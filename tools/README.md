@@ -14,22 +14,14 @@ added here is available to all of them without code changes:
 | `greet` | Bash | `name` (optional) | A greeting for `name`, or for the shell user (`$USER`) |
 | `time` | Bash / `date` | `timezone` (optional, IANA name) | The current date and time |
 | `sysinfo` | Python | `section` (optional) | The system, CPU utilization and load, memory, disks, network, GPU, busiest processes and software versions (Python, gcc, ...) |
-| `ls` | Python | `path` (optional) | A folder's entries with sizes and dates (up to 200); no path lists the allowed folders |
-| `cat` | Python | `path`, `start`, `count` (optional) | A text file's lines, numbered, up to 200 per call |
+| `shell` | Python / `bwrap` | `cwd`, `command` | Runs a command line (ls, cat, grep, find, sed, make, gcc, git, ... joined with `\|`, `&&`, `;`) in an allowed folder, inside a sandbox; `help` lists the commands |
 | `ed` | Python | `path`, `action`, `old`, `new`, `all`, `start`, `end`, `line` (by action) | Edits a file: replace exact text, replace or delete lines, insert, or write a whole file; shows the changed lines |
-| `wc` | Bash / `wc` | `file` | The file's line count |
-| `grep` | Python / `grep` | `pattern`, `path`, `ignore_case`, `fixed`, `files_only`, `context`, `include` (optional) | Matching lines as `file:line:text`, or the matching files (up to 50) |
-| `find` | Python / `find` | `path`, `name`, `type`, `max_depth`, `ignore_case` (optional) | Files and folders by name (up to 200) |
-| `df` | Bash / `du` | `path` (optional) | A file or folder's total size and file count |
-| `git` | Python / `git` | `path`, `command`, `args` (optional) | A read-only git command's output (log, status, diff, show, blame, ...) |
-| `make` | Python / `make` | `path`, `target` (optional) | Whether the build succeeded, and its output |
-| `gcc` | Python / `gcc` | `sources`, `output`, `flags` (optional) | Warnings and errors (a check), or a built program |
 | `doxy` | Bash / `doxygen` | `paths` (files or folders, space-separated) | Doxygen documentation problems as `file:line: message`, or "All documented" |
 | `mr_gate` | Python (shared `.venv`) | `pr` (optional) | Open PRs in the quiz-gated repository and their quiz state; see [mr_gate/README.md](mr_gate/README.md) |
 
-Every path a tool takes (`ls`, `cat`, `ed`, `wc`, `grep`, `find`, `df`, `git`, `make`,
-`gcc`, `doxy`) must be inside the folders named in [`context/paths.json`](../context/paths.json);
-see "Allowed paths" below.
+Every path a tool takes (`shell`, `ed`, `doxy`) must be inside the folders named in
+[`context/paths.json`](../context/paths.json), with the access the tool needs; see "Allowed paths"
+below. Most file and build work goes through `shell`; see [shell/README.md](shell/README.md).
 
 ## The manifest
 
@@ -62,23 +54,29 @@ see "Allowed paths" below.
 this folder is also the working directory when a tool runs.
 
 **Allowed paths:** a path the *model* passes must lie inside one of the folders named in
-[`context/paths.json`](../context/paths.json), and starts with that folder's name. Folders are
-absolute, start with `~`, or are relative to the agents repository:
+[`context/paths.json`](../context/paths.json), and starts with that folder's name. Each folder has
+access rights, inherited by everything inside it; `subpaths` override them for a sub-folder:
 
 ```json
 "paths": {
-  "core_dump": "~/projects/core_dump",
-  "tools": "tools"
+  "core_dump": {"path": "~/projects/core_dump", "access": "rwx"},
+  "tools": {"path": "tools", "access": "r"}
 }
 ```
 
-So `wc` takes `core_dump/README.md` or `tools/greet/README.md`, and nothing outside
-those folders (`..` and symbolic links are resolved before the check). Every tool that takes a
-path (`ls`, `cat`, `ed`, `wc`, `grep`, `find`, `df`, `git`, `make`, `gcc`,
-`doxy`) checks it with the file-system gate, [`fs_gate/fs_gate.py`](fs_gate/fs_gate.py): Python
-tools import it, and Bash tools run `python3 fs_gate/fs_gate.py <path> [--dir|--file]`, which prints
-the absolute path and the path as shown, or an error. `fs_gate/` has no `tool.json`, so it is not
-offered as a tool. To allow another folder, add a name to `paths.json`; it is read on every call.
+| Right | Means |
+| --- | --- |
+| `r` read | `shell` mounts the folder (read-only without `w`); `doxy` may read it |
+| `w` write | `shell` mounts it writable; `ed` may change files there |
+| `x` execute | `shell` may run programs found there (`./core_dump`) and `make` |
+
+A path given as a plain string is read-only. Folders are absolute, start with `~`, or are relative
+to the agents repository. So `ed` takes `core_dump/src/main.c` but refuses `tools/...` (read-only),
+and nothing outside those folders is reachable (`..` and symbolic links are resolved before the
+check). The checks live in the file-system gate, [`fs_gate/fs_gate.py`](fs_gate/fs_gate.py):
+Python tools import it, and Bash tools run `python3 fs_gate/fs_gate.py <path> [--dir|--file]
+[--need r|w|x]`, which prints the absolute path and the path as shown, or an error. `fs_gate/` has
+no `tool.json`, so it is not offered as a tool. `paths.json` is read on every call.
 
 Each agent validates the model's arguments against the schema built from `params` before running
 the command (`jsonschema` in mcpagent and pydantic, zod in vercel). The agent also sets `AGENT_NAME`
@@ -87,25 +85,30 @@ reported to the model as a tool failure, with the script's output as the message
 
 ## Adding a tool
 
-1. Create a folder named after the tool, e.g. `tools/df/`.
-2. Add the script, e.g. `df/df.sh`. Print the result to stdout, and exit nonzero
+1. Create a folder named after the tool, e.g. `tools/uptime/`.
+2. Add the script, e.g. `uptime/uptime.sh`. Print the result to stdout, and exit nonzero
    with an explanation on failure.
-3. Add `df/tool.json`, with paths relative to `tools/`:
+3. Add `uptime/tool.json`, with paths relative to `tools/`:
 
    ```json
    {
-     "description": "Shows how much disk space a folder uses.",
+     "description": "Shows how long the machine has been running.",
      "command": "bash",
-     "args": ["df/df.sh"],
+     "args": ["uptime/uptime.sh"],
      "params": [
-       {"name": "path", "type": "string", "description": "Folder to measure, relative to the tools folder", "style": "positional"}
+       {"name": "pretty", "type": "boolean", "description": "Say it in words, e.g. up 3 hours", "style": "flag", "required": false}
      ],
-     "resource": "df/README.md"
+     "resource": "uptime/README.md"
    }
    ```
 
-4. Add `df/README.md` describing it.
+4. Add `uptime/README.md` describing it.
 5. Restart the agents (and the MCPAgent server). Each agent lists the tools it loaded; ask one to use
    the new tool.
+
+A tool that takes a path must check it with the file-system gate (`fs_gate/fs_gate.py`, see
+"Allowed paths"), with the access it needs. A tool named like a command in
+[`shell/commands.json`](shell/commands.json) takes that command over: the shell then refuses it
+and points the model to the tool.
 
 Tools run with the permissions of the user running the agent, and are not sandboxed.

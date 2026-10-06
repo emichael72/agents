@@ -1,9 +1,0 @@
-{
-  "description": "Counts the number of lines in a given file.",
-  "command": "bash",
-  "args": ["wc/wc.sh"],
-  "params": [
-    {"name": "file", "type": "string", "description": "File path, starting with an allowed folder name, e.g. core_dump/README.md or tools/greet/README.md", "style": "positional"}
-  ],
-  "resource": "wc/README.md"
-}

@@ -3,10 +3,10 @@
 Module: ed.py
 
 Description:
-    Edits text files for the agents, inside the allowed folders (context/paths.json, checked
-    by tools/fs_gate/fs_gate.py). Four actions:
+    Edits text files for the agents, inside the allowed folders with write access
+    (context/paths.json, checked by tools/fs_gate/fs_gate.py). Four actions:
       - replace: replace exact text (`old` with `new`); `old` must match once, unless `all` is set.
-      - lines:   replace lines `start`..`end` (the numbers the cat tool shows) with `new`; an empty
+      - lines:   replace lines `start`..`end` (as `cat -n` in the shell numbers them) with `new`; an empty
                  `new` deletes them.
       - insert:  insert `new` after line `line` (0 inserts at the top).
       - write:   create the file, or replace all of it, with `new`.
@@ -48,7 +48,7 @@ def target_file(path: str, action: str) -> tuple[Path, str]:
     Raises:
         ValueError: If the path is not allowed, protected, missing, binary or too large.
     """
-    target, shown = fs_gate.resolve(path, "output" if action == "write" else "file")
+    target, shown = fs_gate.resolve(path, "output" if action == "write" else "file", "w")
     for protected, name in ((fs_gate.TOOLS_DIR, "tools"), (fs_gate.CONTEXT_DIR, "context")):
         if target == protected or protected in target.parents:
             raise ValueError(f"'{shown}' is in the {name} folder, which ed does not change.")
@@ -175,7 +175,7 @@ def edit(path: str, action: str = "replace", old: Optional[str] = None, new: Opt
         count = text.count(old)
         if count == 0:
             raise ValueError(f"old was not found in '{shown}'; it must match exactly, including spaces and "
-                             f"indentation. Show the file with cat and copy the text from it.")
+                             f"indentation. Show the file with cat -n in the shell and copy the text from it.")
         if count > 1 and not replace_all:
             offsets, at = [], text.find(old)
             while at != -1:

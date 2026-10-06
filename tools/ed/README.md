@@ -6,7 +6,7 @@ then shows the changed lines, numbered, with three lines of context so the edit 
 | Action | Parameters | Does |
 | --- | --- | --- |
 | `replace` (default) | `old`, `new`, `all` | Replaces the exact text `old` with `new`. `old` must match once; if it matches several places, the error lists their lines (add surrounding text, or set `all`). |
-| `lines` | `start`, `end`, `new` | Replaces lines `start`..`end` (as numbered by `cat`) with `new`; an empty `new` deletes them. |
+| `lines` | `start`, `end`, `new` | Replaces lines `start`..`end` (as numbered by `cat -n` in the shell) with `new`; an empty `new` deletes them. |
 | `insert` | `line`, `new` | Inserts `new` after line `line`; `0` inserts at the top. |
 | `write` | `new` | Creates the file, or replaces all of it, with `new`. |
 

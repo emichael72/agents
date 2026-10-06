@@ -66,18 +66,13 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         for name, args, expected in [
             ('greet', {'name': 'Alice Smith'}, 'Hello, Alice Smith!'),
             ('greet', {}, f"Hello, {os.environ['USER']}!"),  # no name: the shell user
-            ('wc', {'file': 'tools/greet/README.md'}, 'lines.'),
-            ('cat', {'path': 'tools/greet/tool.json', 'count': 2}, 'lines 1-2 of'),
             ('sysinfo', {'section': 'software'}, 'python (running this tool)'),
             ('sysinfo', {}, '[cpu]'),
             ('time', {'timezone': 'UTC'}, 'UTC (UTC+00:00)'),
-            ('ls', {'path': 'tools/greet'}, 'tool.json'),
-            ('ls', {}, 'Allowed folders'),
-            ('grep', {'pattern': 'AGENT_NAME', 'path': 'tools/greet'}, 'tools/greet/greet.sh:'),
-            ('grep', {'pattern': 'agent_name', 'path': 'tools/greet', 'ignore_case': True, 'files_only': True}, 'tools/greet/greet.sh'),
-            ('find', {'path': 'tools', 'name': 'greet*', 'type': 'f'}, 'tools/greet/greet.sh'),
-            ('df', {'path': 'tools/greet'}, 'tools/greet: '),
-            ('git', {'path': 'tools', 'command': 'log', 'args': '-1 --date=short --format="%h %ad %s"'}, ' 20'),
+            ('shell', {'cwd': 'tools', 'command': 'ls greet'}, 'tool.json'),
+            ('shell', {'cwd': 'tools', 'command': 'help'}, 'Allowed folders'),
+            ('shell', {'cwd': 'tools/greet', 'command': 'grep -n AGENT_NAME greet.sh | head -1'}, 'AGENT_NAME'),
+            ('shell', {'cwd': 'tools', 'command': 'cat -n greet/tool.json | wc -l'}, ''),
         ]:
             result = (await self.rpc('tools/call', {'name': name, 'arguments': args}))['result']
             self.assertFalse(result['isError'], result)
@@ -112,67 +107,71 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_path_tools_stay_inside_the_allowed_folders(self):
         for path in ('tools/..', 'tools/greet/../..', 'etc', '/etc'):
-            for name, args in [('ls', {'path': path}), ('cat', {'path': path + '/passwd'}),
-                               ('wc', {'file': path + '/passwd'}), ('df', {'path': path}),
-                               ('grep', {'pattern': 'root', 'path': path}), ('find', {'path': path}),
-                               ('git', {'path': path, 'command': 'log'}), ('doxy', {'paths': path}),
-                               ('make', {'path': path}), ('gcc', {'sources': path + '/x.c'})]:
+            for name, args in [('shell', {'cwd': path, 'command': 'ls'}), ('doxy', {'paths': path}),
+                               ('ed', {'path': path + '/passwd', 'action': 'write', 'new': 'x'})]:
                 result = (await self.rpc('tools/call', {'name': name, 'arguments': args}))['result']
                 self.assertTrue(result['isError'], (name, path))
         link = Path(__file__).resolve().parents[2] / 'tools' / 'greet' / 'escape-test-link'
         link.symlink_to('/etc')
         try:
-            result = (await self.rpc('tools/call', {'name': 'ls',
-                                                    'arguments': {'path': 'tools/greet/escape-test-link'}}))['result']
+            result = (await self.rpc('tools/call', {'name': 'shell', 'arguments': {
+                'cwd': 'tools/greet/escape-test-link', 'command': 'ls'}}))['result']
             self.assertTrue(result['isError'])
             self.assertIn('outside the allowed folder', result['content'][0]['text'])
         finally:
             link.unlink()
 
-    async def test_make_gcc_and_git_work_inside_and_refuse_outside(self):
+    @unittest.skipUnless(shutil.which('bwrap'), 'bubblewrap is not installed')
+    async def test_shell_runs_allowed_commands_in_the_sandbox(self):
         source = '#include <stdio.h>\nint main(void) { int unused; printf("hi\\n"); return 0; }\n'
+        tools = str(Path(__file__).resolve().parents[2] / 'tools')
         with tempfile.TemporaryDirectory() as folder:
-            (Path(folder) / 'hello.c').write_text(source)
-            (Path(folder) / 'Makefile').write_text('hello: hello.c\n\tcc -o hello hello.c\nclean:\n\trm -f hello\n')
+            (Path(folder) / 'rw').mkdir()
+            (Path(folder) / 'rw' / 'hello.c').write_text(source)
+            (Path(folder) / 'rw' / 'Makefile').write_text('hello: hello.c\n\tcc -Wall -o hello hello.c\n')
+            (Path(folder) / 'rw' / 'locked').mkdir()
+            (Path(folder) / 'ro').mkdir()
+            (Path(folder) / 'ro' / 'Makefile').write_text('all:\n\ttrue\n')
             allowed = Path(folder) / 'paths.json'
-            allowed.write_text(json.dumps({'paths': {'sample': folder}}))
+            allowed.write_text(json.dumps({'paths': {
+                'proj': {'path': str(Path(folder) / 'rw'), 'access': 'rwx', 'subpaths': {'locked': 'r'}},
+                'docs': {'path': str(Path(folder) / 'ro'), 'access': 'r'},
+                'tools': {'path': tools, 'access': 'r'}}}))
 
-            async def call(name, args):
+            async def shell(cwd, command):
                 with patch.dict(os.environ, {'FS_GATE_PATHS': str(allowed)}):
-                    result = (await self.rpc('tools/call', {'name': name, 'arguments': args}))['result']
+                    result = (await self.rpc('tools/call', {'name': 'shell', 'arguments': {'cwd': cwd, 'command': command}}))['result']
                 return result['isError'], result['content'][0]['text']
 
-            error, text = await call('make', {'path': 'sample'})
+            error, text = await shell('proj', 'git init -q && git add hello.c && git commit -qm first && git log --format=%s')
             self.assertFalse(error, text)
-            self.assertIn('make (default target) in sample: succeeded', text)
-            self.assertTrue((Path(folder) / 'hello').exists())
-            self.assertTrue((await call('make', {'path': 'sample', 'target': 'CC=evil'}))[0])
-            self.assertTrue((await call('make', {'path': 'sample', 'target': '-f/etc/passwd'}))[0])
-
-            error, text = await call('gcc', {'sources': 'sample/hello.c', 'flags': '-Wall'})
+            self.assertIn('first', text)  # git works, and can commit in a writable folder
+            self.assertTrue((await shell('proj', 'touch .git/hooks/pre-commit'))[0])  # Hooks stay read-only
+            error, text = await shell('proj', 'make && ./hello && grep -c include hello.c')
             self.assertFalse(error, text)
-            self.assertIn('1 warning(s)', text)
-            self.assertIn("sample/hello.c:2:", text)  # Paths shown as the model gives them
-            error, text = await call('gcc', {'sources': 'sample/hello.c', 'output': 'sample/built'})
-            self.assertFalse(error, text)
-            self.assertTrue((Path(folder) / 'built').exists())
-            for args in ({'sources': 'sample/hello.c', 'flags': '-fplugin=x.so'},
-                         {'sources': 'sample/hello.c', 'output': '/tmp/built'},
-                         {'sources': 'sample/hello.c', 'flags': '-I/etc'}):
-                self.assertTrue((await call('gcc', args))[0], args)
-
-        for args in ({'path': 'tools', 'command': 'commit', 'args': '-m x'},
-                     {'path': 'tools', 'command': 'diff', 'args': '--no-index /etc/passwd x'},
-                     {'path': 'tools', 'command': 'branch', 'args': 'new-branch'}):
-            result = (await self.rpc('tools/call', {'name': 'git', 'arguments': args}))['result']
-            self.assertTrue(result['isError'], args)
+            self.assertIn('hi', text)
+            self.assertIn('hello.c:2:', text.replace('proj/', ''))  # gcc's warning, paths as the model sees them
+            # Refused by the check
+            for cwd, command in (('proj', 'python3 -c 1'), ('proj', 'ls > x'), ('proj', 'ls $(echo /)'),
+                                 ('proj', 'echo a#b; python3'), ('proj', 'cd .. && ls'), ('proj', 'make -C /work/docs'),
+                                 ('docs', 'make'), ('docs', './x'), ('proj', 'ls\npython3')):
+                self.assertTrue((await shell(cwd, command))[0], command)
+            # Refused by the sandbox (the kernel)
+            for cwd, command in (('docs', 'touch x'), ('proj', 'touch locked/x'), ('proj', 'cat /etc/passwd'),
+                                 ('proj', 'ls /home'), ('proj', f'touch {tools}/x'), ('proj', 'touch /work/tools/x'),
+                                 ('proj', 'git ls-remote https://github.com/x/y')):
+                error, text = await shell(cwd, command)
+                self.assertTrue(error, (command, text))
+            self.assertFalse((Path(folder) / 'ro' / 'x').exists())
+            self.assertFalse((Path(tools) / 'x').exists())
 
     async def test_ed_edits_inside_allowed_folders_and_protects_tools_and_git(self):
         with tempfile.TemporaryDirectory() as folder:
             (Path(folder) / 'a.c').write_text('int a;\nint b;\nint b;\n')
             (Path(folder) / '.git').mkdir()
             allowed = Path(folder) / 'paths.json'
-            allowed.write_text(json.dumps({'paths': {'sample': folder, 'tools': str(Path(__file__).resolve().parents[2] / 'tools')}}))
+            allowed.write_text(json.dumps({'paths': {'sample': {'path': folder, 'access': 'rw'},
+                                                    'tools': str(Path(__file__).resolve().parents[2] / 'tools')}}))
 
             async def ed(args):
                 with patch.dict(os.environ, {'FS_GATE_PATHS': str(allowed)}):
@@ -215,7 +214,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         for arguments in ({'name': 123}, {'name': 'Alice', 'extra': True}, []):
             result = await self.rpc('tools/call', {'name': 'greet', 'arguments': arguments})
             self.assertEqual(result['error']['code'], -32602)
-        for name, args in [('time', {'timezone': 'Not/AZone'}), ('wc', {'file': 'missing-file'})]:
+        for name, args in [('time', {'timezone': 'Not/AZone'}), ('shell', {'cwd': 'missing-file', 'command': 'ls'})]:
             result = await self.rpc('tools/call', {'name': name, 'arguments': args})
             self.assertTrue(result['result']['isError'])
 

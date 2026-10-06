@@ -1,0 +1,10 @@
+{
+  "description": "Runs a shell command line in one of the allowed folders, e.g. cwd core_dump with \"grep -rn main src | head\" or \"make && ./core_dump -dp\". Common Linux commands are available: ls, cat, head, tail, grep, find, sed, awk, sort, wc, diff, tree, du, make, gcc, git, objdump and more; run the command help to list them all and see the folders and their access. Join commands with |, &&, || or ;. No redirection (> <), $(...), or network. Use ed to edit files.",
+  "command": "python3",
+  "args": ["shell/shell.py"],
+  "params": [
+    {"name": "cwd", "type": "string", "description": "Folder to run in, starting with an allowed folder name, e.g. core_dump or core_dump/src", "style": "flag"},
+    {"name": "command", "type": "string", "description": "The command line, e.g. ls -la, cat -n src/main.c, git log --oneline -5; help lists the commands", "style": "flag"}
+  ],
+  "resource": "shell/README.md"
+}

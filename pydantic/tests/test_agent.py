@@ -27,7 +27,7 @@ from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel 
 import agent  # noqa: E402
 import toolset as tools_module  # noqa: E402
 
-CALLS = [("greet", {"name": "Alice"}), ("wc", {"file": "missing-file"}),
+CALLS = [("greet", {"name": "Alice"}), ("shell", {"cwd": "missing-file", "command": "ls"}),
          ("time", {"timezone": "UTC"})]
 
 
@@ -148,7 +148,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         await agent.ask(bot, "Do everything", [], trace=True)
         lines = [line[:1] + " " + line[2:].split("(")[0].split(":")[0]
                  for line in self.output.getvalue().splitlines() if line[:1] in "→←✗" and line]
-        self.assertEqual(lines, ["→ greet", "← greet", "→ wc", "✗ wc",
+        self.assertEqual(lines, ["→ greet", "← greet", "→ shell", "✗ shell",
                                  "→ time", "← time"])
 
     def test_greet_without_name_greets_the_shell_user(self):

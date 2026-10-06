@@ -199,7 +199,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.requests), 1)
 
     async def test_tool_failure_returned_to_model(self):
-        self.outputs = [[call(self.aliases['wc'], {'file': 'missing-file'})],
+        self.outputs = [[call(self.aliases['shell'], {'cwd': 'missing-file', 'command': 'ls'})],
                         [message('File not found')]]
         await self.agent.ask('Count missing-file')
         result = json.loads(self.requests[-1]['input'][-1]['output'])

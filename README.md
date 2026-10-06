@@ -37,8 +37,8 @@ committed.
 `tools/` holds one folder per tool: a `tool.json` manifest, the script and its `README.md`.
 Every agent scans this folder at startup, so a tool added there is available to all three
 without code changes. [tools/README.md](tools/README.md) describes the manifest and how to add
-a tool. Current tools: `greet`, `time`, `sysinfo`; `ls`, `cat`, `ed`, `wc`, `grep`, `find`,
-`df` for files; `git` (read-only), `make` and `gcc` for code; `doxy`
+a tool. Current tools: `shell` (ls, cat, grep, find, sed, make, gcc, git and more, in a sandbox),
+`ed` (edit files), `doxy`
 (checks Doxygen documentation of C/C++ sources) and `mr_gate` (Merge Request Gate: a merge gate
 that quizzes a developer on their pull request; see [tools/mr_gate/README.md](tools/mr_gate/README.md)).
 Tools that take a path only reach the folders named in
@@ -57,8 +57,10 @@ change on its next start. None of this is hard-coded in the agents.
   lines.
 - `context/output.json`: the terminal layout: `width` (120) and `show_time` (true). See
   "Terminal output" below.
-- `context/paths.json`: the folders the tools may read and change (`core_dump`, `tools`). Every
-  tool that takes a path checks it with the file-system gate, `tools/fs_gate/fs_gate.py`; see
+- `context/paths.json`: the folders the tools may use and their access (`r` read, `w` write,
+  `x` execute): `core_dump` is `rwx`, `tools` is `r`. Every tool that takes a path checks it with
+  the file-system gate, `tools/fs_gate/fs_gate.py`, and `shell` mounts exactly these folders in its
+  sandbox; see
   [tools/README.md](tools/README.md). Unlike the rest of `context/`, it is read on every tool call,
   so a change applies at once.
 - `context/models.json`: the model profiles. `"default"` names the profile used when no flag picks
