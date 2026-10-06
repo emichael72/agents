@@ -110,11 +110,11 @@ def check_docs(tree: Path, changed: list[str]) -> tuple[bool, str]:
     if not changed:
         return True, "No C/C++ files changed."
     # doxy only reads folders that allowed-paths file names: allow just this tree, as "pr"
-    allowed = Path(tempfile.mkdtemp()) / "allowed_paths.json"
+    allowed = Path(tempfile.mkdtemp()) / "paths.json"
     allowed.write_text(json.dumps({"paths": {"pr": str(Path(tree).resolve())}}))
     try:
         result = subprocess.run(["bash", str(DOXY), "pr"], cwd=tree, capture_output=True, text=True,
-                                timeout=120, env={**os.environ, "TOOLS_ALLOWED_PATHS": str(allowed)})
+                                timeout=120, env={**os.environ, "FS_GATE_PATHS": str(allowed)})
     except subprocess.TimeoutExpired:
         return False, "The documentation check timed out."
     finally:

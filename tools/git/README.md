@@ -1,7 +1,7 @@
 # Git
 
 Runs a read-only git command in a repository inside the allowed folders
-([`../allowed_paths.json`](../allowed_paths.json)), such as `core_dump`. git runs in the given
+([`../../context/paths.json`](../../context/paths.json)), such as `core_dump`. git runs in the given
 folder, so paths in the arguments are relative to it. Output is cut to 200 lines.
 
 **Usage Example:**

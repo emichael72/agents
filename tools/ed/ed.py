@@ -3,8 +3,8 @@
 Module: ed.py
 
 Description:
-    Edits text files for the agents, inside the allowed folders (tools/allowed_paths.json, checked
-    by tools/allowed_paths.py). Four actions:
+    Edits text files for the agents, inside the allowed folders (context/paths.json, checked
+    by tools/fs_gate/fs_gate.py). Four actions:
       - replace: replace exact text (`old` with `new`); `old` must match once, unless `all` is set.
       - lines:   replace lines `start`..`end` (the numbers the cat tool shows) with `new`; an empty
                  `new` deletes them.
@@ -13,8 +13,9 @@ Description:
     After an edit it shows the changed lines, numbered, with CONTEXT lines around them.
 
     Key design points:
-      - Never edits the tools folder (the tools' code and allowed_paths.json, so the model cannot
-        widen its own access) or a .git folder (git's configuration can run programs).
+      - Never edits the tools folder (the tools' code, including the gate) or the context folder
+        (paths.json, models and instructions), so the model cannot widen its own access, nor a
+        .git folder (git's configuration can run programs).
       - Writes are atomic (a temporary file renamed over the original) and keep the file's
         permissions and line endings (LF or CRLF).
       - Only UTF-8 text files up to MAX_BYTES; a failed match changes nothing.
@@ -26,9 +27,9 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-# The shared allowed-paths rule lives in the tools folder
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import allowed_paths  # noqa: E402
+# The shared path gate (context/paths.json) lives in tools/fs_gate
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "fs_gate"))
+import fs_gate  # noqa: E402
 
 ACTIONS = ("replace", "lines", "insert", "write")
 OPTIONS = ("action", "old", "new", "all", "start", "end", "line")
@@ -47,9 +48,10 @@ def target_file(path: str, action: str) -> tuple[Path, str]:
     Raises:
         ValueError: If the path is not allowed, protected, missing, binary or too large.
     """
-    target, shown = allowed_paths.resolve(path, "output" if action == "write" else "file")
-    if target == allowed_paths.TOOLS_DIR or allowed_paths.TOOLS_DIR in target.parents:
-        raise ValueError(f"'{shown}' is in the tools folder, which ed does not change.")
+    target, shown = fs_gate.resolve(path, "output" if action == "write" else "file")
+    for protected, name in ((fs_gate.TOOLS_DIR, "tools"), (fs_gate.CONTEXT_DIR, "context")):
+        if target == protected or protected in target.parents:
+            raise ValueError(f"'{shown}' is in the {name} folder, which ed does not change.")
     if ".git" in target.parts:
         raise ValueError(f"'{shown}' is inside a .git folder, which ed does not change.")
     if target.exists() and target.stat().st_size > MAX_BYTES:

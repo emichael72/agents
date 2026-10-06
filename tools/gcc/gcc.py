@@ -4,7 +4,7 @@ Module: gcc.py
 
 Description:
     Compiles C sources with gcc for the agents. Sources, include folders and the output must all be
-    inside the allowed folders (tools/allowed_paths.json, checked by tools/allowed_paths.py).
+    inside the allowed folders (context/paths.json, checked by tools/fs_gate/fs_gate.py).
 
     Without an output, gcc only checks the sources (-fsyntax-only): the result is the warnings and
     errors. With an output, it compiles and links a program there.
@@ -24,9 +24,9 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-# The shared allowed-paths rule lives in the tools folder
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import allowed_paths  # noqa: E402
+# The shared path gate (context/paths.json) lives in tools/fs_gate
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "fs_gate"))
+import fs_gate  # noqa: E402
 
 SOURCE_EXTENSIONS = {".c", ".h"}
 ALLOWED_FLAGS = re.compile(r"""^-(
@@ -57,7 +57,7 @@ def compile_sources(sources: str, output: Optional[str] = None, flags: str = "")
     """
     files = []
     for path in sources.split():
-        target, shown = allowed_paths.resolve(path, "file")
+        target, shown = fs_gate.resolve(path, "file")
         if target.suffix not in SOURCE_EXTENSIONS:
             raise ValueError(f"'{shown}' is not a C source or header (.c, .h).")
         files.append(target)
@@ -67,7 +67,7 @@ def compile_sources(sources: str, output: Optional[str] = None, flags: str = "")
     arguments = []
     for flag in flags.split():
         if flag.startswith("-I") and len(flag) > 2:
-            arguments.append("-I" + str(allowed_paths.resolve(flag[2:], "dir")[0]))
+            arguments.append("-I" + str(fs_gate.resolve(flag[2:], "dir")[0]))
         elif ALLOWED_FLAGS.match(flag):
             arguments.append(flag)
         else:
@@ -75,7 +75,7 @@ def compile_sources(sources: str, output: Optional[str] = None, flags: str = "")
                              "-pedantic, -D..., -l..., -I<allowed folder>.")
 
     if output:
-        target, shown_output = allowed_paths.resolve(output, "output")
+        target, shown_output = fs_gate.resolve(output, "output")
         command = ["gcc", *arguments, *map(str, files), "-o", str(target)]
         action = f"build {shown_output}"
     else:
@@ -85,7 +85,7 @@ def compile_sources(sources: str, output: Optional[str] = None, flags: str = "")
         result = subprocess.run(command, capture_output=True, text=True, timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
         return False, f"gcc {action}: stopped after {TIMEOUT}s"
-    lines = allowed_paths.display(result.stdout + result.stderr).rstrip().splitlines()
+    lines = fs_gate.display(result.stdout + result.stderr).rstrip().splitlines()
     if len(lines) > MAX_LINES:
         lines = [f"... {len(lines) - MAX_LINES} earlier lines not shown"] + lines[-MAX_LINES:]
     warnings = sum(": warning:" in line for line in lines)

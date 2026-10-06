@@ -3,8 +3,8 @@
 Module: make.py
 
 Description:
-    Runs GNU make for the agents in a folder inside the allowed folders (tools/allowed_paths.json,
-    checked by tools/allowed_paths.py), e.g. `core_dump` or `core_dump/src`.
+    Runs GNU make for the agents in a folder inside the allowed folders (context/paths.json,
+    checked by tools/fs_gate/fs_gate.py), e.g. `core_dump` or `core_dump/src`.
 
     Key design points:
       - The target must be a plain name (all, clean, core_dump); options and VAR=value overrides
@@ -23,9 +23,9 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-# The shared allowed-paths rule lives in the tools folder
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import allowed_paths  # noqa: E402
+# The shared path gate (context/paths.json) lives in tools/fs_gate
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "fs_gate"))
+import fs_gate  # noqa: E402
 
 TARGET = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]*$")
 TIMEOUT = 25
@@ -43,7 +43,7 @@ def run_make(path: str, target: Optional[str] = None) -> tuple[bool, str]:
     Raises:
         ValueError: If the folder is not allowed, has no Makefile, or the target is not a plain name.
     """
-    folder, shown = allowed_paths.resolve(path, "dir")
+    folder, shown = fs_gate.resolve(path, "dir")
     if not any((folder / name).is_file() for name in ("GNUmakefile", "makefile", "Makefile")):
         raise ValueError(f"'{shown}' has no Makefile.")
     if target and (not TARGET.match(target) or ".." in target):
@@ -54,7 +54,7 @@ def run_make(path: str, target: Optional[str] = None) -> tuple[bool, str]:
         result = subprocess.run(command, capture_output=True, text=True, timeout=TIMEOUT, env=env)
     except subprocess.TimeoutExpired:
         return False, f"make {target or ''} in {shown}: stopped after {TIMEOUT}s"
-    lines = allowed_paths.display(result.stdout + result.stderr).rstrip().splitlines()
+    lines = fs_gate.display(result.stdout + result.stderr).rstrip().splitlines()
     if len(lines) > MAX_LINES:
         lines = [f"... {len(lines) - MAX_LINES} earlier lines not shown"] + lines[-MAX_LINES:]
     status = "succeeded" if result.returncode == 0 else f"failed (exit {result.returncode})"

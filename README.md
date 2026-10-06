@@ -42,7 +42,7 @@ a tool. Current tools: `greet`, `rand`, `time`, `sysinfo`, `calc`; `ls`, `cat`, 
 (checks Doxygen documentation of C/C++ sources) and `mr_gate` (Merge Request Gate: a merge gate
 that quizzes a developer on their pull request; see [tools/mr_gate/README.md](tools/mr_gate/README.md)).
 Tools that take a path only reach the folders named in
-[`tools/allowed_paths.json`](tools/allowed_paths.json).
+[`context/paths.json`](context/paths.json).
 
 ```bash
 bash tools/greet/greet.sh --name Alice  # run a tool's script by hand
@@ -57,6 +57,10 @@ change on its next start. None of this is hard-coded in the agents.
   lines.
 - `context/output.json`: the terminal layout: `width` (120) and `show_time` (true). See
   "Terminal output" below.
+- `context/paths.json`: the folders the tools may read and change (`core_dump`, `tools`). Every
+  tool that takes a path checks it with the file-system gate, `tools/fs_gate/fs_gate.py`; see
+  [tools/README.md](tools/README.md). Unlike the rest of `context/`, it is read on every tool call,
+  so a change applies at once.
 - `context/models.json`: the model profiles. `"default"` names the profile used when no flag picks
   one; it ships with `local` (an LM Studio server) and `openai`. The `local` profile expects LM
   Studio at `http://boba:1234/v1`; point it at another host with `LOCAL_LLM_BASE_URL` or by

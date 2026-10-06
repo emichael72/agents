@@ -1,7 +1,7 @@
 # GCC
 
 Compiles C sources with gcc. Sources, include folders and the output must all be inside the
-allowed folders ([`../allowed_paths.json`](../allowed_paths.json)). Messages show paths as
+allowed folders ([`../../context/paths.json`](../../context/paths.json)). Messages show paths as
 `<allowed name>/...`; at most the last 60 lines are shown.
 
 - **Without `output`** it only checks the code (`-fsyntax-only`) and reports warnings and errors.

@@ -4,7 +4,7 @@ Module: git.py
 
 Description:
     Runs read-only git commands for the agents in a repository inside the allowed folders
-    (tools/allowed_paths.json, checked by tools/allowed_paths.py), e.g. `git log` in core_dump.
+    (context/paths.json, checked by tools/fs_gate/fs_gate.py), e.g. `git log` in core_dump.
 
     Key design points:
       - Only read-only subcommands (SUBCOMMANDS); `branch` and `tag` only list. Nothing is
@@ -23,9 +23,9 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-# The shared allowed-paths rule lives in the tools folder
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import allowed_paths  # noqa: E402
+# The shared path gate (context/paths.json) lives in tools/fs_gate
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "fs_gate"))
+import fs_gate  # noqa: E402
 
 SUBCOMMANDS = {"status", "log", "show", "diff", "blame", "ls-files", "shortlog", "grep", "describe",
                "rev-parse", "branch", "tag"}
@@ -53,7 +53,7 @@ def run_git(path: str, command: str, args: str = "") -> tuple[bool, str]:
     Raises:
         ValueError: If the folder is not allowed, the subcommand is not read-only, or an argument is refused.
     """
-    folder, shown = allowed_paths.resolve(path, "dir")
+    folder, shown = fs_gate.resolve(path, "dir")
     if command not in SUBCOMMANDS:
         raise ValueError(f"'git {command}' is not allowed. Allowed: {', '.join(sorted(SUBCOMMANDS))} (read-only).")
     try:
@@ -74,7 +74,7 @@ def run_git(path: str, command: str, args: str = "") -> tuple[bool, str]:
                                 text=True, timeout=TIMEOUT, env=env)
     except subprocess.TimeoutExpired:
         return False, f"git {command} in {shown}: stopped after {TIMEOUT}s"
-    lines = allowed_paths.display(result.stdout + result.stderr).rstrip().splitlines()
+    lines = fs_gate.display(result.stdout + result.stderr).rstrip().splitlines()
     if len(lines) > MAX_LINES:
         lines = lines[:MAX_LINES] + [f"... {len(lines) - MAX_LINES} more lines; narrow the command to see them"]
     if result.returncode != 0:

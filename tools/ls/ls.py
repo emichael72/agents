@@ -5,8 +5,8 @@ Module: ls.py
 Description:
     Lists a folder for the agents: folders first, then files, with sizes and modification dates.
 
-    Only the folders named in tools/allowed_paths.json, and folders inside them, can be listed
-    (see tools/allowed_paths.py). A path starts with one of those names: `core_dump/src` lists
+    Only the folders named in context/paths.json, and folders inside them, can be listed
+    (see tools/fs_gate/fs_gate.py). A path starts with one of those names: `core_dump/src` lists
     `src` in the folder named core_dump. Without a path, the tool lists the allowed names.
     Output stops after MAX_ENTRIES entries.
 """
@@ -19,9 +19,9 @@ from typing import Optional
 
 MAX_ENTRIES = 200
 
-# The shared allowed-paths rule lives in the tools folder
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import allowed_paths  # noqa: E402
+# The shared path gate (context/paths.json) lives in tools/fs_gate
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "fs_gate"))
+import fs_gate  # noqa: E402
 
 
 def human_size(size: int) -> str:
@@ -77,8 +77,8 @@ def main(argv: Optional[list[str]] = None) -> str:
     parser.add_argument("path", nargs="?", help="<allowed name>/<sub/path>, e.g. core_dump/src")
     args = parser.parse_args(argv)
     if not args.path:
-        return allowed_paths.describe()
-    return listing(*allowed_paths.resolve(args.path, "dir"))
+        return fs_gate.describe()
+    return listing(*fs_gate.resolve(args.path, "dir"))
 
 
 if __name__ == "__main__":

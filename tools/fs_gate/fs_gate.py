@@ -1,27 +1,26 @@
 #!/usr/bin/env python3
 """
-Module: allowed_paths.py
+Module: fs_gate.py
 
 Description:
-    The one rule for which files and folders the tools may touch, shared by every tool that takes
-    a path (ls, cat, ed, wc, search_text, df, git, make, gcc, doxy). It lives in the
-    tools folder, next to allowed_paths.json, and is not a tool itself (it has no tool.json).
+    The file-system gate: the one rule for which files and folders the tools may touch, shared by
+    every tool that takes a path (ls, cat, ed, wc, search_text, df, git, make, gcc, doxy). The
+    allowed folders are listed in context/paths.json. This folder holds no tool.json, so the
+    agents do not offer it as a tool.
 
     A path the model gives starts with the name of an allowed folder: `core_dump/src/pi.c` means
-    `src/pi.c` inside the folder that allowed_paths.json names core_dump. Paths are resolved
-    (`..` and symbolic links included) before they are checked, so nothing outside the allowed
-    folders can be reached.
-
-    Tools that write (make, gcc) use the same rule: what they create stays inside the allowed
-    folders.
+    `src/pi.c` inside the folder that paths.json names core_dump. Paths are resolved (`..` and
+    symbolic links included) before they are checked, so nothing outside the allowed folders can
+    be reached. Tools that write (ed, make, gcc) use the same rule: what they create stays inside
+    the allowed folders.
 
     Python tools import it; Bash tools run it:
-        python3 allowed_paths.py PATH [--dir | --file]
+        python3 fs_gate/fs_gate.py PATH [--dir | --file]
     which prints "<absolute path><TAB><path as shown>" or "Error: ..." with exit status 1.
 
-    TOOLS_ALLOWED_PATHS may name another JSON file of the same shape, for a program that runs a
-    tool on its own files (mr_gate runs doxy on a downloaded pull request). The agents only
-    pass the fixed "env" of a tool's manifest, so the model cannot set it.
+    FS_GATE_PATHS may name another JSON file of the same shape, for a program that runs a tool on
+    its own files (mr_gate runs doxy on a downloaded pull request). The agents only pass the fixed
+    "env" of a tool's manifest, so the model cannot set it.
 """
 
 import argparse
@@ -31,21 +30,23 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-TOOLS_DIR = Path(__file__).resolve().parent  # Relative allowed folders start here
-ALLOWED_FILE = TOOLS_DIR / "allowed_paths.json"
+TOOLS_DIR = Path(__file__).resolve().parent.parent
+REPO_DIR = TOOLS_DIR.parent  # Relative allowed folders start here
+CONTEXT_DIR = REPO_DIR / "context"
+PATHS_FILE = CONTEXT_DIR / "paths.json"
 
 
 def load_allowed(path: Optional[Path] = None) -> dict[str, Path]:
     """
     Read the allowed folders.
     Args:
-        path: The JSON file; None uses TOOLS_ALLOWED_PATHS, then tools/allowed_paths.json.
+        path: The JSON file; None uses FS_GATE_PATHS, then context/paths.json.
     Returns:
         dict[str, Path]: Each name and its resolved folder.
     """
-    path = path or Path(os.environ.get("TOOLS_ALLOWED_PATHS") or ALLOWED_FILE)
+    path = path or Path(os.environ.get("FS_GATE_PATHS") or PATHS_FILE)
     paths = json.loads(path.read_text(encoding="utf-8"))["paths"]
-    return {name: (TOOLS_DIR / Path(folder).expanduser()).resolve() for name, folder in paths.items()}
+    return {name: (REPO_DIR / Path(folder).expanduser()).resolve() for name, folder in paths.items()}
 
 
 def resolve(path: str, kind: str = "any", allowed: Optional[dict[str, Path]] = None) -> tuple[Path, str]:
@@ -114,7 +115,7 @@ def describe(allowed: Optional[dict[str, Path]] = None) -> str:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Check a tool path against allowed_paths.json.")
+    parser = argparse.ArgumentParser(description="Check a tool path against context/paths.json.")
     parser.add_argument("path", help="<allowed name>/<sub/path>")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--dir", action="store_const", const="dir", dest="kind", help="Require a folder")

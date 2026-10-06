@@ -5,8 +5,8 @@ Module: cat.py
 Description:
     Shows a text file to the agents, with line numbers, a range of lines at a time.
 
-    Only files inside the folders named in tools/allowed_paths.json can be read (see
-    tools/allowed_paths.py): a path starts with one of those names, e.g. core_dump/src/main.c.
+    Only files inside the folders named in context/paths.json can be read (see
+    tools/fs_gate/fs_gate.py): a path starts with one of those names, e.g. core_dump/src/main.c.
 
     Key design points:
       - At most MAX_LINES lines per call; the header says which lines are shown and how many the
@@ -19,9 +19,9 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-# The shared allowed-paths rule lives in the tools folder
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import allowed_paths  # noqa: E402
+# The shared path gate (context/paths.json) lives in tools/fs_gate
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "fs_gate"))
+import fs_gate  # noqa: E402
 
 MAX_LINES = 200
 MAX_BYTES = 2_000_000
@@ -41,7 +41,7 @@ def view(path: str, start: int = 1, count: int = MAX_LINES) -> str:
     """
     if start < 1 or not 1 <= count <= MAX_LINES:
         raise ValueError(f"start must be 1 or more, and count 1 to {MAX_LINES}.")
-    target, shown = allowed_paths.resolve(path, "file")
+    target, shown = fs_gate.resolve(path, "file")
     if target.stat().st_size > MAX_BYTES:
         raise ValueError(f"'{shown}' is larger than {MAX_BYTES:,} bytes; search it with search_text instead.")
     data = target.read_bytes()

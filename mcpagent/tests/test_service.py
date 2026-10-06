@@ -91,12 +91,12 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as folder:
             for name, text in [('good.c', good), ('bad.c', bad), ('bare.h', bare)]:
                 (Path(folder) / name).write_text(text)
-            # Allow only the test folder, as "sample" (the tools read TOOLS_ALLOWED_PATHS instead)
-            allowed = Path(folder) / 'allowed_paths.json'
+            # Allow only the test folder, as "sample" (the tools read FS_GATE_PATHS instead)
+            allowed = Path(folder) / 'paths.json'
             allowed.write_text(json.dumps({'paths': {'sample': folder}}))
 
             async def check(paths):
-                with patch.dict(os.environ, {'TOOLS_ALLOWED_PATHS': str(allowed)}):
+                with patch.dict(os.environ, {'FS_GATE_PATHS': str(allowed)}):
                     return (await self.rpc('tools/call', {'name': 'doxy', 'arguments': {'paths': paths}}))['result']
 
             result = await check('sample/good.c')
@@ -133,11 +133,11 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as folder:
             (Path(folder) / 'hello.c').write_text(source)
             (Path(folder) / 'Makefile').write_text('hello: hello.c\n\tcc -o hello hello.c\nclean:\n\trm -f hello\n')
-            allowed = Path(folder) / 'allowed_paths.json'
+            allowed = Path(folder) / 'paths.json'
             allowed.write_text(json.dumps({'paths': {'sample': folder}}))
 
             async def call(name, args):
-                with patch.dict(os.environ, {'TOOLS_ALLOWED_PATHS': str(allowed)}):
+                with patch.dict(os.environ, {'FS_GATE_PATHS': str(allowed)}):
                     result = (await self.rpc('tools/call', {'name': name, 'arguments': args}))['result']
                 return result['isError'], result['content'][0]['text']
 
@@ -170,11 +170,11 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as folder:
             (Path(folder) / 'a.c').write_text('int a;\nint b;\nint b;\n')
             (Path(folder) / '.git').mkdir()
-            allowed = Path(folder) / 'allowed_paths.json'
+            allowed = Path(folder) / 'paths.json'
             allowed.write_text(json.dumps({'paths': {'sample': folder, 'tools': str(Path(__file__).resolve().parents[2] / 'tools')}}))
 
             async def ed(args):
-                with patch.dict(os.environ, {'TOOLS_ALLOWED_PATHS': str(allowed)}):
+                with patch.dict(os.environ, {'FS_GATE_PATHS': str(allowed)}):
                     result = (await self.rpc('tools/call', {'name': 'ed', 'arguments': args}))['result']
                 return result['isError'], result['content'][0]['text']
 
@@ -190,7 +190,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse((await ed({'path': 'sample/b.h', 'action': 'write', 'new': '#pragma once'}))[0])
             self.assertEqual((Path(folder) / 'a.c').read_text(), '/* top */\nint alpha;\nint beta;\n')
             self.assertEqual((Path(folder) / 'b.h').read_text(), '#pragma once\n')
-            for args in ({'path': 'tools/allowed_paths.json', 'action': 'write', 'new': '{}'},
+            for args in ({'path': 'context/paths.json', 'action': 'write', 'new': '{}'},
                          {'path': 'sample/.git/config', 'action': 'write', 'new': 'x'},
                          {'path': 'sample/../escape.c', 'action': 'write', 'new': 'x'},
                          {'path': 'sample/a.c', 'old': 'missing', 'new': 'x'}):

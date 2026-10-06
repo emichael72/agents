@@ -29,7 +29,7 @@ added here is available to all of them without code changes:
 | `mr_gate` | Python (shared `.venv`) | `pr` (optional) | Open PRs in the quiz-gated repository and their quiz state; see [mr_gate/README.md](mr_gate/README.md) |
 
 Every path a tool takes (`ls`, `cat`, `ed`, `wc`, `search_text`, `df`, `git`, `make`,
-`gcc`, `doxy`) must be inside the folders named in [`allowed_paths.json`](allowed_paths.json);
+`gcc`, `doxy`) must be inside the folders named in [`context/paths.json`](../context/paths.json);
 see "Allowed paths" below.
 
 ## The manifest
@@ -63,22 +63,23 @@ see "Allowed paths" below.
 this folder is also the working directory when a tool runs.
 
 **Allowed paths:** a path the *model* passes must lie inside one of the folders named in
-[`allowed_paths.json`](allowed_paths.json), and starts with that folder's name:
+[`context/paths.json`](../context/paths.json), and starts with that folder's name. Folders are
+absolute, start with `~`, or are relative to the agents repository:
 
 ```json
 "paths": {
   "core_dump": "~/projects/core_dump",
-  "tools": "."
+  "tools": "tools"
 }
 ```
 
 So `wc` takes `core_dump/README.md` or `tools/greet/README.md`, and nothing outside
 those folders (`..` and symbolic links are resolved before the check). Every tool that takes a
 path (`ls`, `cat`, `ed`, `wc`, `search_text`, `df`, `git`, `make`, `gcc`,
-`doxy`) checks it with [`allowed_paths.py`](allowed_paths.py): Python tools import it, and
-Bash tools run `python3 allowed_paths.py <path> [--dir|--file]`, which prints the absolute path and
-the path as shown, or an error. To allow another folder, add a name to the JSON; it is read on
-every call.
+`doxy`) checks it with the file-system gate, [`fs_gate/fs_gate.py`](fs_gate/fs_gate.py): Python
+tools import it, and Bash tools run `python3 fs_gate/fs_gate.py <path> [--dir|--file]`, which prints
+the absolute path and the path as shown, or an error. `fs_gate/` has no `tool.json`, so it is not
+offered as a tool. To allow another folder, add a name to `paths.json`; it is read on every call.
 
 Each agent validates the model's arguments against the schema built from `params` before running
 the command (`jsonschema` in mcpagent and pydantic, zod in vercel). The agent also sets `AGENT_NAME`

@@ -3,7 +3,7 @@
 # Usage: ./doxy.sh <allowed name>/<path> [...]
 # Checks that C/C++ sources and headers are documented with Doxygen, using the settings in
 # Doxyfile.check (next to this script). Each path is a file or a folder (searched recursively)
-# inside tools/allowed_paths.json's folders; one argument may also hold several paths separated by
+# inside context/paths.json's folders; one argument may also hold several paths separated by
 # spaces. Documentation problems are the result, not a failure: the script exits nonzero only when
 # the check itself cannot run.
 
@@ -38,8 +38,8 @@ FILE_LIST=()
 ABSOLUTE=()  # Each path as resolved, and as shown in the report
 SHOWN=()
 for path in "${PATHS[@]}"; do
-  # Check the path against tools/allowed_paths.json (prints "<absolute path><TAB><path as shown>")
-  resolved="$(python3 "$TOOLS_DIR/allowed_paths.py" "$path")" || { echo "$resolved"; exit 1; }
+  # Check the path against context/paths.json (prints "<absolute path><TAB><path as shown>")
+  resolved="$(python3 "$TOOLS_DIR/fs_gate/fs_gate.py" "$path")" || { echo "$resolved"; exit 1; }
   IFS=$'\t' read -r target shown <<< "$resolved"
   if [ -d "$target" ]; then
     mapfile -t -O "${#FILE_LIST[@]}" FILE_LIST < <(find "$target" -type f -regextype posix-extended -regex ".*\.($EXTENSIONS)$")

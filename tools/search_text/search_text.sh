@@ -2,7 +2,7 @@
 
 # Usage: ./search_text.sh <pattern> [<allowed name>/<path>]
 # Finds lines matching a regular expression in a file or folder (recursively; default: tools), at
-# most 50 matches. The path must be inside tools/allowed_paths.json's folders.
+# most 50 matches. The path must be inside context/paths.json's folders.
 
 PATTERN="$1"
 TARGET="${2:-tools}"
@@ -12,9 +12,9 @@ if [ -z "$PATTERN" ]; then
   echo "Error: a search pattern is required"
   exit 1
 fi
-# Check the path against tools/allowed_paths.json (prints "<absolute path><TAB><path as shown>")
+# Check the path against context/paths.json (prints "<absolute path><TAB><path as shown>")
 TOOLS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-RESOLVED="$(python3 "$TOOLS_DIR/allowed_paths.py" "$TARGET")" || { echo "$RESOLVED"; exit 1; }
+RESOLVED="$(python3 "$TOOLS_DIR/fs_gate/fs_gate.py" "$TARGET")" || { echo "$RESOLVED"; exit 1; }
 IFS=$'\t' read -r TARGET SHOWN <<< "$RESOLVED"
 
 # -I skips binary files; -n adds line numbers; -H always names the file; -E uses extended regular

@@ -1,7 +1,7 @@
 # Make
 
 Runs GNU make in a folder inside the allowed folders
-([`../allowed_paths.json`](../allowed_paths.json)), such as `core_dump`, and reports whether it
+([`../../context/paths.json`](../../context/paths.json)), such as `core_dump`, and reports whether it
 succeeded with the last 60 lines of output (paths shown as `<allowed name>/...`).
 
 **Usage Example:**

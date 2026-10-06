@@ -1,6 +1,6 @@
 # Ed
 
-Edits a text file inside the allowed folders ([`../allowed_paths.json`](../allowed_paths.json)),
+Edits a text file inside the allowed folders ([`../../context/paths.json`](../../context/paths.json)),
 then shows the changed lines, numbered, with three lines of context so the edit can be checked.
 
 | Action | Parameters | Does |
@@ -18,9 +18,9 @@ python3 ed/ed.py core_dump/src/main.c --action lines --start 12 --end 14 --new "
 python3 ed/ed.py core_dump/src/modules/e.c --action write --new "$(cat e.c)"
 ```
 
-- **Protected:** ed never changes the tools folder (the tools' code and `allowed_paths.json`, so
-  the model cannot widen its own access) or anything in a `.git` folder (git's configuration can
-  run programs).
+- **Protected:** ed never changes the tools folder (the tools' code, including the gate) or the
+  `context` folder (`paths.json`, models and instructions), so the model cannot widen its own
+  access, nor anything in a `.git` folder (git's configuration can run programs).
 - **Safe writes:** the new contents go to a temporary file that replaces the original in one step;
   permissions and line endings (LF or CRLF) are kept. A match that fails changes nothing.
 - Only UTF-8 text files up to 2 MB. `write` ends the file with a newline.
