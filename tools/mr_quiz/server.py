@@ -14,8 +14,8 @@ Description:
 
     Key design points:
       - Grading happens on the server; the browser only receives questions and choices.
-      - HTTP Basic authentication with the password in data/access_password, and a per-quiz
-        form token. Plain HTTP: meant for a trusted network, not the internet.
+      - A demo sign-in page (user / pass by default, shown on the page) that sets a signed
+        cookie, and a per-quiz form token. Plain HTTP: meant for a trusted network only.
       - Polling instead of webhooks, so the host needs only outbound access to GitHub.
       - One generation and one submission at a time.
 """
@@ -28,12 +28,12 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from typing import Any, Optional
+from urllib.parse import quote
 
 # Third-party
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
@@ -41,6 +41,7 @@ from starlette.concurrency import run_in_threadpool
 import quiz
 
 MAX_FAILURES = 3  # Generation attempts per revision before the poller gives up on it
+SESSION_COOKIE = "mr_quiz_session"
 
 logger = logging.getLogger("mr_quiz")
 
@@ -141,8 +142,7 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
     Returns:
         FastAPI: The application.
     """
-    password = quiz.init()
-    security = HTTPBasic()
+    secret = quiz.init()
     templates = Jinja2Templates(directory=quiz.TOOL_DIR / "templates")
     submission_lock = threading.Lock()
 
@@ -155,17 +155,18 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
             poller.stop()
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
-    app.state.password = password
 
-    def authenticate(credentials: HTTPBasicCredentials = Depends(security)) -> str:
-        valid_user = secrets.compare_digest(credentials.username.encode(), quiz.DEVELOPER.encode())
-        valid_password = secrets.compare_digest(credentials.password.encode(), password.encode())
-        if not (valid_user and valid_password):
-            raise HTTPException(401, "Authentication required", headers={"WWW-Authenticate": "Basic"})
-        return credentials.username
+    def sign(value: str) -> str:
+        return hmac.new(secret.encode(), value.encode(), hashlib.sha256).hexdigest()
+
+    def authenticate(request: Request) -> str:
+        # Not signed in: send the browser to the sign-in page, then back here
+        if not secrets.compare_digest(request.cookies.get(SESSION_COOKIE, ""), sign("session:" + quiz.WEB_USER)):
+            raise HTTPException(303, headers={"Location": "/login?next=" + quote(request.url.path)})
+        return quiz.WEB_USER
 
     def csrf(qid: str) -> str:
-        return hmac.new(password.encode(), qid.encode(), hashlib.sha256).hexdigest()
+        return sign(qid)
 
     def locked_submit(qid: str, answers: list[int]) -> dict[str, Any]:
         with submission_lock:
@@ -185,6 +186,26 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
     @app.get("/health")
     def health():
         return {"status": "ok"}
+
+    @app.get("/login", response_class=HTMLResponse)
+    def login_page(request: Request, target: str = Query("/", alias="next")):
+        return templates.TemplateResponse(request=request, name="login.html", context={
+            "next": target, "user": quiz.WEB_USER, "password": quiz.WEB_PASSWORD, "failed": False})
+
+    @app.post("/login", response_class=HTMLResponse)
+    async def login(request: Request):
+        form = await request.form(max_fields=5)
+        target = str(form.get("next", "/"))
+        if not target.startswith("/") or target.startswith("//"):
+            target = "/"  # Only redirect within this site
+        valid_user = secrets.compare_digest(str(form.get("user", "")).encode(), quiz.WEB_USER.encode())
+        valid_password = secrets.compare_digest(str(form.get("password", "")).encode(), quiz.WEB_PASSWORD.encode())
+        if not (valid_user and valid_password):
+            return templates.TemplateResponse(request=request, name="login.html", status_code=401, context={
+                "next": target, "user": quiz.WEB_USER, "password": quiz.WEB_PASSWORD, "failed": True})
+        response = RedirectResponse(target, status_code=303)
+        response.set_cookie(SESSION_COOKIE, sign("session:" + quiz.WEB_USER), httponly=True, samesite="lax")
+        return response
 
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request, user: str = Depends(authenticate)):

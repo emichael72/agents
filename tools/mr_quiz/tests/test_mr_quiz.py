@@ -59,7 +59,7 @@ class QuizTests(unittest.TestCase):
         self.answers = [q.correct for q in self.content.questions]
         self.app = server.create_app()
         self.client = TestClient(self.app)
-        self.client.auth = (quiz.DEVELOPER, self.app.state.password)
+        self.client.post("/login", data={"user": "user", "password": "pass"})
 
     def tearDown(self):
         self.client.close()
@@ -86,9 +86,21 @@ class QuizTests(unittest.TestCase):
         self.assertNotIn("Private explanation sentinel", page.text)
         self.assertNotIn('"correct"', page.text)
         self.assertIn('name="q0"', page.text)
-        self.assertEqual(self.client.get("/", auth=None).status_code, 401)
-        self.assertEqual(self.client.get("/", auth=("bad", "bad")).status_code, 401)
-        self.assertEqual(self.client.get("/health", auth=None).status_code, 200)
+        self.assertEqual(TestClient(self.app).get("/health").status_code, 200)
+
+    def test_sign_in_page_shows_demo_credentials_and_guards_pages(self):
+        anonymous = TestClient(self.app)
+        redirect = anonymous.get("/q/" + self.qid, follow_redirects=False)
+        self.assertEqual(redirect.status_code, 303)
+        self.assertEqual(redirect.headers["location"], "/login?next=/q/" + self.qid)
+        page = anonymous.get("/login")
+        self.assertIn("<code>user</code>", page.text)
+        self.assertIn("<code>pass</code>", page.text)
+        self.assertEqual(anonymous.post("/login", data={"user": "user", "password": "bad"}).status_code, 401)
+        offsite = anonymous.post("/login", data={"user": "user", "password": "pass", "next": "//evil.example"},
+                                 follow_redirects=False)
+        self.assertEqual(offsite.headers["location"], "/")
+        self.assertEqual(anonymous.get("/").status_code, 200)
 
     def test_pass_is_persisted_and_published(self):
         self.assertTrue(quiz.submit(self.qid, self.answers)["passed"])

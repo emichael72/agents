@@ -65,16 +65,18 @@ systemctl --user daemon-reload && systemctl --user enable --now mr-quiz
 journalctl --user -u mr-quiz -f       # watch the poller
 ```
 
-Open `http://minion:8000` (port 8000 is open in minion's firewall). The browser asks for HTTP
-Basic credentials: user `emichael72`, password in `data/access_password` on minion.
+Open `http://minion:8000` (port 8000 is open in minion's firewall) and sign in with user `user`,
+password `pass`; the sign-in page shows them. Change them with `QUIZ_WEB_USER` and
+`QUIZ_WEB_PASSWORD`.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `QUIZ_REPO` | `emichael72/mr_quiz` | The repository to gate |
-| `QUIZ_DEVELOPER` | `emichael72` | The only PR author assessed, and the web login |
+| `QUIZ_DEVELOPER` | `emichael72` | The only PR author assessed |
+| `QUIZ_WEB_USER`, `QUIZ_WEB_PASSWORD` | `user`, `pass` | The web sign-in |
 | `QUIZ_BASE_URL` | `http://<hostname>:8000` | Where the PR's Details link points |
 | `QUIZ_MODEL_PROFILE` | the models file's default | Model profile |
-| `QUIZ_DATA_DIR` | `mr_quiz/data` | Database and password (gitignored) |
+| `QUIZ_DATA_DIR` | `mr_quiz/data` | Database and the key that signs sign-in cookies (gitignored) |
 
 GitHub access goes through the `gh` CLI and its login; the service needs only outbound access.
 
@@ -82,7 +84,8 @@ GitHub access goes through the `gh` CLI and its login; the service needs only ou
 
 This is a single-user demo, not tamper-proof enforcement:
 
-- Plain HTTP with one shared password: use it on a trusted network only.
+- Plain HTTP with a demo sign-in printed on the sign-in page: anyone who can reach the port can
+  take a quiz. Use it on a trusted network only.
 - The `gh` login that posts the status could post success directly; a real deployment would use
   a dedicated GitHub App as the only allowed status source, HTTPS and per-user sign-in.
 - Model-generated questions can be wrong; look at a quiz before presenting it.

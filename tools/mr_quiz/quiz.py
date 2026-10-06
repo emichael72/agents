@@ -44,6 +44,8 @@ REPO = os.environ.get("QUIZ_REPO", "emichael72/mr_quiz")
 DEVELOPER = os.environ.get("QUIZ_DEVELOPER", "emichael72")
 BASE_URL = os.environ.get("QUIZ_BASE_URL", f"http://{socket.gethostname()}:8000").rstrip("/")
 PROFILE = os.environ.get("QUIZ_MODEL_PROFILE") or None  # None uses the models file's default
+WEB_USER = os.environ.get("QUIZ_WEB_USER", "user")  # Demo sign-in, shown on the sign-in page
+WEB_PASSWORD = os.environ.get("QUIZ_WEB_PASSWORD", "pass")
 
 CONTEXT = "developer-quiz"  # The status check name branch protection requires
 MAX_DIFF_CHARS = 60_000
@@ -100,9 +102,9 @@ def connect() -> Iterator[sqlite3.Connection]:
 
 def init() -> str:
     """
-    Create the database tables and the access password, if missing.
+    Create the database tables and the secret key, if missing.
     Returns:
-        str: The HTTP Basic password for the web pages (data/access_password).
+        str: The key that signs the sign-in cookie and the form tokens (data/secret_key).
     """
     with connect() as db:
         db.executescript("""
@@ -118,7 +120,7 @@ def init() -> str:
           passed INTEGER NOT NULL, created TEXT DEFAULT CURRENT_TIMESTAMP
         );
         """)
-    secret_file = DATA / "access_password"
+    secret_file = DATA / "secret_key"
     if not secret_file.exists():
         try:
             fd = os.open(secret_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

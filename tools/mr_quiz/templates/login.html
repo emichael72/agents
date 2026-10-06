@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}Sign in · Developer Quiz{% endblock %}
+
+{% block content %}
+  <p class="eyebrow">Sign in</p>
+  <h1>Developer quiz</h1>
+
+  {# Demo credentials, shown on purpose: this page is for a trusted network #}
+  <p class="card">Sign in with user <code>{{ user }}</code> and password <code>{{ password }}</code>.</p>
+  {% if failed %}
+    <p class="card failure">Wrong user or password. Try again.</p>
+  {% endif %}
+
+  <form method="post" class="card">
+    <input type="hidden" name="next" value="{{ next }}">
+    <p>User<br><input class="field" name="user" value="{{ user }}" autocomplete="username" required></p>
+    <p>Password<br><input class="field" name="password" type="password" autocomplete="current-password" required></p>
+    <button type="submit">Sign in →</button>
+  </form>
+{% endblock %}
