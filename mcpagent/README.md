@@ -52,9 +52,10 @@ The client needs the server, so use two terminals, both at the repository root:
 
 The server listens on **http://127.0.0.1:6275/**. Stop it with **Ctrl+C**.
 
-The client prints the same layout as the other two agents: the model and the tools it connected
-to, a dimmed line for each tool call (`→ tool(args)`), result (`← tool: output`) and failure
-(`✗ tool: message`), then the answer with a blank line before and after it. `--quiet` hides the tool
+The client prints the same layout as the other two agents (see "Terminal output" in the
+[main README](../README.md)): a dark gray banner (model and tool count), a dark gray line for each tool
+call (`→ tool(args)`), result (`← tool: output`) and failure (`✗ tool: message`), then the answer,
+wrapped to 120 columns with a blank line before and after it, and the response time. `--quiet` hides the tool
 lines. In the chat, `/history` shows the messages exchanged with the model, `/reset` clears them and
 `exit` quits; each turn allows at most eight tool calls.
 

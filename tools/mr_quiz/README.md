@@ -1,4 +1,4 @@
-# MR Quiz
+# Merge Request Quiz
 
 A merge gate that checks the developer understands the code they are about to merge. When a pull
 request is opened (or a commit is pushed to it), a model reads the diff and writes a short

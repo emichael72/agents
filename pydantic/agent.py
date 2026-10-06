@@ -18,6 +18,7 @@ import argparse
 import asyncio
 import json
 import os
+import time
 from dataclasses import asdict
 from pathlib import Path
 from pprint import pprint
@@ -26,6 +27,7 @@ os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")  # Skip pydantic-ai's observ
 
 import httpx2
 from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import ANSI
 from pydantic_ai import Agent, AgentRunResultEvent, UsageLimits
 from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.messages import (FunctionToolCallEvent, FunctionToolResultEvent, PartDeltaEvent,
@@ -43,6 +45,7 @@ MCP_URL = "http://127.0.0.1:6275/"  # MCPAgent's server (python -m mcpagent.serv
 CONTEXT_DIR = Path(__file__).resolve().parent.parent / "context"
 INSTRUCTIONS_FILE = CONTEXT_DIR / "instructions.json"
 MODELS_FILE = CONTEXT_DIR / "models.json"
+OUTPUT_FILE = CONTEXT_DIR / "output.json"  # Terminal layout
 
 # Same cap as MCPAgent's max_tool_calls.
 LIMITS = UsageLimits(tool_calls_limit=8)
@@ -157,20 +160,76 @@ def readable(output: str) -> str:
     return output
 
 
+def load_output_settings(path: Path = OUTPUT_FILE) -> dict:
+    """
+    Read the shared terminal layout settings.
+    Args:
+        path: The JSON file (default: agents/context/output.json).
+    Returns:
+        dict: "width" (wrap column) and "show_time" (print each response's duration).
+    """
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def wrap(text: str, width: int, indent: str = "  ") -> list[str]:
+    """
+    Word-wrap text to a width, the same way in all three agents. Each line wraps on its own;
+    continuation lines start with `indent`. A word longer than the width (e.g. a URL) is kept whole.
+    Args:
+        text: The text; may contain newlines.
+        width: The column to wrap at.
+        indent: Prefix for continuation lines.
+    Returns:
+        list[str]: The wrapped lines.
+    """
+    lines = []
+    for raw in text.split("\n"):
+        line = None
+        for word in raw.split(" "):
+            if line is None:
+                line = word
+            elif line.strip() and len(line) + 1 + len(word) > width:
+                lines.append(line)
+                line = indent + word
+            else:
+                line += " " + word
+        lines.append(line)
+    return lines
+
+
 class Output:
     """
-    The terminal layout shared by the three agents: tool calls and results as dimmed lines while
-    they happen, and the model's text with exactly one blank line before and after it.
+    The terminal layout shared by the three agents (README.md, "Terminal output"):
+      - Everything except the model's answer (banner, hints, tool calls and results, timing) is a
+        dark gray line.
+      - The model's streamed answer is word-wrapped as it arrives, with exactly one blank line
+        before and after it.
+      - All output fits in the configured width (context/output.json), or the terminal's if narrower.
+      - Each response ends with how long it took.
     """
 
-    def __init__(self, out: Console):
+    def __init__(self, out: Console, settings: dict | None = None):
         """
         Args:
             out: The console to print to.
+            settings: The layout settings; None reads context/output.json.
         """
+        settings = settings or load_output_settings()
         self.out = out
+        self.width = int(settings.get("width", 120))
+        if out.is_terminal:
+            self.width = min(self.width, out.width)
+        self.show_time = bool(settings.get("show_time", True))
         self.in_text = False  # A text block is open
         self.pending = ""  # Trailing newlines held back until more text follows
+        self.column = 0  # Where the streamed answer's current line ends
+        self.word = ""  # The streamed word being collected
+        self.spaces = ""  # The spaces before it
+        self.started = time.monotonic()
+
+    def start(self) -> None:
+        """Start timing a response."""
+        self.started = time.monotonic()
 
     def text(self, chunk: str) -> None:
         """
@@ -186,27 +245,75 @@ class Output:
             self.in_text = True
         body = chunk.rstrip("\n")
         if body:
-            self.out.print(self.pending + body, end="", markup=False, soft_wrap=True)
+            self.out.print(self._wrap_stream(self.pending + body), end="", markup=False, soft_wrap=True)
             self.pending = chunk[len(body):]
         else:
             self.pending += chunk
 
-    def line(self, text: str, style: str = "dim") -> None:
+    def line(self, text: str) -> None:
         """
-        Print a whole line (a tool call or result), closing any open text block first.
+        Print a whole dark gray line (a tool call or result, the banner), wrapped to the width,
+        closing any open text block first.
         Args:
-            text: The line.
-            style: Rich style for the line.
+            text: The line; may contain newlines.
         """
         self.end()
-        self.out.print(text, style=style, markup=False)
+        for line in wrap(text, self.width):
+            self.out.print(line, style="bright_black", markup=False, soft_wrap=True)
 
     def end(self) -> None:
         """Close the open text block, if any: end its line and add the blank line after it."""
         if self.in_text:
+            self.out.print(self._take_word(), end="", markup=False, soft_wrap=True)
             self.out.print("\n")
         self.in_text = False
         self.pending = ""
+        self.column = 0
+        self.word = self.spaces = ""
+
+    def finish(self) -> None:
+        """Close the response, and print how long it took since `start`."""
+        self.end()
+        if self.show_time:
+            self.line(f"Response time: {time.monotonic() - self.started:.1f}s")
+
+    def _wrap_stream(self, text: str) -> str:
+        """
+        Word-wrap streamed text: words are held until they end, so they can move to the next line.
+        Args:
+            text: The text to add.
+        Returns:
+            str: What can be printed now.
+        """
+        printed = []
+        for char in text:
+            if char == "\n":
+                printed.append(self._take_word() + "\n")
+                self.column = 0
+                self.spaces = ""
+            elif char == " ":
+                printed.append(self._take_word())
+                self.spaces += " "
+            else:
+                self.word += char
+        return "".join(printed)
+
+    def _take_word(self) -> str:
+        """
+        Place the collected word on the current line, or on the next one if it does not fit.
+        Returns:
+            str: The word with what goes before it (its spaces, or a line break).
+        """
+        if not self.word:
+            return ""
+        if self.column and self.column + len(self.spaces) + len(self.word) > self.width:
+            placed = "\n" + self.word
+            self.column = len(self.word)
+        else:
+            placed = self.spaces + self.word
+            self.column += len(placed)
+        self.word = self.spaces = ""
+        return placed
 
 
 async def ask(agent: Agent, prompt: str, history: list, trace: bool = True, parallel: bool = False) -> list:
@@ -222,6 +329,7 @@ async def ask(agent: Agent, prompt: str, history: list, trace: bool = True, para
         list: The updated message history, including this turn.
     """
     output = Output(console)
+    output.start()
     # pydantic-ai reports every call of a model response before their results; hold each call
     # line until its result arrives, so the two print together (as in the other agents).
     pending_calls: dict[str, str] = {}
@@ -253,7 +361,7 @@ async def ask(agent: Agent, prompt: str, history: list, trace: bool = True, para
     finally:
         for line in pending_calls.values():  # Calls that never got a result (e.g. the run failed)
             output.line(line)
-        output.end()
+        output.finish()
     return history
 
 
@@ -287,18 +395,18 @@ async def chat(agent: Agent, prompt: str | None, trace: bool, show_history: bool
             if show_history:
                 print_history(history)
             return 0
-        console.print("Ask me to use a tool. /history shows messages, /reset clears them, exit quits.")
+        Output(console).line("Ask me to use a tool. /history shows messages, /reset clears them, exit quits.")
         session = PromptSession()
         while True:
             try:
-                prompt = (await session.prompt_async("You > ") or "").strip()
+                prompt = (await session.prompt_async(ANSI("\x1b[90mYou > \x1b[0m")) or "").strip()
             except (EOFError, KeyboardInterrupt):
                 return 0
             if prompt.lower() in {"exit", "quit", "q"}:
                 return 0
             if prompt == "/reset":
                 history = []
-                console.print("History cleared.")
+                Output(console).line("History cleared.")
             elif prompt == "/history":
                 print_history(history)
             elif prompt:
@@ -336,10 +444,10 @@ def main() -> int:
         profile = args.profile or ("local" if args.local else "openai" if args.openai else None)
         settings = resolve_model(load_models(), profile, model=args.model, base_url=args.base_url)
         agent = build_agent(build_model(settings), args.mcp)
-        tools = f"MCP server {args.mcp}" if args.mcp else ", ".join(local_toolset.tools)
+        tools = f"tools from MCP server {args.mcp}" if args.mcp else f"{len(local_toolset.tools)} tools"
         execution = "parallel" if args.parallel else "sequential"
-        console.print(f"{settings['name']} model: {settings['model']} @ {settings['base_url']}\n"
-                      f"Tools: {tools} ({execution})", markup=False)
+        Output(console).line(f"{settings['name']} model: {settings['model']} @ {settings['base_url']}, "
+                             f"{tools} ({execution})")
         return asyncio.run(chat(agent, args.prompt, trace=not args.quiet,
                                 show_history=args.history, parallel=args.parallel))
     except KeyboardInterrupt:

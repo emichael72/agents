@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ask, buildAgent, loadInstructions, loadModels, resolveModel } from '../agent.ts';
+import { ask, buildAgent, loadInstructions, loadModels, loadOutputSettings, Output, resolveModel, wrap } from '../agent.ts';
 import { loadTools, localTools } from '../tools.ts';
 
 const usage = {
@@ -164,4 +164,22 @@ test('history carries across turns', async () => {
   history = await ask(agent, 'two', history, quiet);
   assert.equal(history.length, 4);
   assert.match(JSON.stringify(history.at(-1)), /3 messages so far/);
+});
+
+test('lines and the streamed answer wrap to the width, and the response is timed', () => {
+  assert.deepEqual(wrap('one two three four five six seven', 15), ['one two three', '  four five six', '  seven']);
+  let printed = '';
+  const output = new Output((text) => { printed += text; }, { width: 30, show_time: true });
+  const answer = 'The quiz service is running and pull request number one is still waiting for its quiz.';
+  for (let i = 0; i < answer.length; i += 7) output.text(answer.slice(i, i + 7));
+  output.finish();
+  const plain = printed.replace(/\x1b\[[0-9;]*m/g, '');
+  const body = plain.split('\n').filter((line) => line && !line.startsWith('Response time'));
+  assert.ok(body.every((line) => line.length <= 30));
+  assert.equal(body.join(' '), answer);
+  assert.match(plain, /\n\nResponse time: \d+\.\ds\n$/);
+});
+
+test('layout settings come from the shared context file', () => {
+  assert.deepEqual(loadOutputSettings(), { ...loadOutputSettings(), width: 120, show_time: true });
 });

@@ -19,11 +19,12 @@ const MCP_URL = 'http://127.0.0.1:6275/'; // MCPAgent's server (python -m mcpage
 const CONTEXT_DIR = path.join(import.meta.dirname, '..', 'context');
 const INSTRUCTIONS_FILE = path.join(CONTEXT_DIR, 'instructions.json');
 const MODELS_FILE = path.join(CONTEXT_DIR, 'models.json');
+const OUTPUT_FILE = path.join(CONTEXT_DIR, 'output.json'); // Terminal layout
 
 // Roughly MCPAgent's max_tool_calls=8: each step is one model call plus the tools it requested.
 const MAX_STEPS = 9;
 
-const dim = (text: string) => styleText('dim', text);
+const gray = (text: string) => styleText('gray', text); // Everything except the model's answer
 
 type Profile = {
   name?: string; base_url: string; base_url_env?: string; model: string; model_env?: string;
@@ -94,19 +95,73 @@ export function buildAgent(model: LanguageModel, tools: ToolSet, parallel = fals
 type Agent = ReturnType<typeof buildAgent>;
 type Write = (text: string) => void;
 
+export type OutputSettings = { width?: number; show_time?: boolean };
+
+/** Read the shared terminal layout settings: "width" (wrap column) and "show_time". */
+export function loadOutputSettings(file = OUTPUT_FILE): OutputSettings {
+  return JSON.parse(readFileSync(file, 'utf8')) as OutputSettings;
+}
+
 /**
- * The terminal layout shared by the three agents: tool calls and results as dimmed lines while
- * they happen, and the model's text with exactly one blank line before and after it.
+ * Word-wrap text to a width, the same way in all three agents. Each line wraps on its own;
+ * continuation lines start with `indent`. A word longer than the width (e.g. a URL) is kept whole.
+ * @param text The text; may contain newlines.
+ * @param width The column to wrap at.
+ * @param indent Prefix for continuation lines.
+ * @returns The wrapped lines.
+ */
+export function wrap(text: string, width: number, indent = '  '): string[] {
+  const lines: string[] = [];
+  for (const raw of text.split('\n')) {
+    let line: string | undefined;
+    for (const word of raw.split(' ')) {
+      if (line === undefined) {
+        line = word;
+      } else if (line.trim() && line.length + 1 + word.length > width) {
+        lines.push(line);
+        line = indent + word;
+      } else {
+        line += ' ' + word;
+      }
+    }
+    lines.push(line ?? '');
+  }
+  return lines;
+}
+
+/**
+ * The terminal layout shared by the three agents (README.md, "Terminal output"):
+ * - Everything except the model's answer (banner, hints, tool calls and results, timing) is a dark
+ *   gray line.
+ * - The model's streamed answer is word-wrapped as it arrives, with exactly one blank line before
+ *   and after it.
+ * - All output fits in the configured width (context/output.json), or the terminal's if narrower.
+ * - Each response ends with how long it took.
  */
 export class Output {
-  private inText = false; // A text block is open
+  inText = false; // A text block is open
   private pending = ''; // Trailing newlines held back until more text follows
-
+  private column = 0; // Where the streamed answer's current line ends
+  private word = ''; // The streamed word being collected
+  private spaces = ''; // The spaces before it
+  private started = performance.now();
+  private readonly width: number;
+  private readonly showTime: boolean;
   private readonly write: Write;
 
-  /** @param write Prints raw text (stdout by default). */
-  constructor(write: Write) {
+  /**
+   * @param write Prints raw text (stdout by default).
+   * @param settings The layout settings; undefined reads context/output.json.
+   */
+  constructor(write: Write, settings: OutputSettings = loadOutputSettings()) {
     this.write = write;
+    this.width = Math.min(settings.width ?? 120, process.stdout.isTTY ? process.stdout.columns : Infinity);
+    this.showTime = settings.show_time ?? true;
+  }
+
+  /** Start timing a response. */
+  start(): void {
+    this.started = performance.now();
   }
 
   /** Print a chunk of streamed model text. */
@@ -119,24 +174,65 @@ export class Output {
     }
     const body = chunk.replace(/\n+$/, '');
     if (body) {
-      this.write(this.pending + body);
+      this.write(this.wrapStream(this.pending + body));
       this.pending = chunk.slice(body.length);
     } else {
       this.pending += chunk;
     }
   }
 
-  /** Print a whole line (a tool call or result), closing any open text block first. */
+  /** Print a whole dark gray line (a tool call or result, the banner), wrapped to the width. */
   line(text: string): void {
     this.end();
-    this.write(dim(text) + '\n');
+    for (const line of wrap(text, this.width)) this.write(gray(line) + '\n');
   }
 
   /** Close the open text block, if any: end its line and add the blank line after it. */
   end(): void {
-    if (this.inText) this.write('\n\n');
+    if (this.inText) this.write(this.takeWord() + '\n\n');
     this.inText = false;
     this.pending = '';
+    this.column = 0;
+    this.word = this.spaces = '';
+  }
+
+  /** Close the response, and print how long it took since `start`. */
+  finish(): void {
+    this.end();
+    if (this.showTime) this.line(`Response time: ${((performance.now() - this.started) / 1000).toFixed(1)}s`);
+  }
+
+  /** Word-wrap streamed text: words are held until they end, so they can move to the next line. */
+  private wrapStream(text: string): string {
+    let printed = '';
+    for (const char of text) {
+      if (char === '\n') {
+        printed += this.takeWord() + '\n';
+        this.column = 0;
+        this.spaces = '';
+      } else if (char === ' ') {
+        printed += this.takeWord();
+        this.spaces += ' ';
+      } else {
+        this.word += char;
+      }
+    }
+    return printed;
+  }
+
+  /** Place the collected word on the current line, or on the next one if it does not fit. */
+  private takeWord(): string {
+    if (!this.word) return '';
+    let placed: string;
+    if (this.column && this.column + this.spaces.length + this.word.length > this.width) {
+      placed = '\n' + this.word;
+      this.column = this.word.length;
+    } else {
+      placed = this.spaces + this.word;
+      this.column += placed.length;
+    }
+    this.word = this.spaces = '';
+    return placed;
   }
 }
 
@@ -153,6 +249,7 @@ export async function ask(agent: Agent, prompt: string, history: ModelMessage[],
                             { trace?: boolean; write?: Write } = {}): Promise<ModelMessage[]> {
   const messages: ModelMessage[] = [...history, { role: 'user', content: prompt }];
   const output = new Output(write);
+  output.start();
   // The AI SDK reports every call of a model response before their results; hold each call line
   // until its result arrives, so the two print together (as in the other agents).
   const pendingCalls = new Map<string, string>();
@@ -190,7 +287,7 @@ export async function ask(agent: Agent, prompt: string, history: ModelMessage[],
     return [...messages, ...(await result.response).messages];
   } finally {
     for (const line of pendingCalls.values()) output.line(line); // Calls that never got a result
-    output.end();
+    output.finish();
   }
 }
 
@@ -226,8 +323,8 @@ async function chat(agent: Agent, prompt: string | undefined, trace: boolean, sh
     if (showHistory) console.dir(history, { depth: null });
     return;
   }
-  console.log('Ask me to use a tool. /history shows messages, /reset clears them, exit quits.');
-  const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: 'You > ' });
+  console.log(gray('Ask me to use a tool. /history shows messages, /reset clears them, exit quits.'));
+  const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: gray('You > ') });
   try {
     rl.prompt();
     // Iterating queues lines that arrive while the agent is busy (e.g. piped input).
@@ -236,7 +333,7 @@ async function chat(agent: Agent, prompt: string | undefined, trace: boolean, sh
       if (['exit', 'quit', 'q'].includes(line.toLowerCase())) return;
       if (line === '/reset') {
         history = [];
-        console.log('History cleared.');
+        console.log(gray('History cleared.'));
       } else if (line === '/history') {
         console.dir(history, { depth: null });
       } else if (line) {
@@ -301,8 +398,9 @@ async function main(): Promise<number> {
     const settings = resolveModel(loadModels(), profile, { model: values.model, baseURL: values['base-url'] });
     const tools = mcpClient ? await mcpClient.tools() : localTools;
     const agent = buildAgent(buildModel(settings), tools, values.parallel, settings.timeout);
-    console.log(`${settings.name} model: ${settings.model} @ ${settings.baseURL}`);
-    console.log(`Tools: ${mcpUrl ? `MCP server ${mcpUrl}` : Object.keys(tools).join(', ')} (${values.parallel ? 'parallel' : 'sequential'})`);
+    const toolCount = mcpUrl ? `${Object.keys(tools).length} tools from MCP server ${mcpUrl}` : `${Object.keys(tools).length} tools`;
+    new Output((text) => void process.stdout.write(text)).line(
+      `${settings.name} model: ${settings.model} @ ${settings.baseURL}, ${toolCount} (${values.parallel ? 'parallel' : 'sequential'})`);
     await chat(agent, values.prompt, !values.quiet, values.history);
     return 0;
   } catch (error) {

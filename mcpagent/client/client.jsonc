@@ -12,6 +12,9 @@
   // --openai) picks one; with neither, the file's "default" is used.
   "models_file": "../../context/models.json",
 
+  // Terminal layout (wrap width, response time), shared by all three agents. Relative to this file.
+  "output_file": "../../context/output.json",
+
   "servers": [{
     "server_id": "tools",
     "description": "The shared agents/tools folder, served by mcpagent/server/server.jsonc.",

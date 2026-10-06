@@ -20,6 +20,7 @@ Description:
 import asyncio
 import json
 import os
+import time
 from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import urlparse
@@ -27,6 +28,7 @@ from urllib.parse import urlparse
 import httpx
 from jsonschema import ValidationError, validate
 from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import ANSI
 from rich.console import Console
 
 from .client import MCPClient
@@ -375,20 +377,81 @@ def readable(output: str) -> str:
     return output
 
 
+def load_output_settings(config_data: dict, config_file) -> dict:
+    """
+    Read the terminal layout settings from the file the client config names.
+    Args:
+        config_data: The parsed client config.
+        config_file: The config's path; "output_file" is relative to its folder.
+    Returns:
+        dict: "width" (wrap column) and "show_time", or {} (the defaults) if none is configured.
+    """
+    output_file = config_data.get("output_file")
+    if not output_file:
+        return {}
+    path = Path(config_file).resolve().parent / output_file
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def wrap(text: str, width: int, indent: str = "  ") -> list[str]:
+    """
+    Word-wrap text to a width, the same way in all three agents. Each line wraps on its own;
+    continuation lines start with `indent`. A word longer than the width (e.g. a URL) is kept whole.
+    Args:
+        text: The text; may contain newlines.
+        width: The column to wrap at.
+        indent: Prefix for continuation lines.
+    Returns:
+        list[str]: The wrapped lines.
+    """
+    lines = []
+    for raw in text.split("\n"):
+        line = None
+        for word in raw.split(" "):
+            if line is None:
+                line = word
+            elif line.strip() and len(line) + 1 + len(word) > width:
+                lines.append(line)
+                line = indent + word
+            else:
+                line += " " + word
+        lines.append(line)
+    return lines
+
+
 class Output:
     """
-    The terminal layout shared by the three agents: tool calls and results as dimmed lines while
-    they happen, and the model's text with exactly one blank line before and after it.
+    The terminal layout shared by the three agents (README.md, "Terminal output"):
+      - Everything except the model's answer (banner, hints, tool calls and results, timing) is a
+        dark gray line.
+      - The model's streamed answer is word-wrapped as it arrives, with exactly one blank line
+        before and after it.
+      - All output fits in the configured width (context/output.json), or the terminal's if narrower.
+      - Each response ends with how long it took.
     """
 
-    def __init__(self, out: Console):
+    def __init__(self, out: Console, settings: Optional[dict] = None):
         """
         Args:
             out: The console to print to.
+            settings: The layout settings (context/output.json); None uses the defaults.
         """
+        settings = settings or {}
         self.out = out
+        self.width = int(settings.get("width", 120))
+        if out.is_terminal:
+            self.width = min(self.width, out.width)
+        self.show_time = bool(settings.get("show_time", True))
         self.in_text = False  # A text block is open
         self.pending = ""  # Trailing newlines held back until more text follows
+        self.column = 0  # Where the streamed answer's current line ends
+        self.word = ""  # The streamed word being collected
+        self.spaces = ""  # The spaces before it
+        self.started = time.monotonic()
+
+    def start(self) -> None:
+        """Start timing a response."""
+        self.started = time.monotonic()
 
     def text(self, chunk: str) -> None:
         """
@@ -404,27 +467,75 @@ class Output:
             self.in_text = True
         body = chunk.rstrip("\n")
         if body:
-            self.out.print(self.pending + body, end="", markup=False)
+            self.out.print(self._wrap_stream(self.pending + body), end="", markup=False, soft_wrap=True)
             self.pending = chunk[len(body):]
         else:
             self.pending += chunk
 
-    def line(self, text: str, style: str = "dim") -> None:
+    def line(self, text: str) -> None:
         """
-        Print a whole line (a tool call or result), closing any open text block first.
+        Print a whole dark gray line (a tool call or result, the banner), wrapped to the width,
+        closing any open text block first.
         Args:
-            text: The line.
-            style: Rich style for the line.
+            text: The line; may contain newlines.
         """
         self.end()
-        self.out.print(text, style=style, markup=False)
+        for line in wrap(text, self.width):
+            self.out.print(line, style="bright_black", markup=False, soft_wrap=True)
 
     def end(self) -> None:
         """Close the open text block, if any: end its line and add the blank line after it."""
         if self.in_text:
+            self.out.print(self._take_word(), end="", markup=False, soft_wrap=True)
             self.out.print("\n")
         self.in_text = False
         self.pending = ""
+        self.column = 0
+        self.word = self.spaces = ""
+
+    def finish(self) -> None:
+        """Close the response, and print how long it took since `start`."""
+        self.end()
+        if self.show_time:
+            self.line(f"Response time: {time.monotonic() - self.started:.1f}s")
+
+    def _wrap_stream(self, text: str) -> str:
+        """
+        Word-wrap streamed text: words are held until they end, so they can move to the next line.
+        Args:
+            text: The text to add.
+        Returns:
+            str: What can be printed now.
+        """
+        printed = []
+        for char in text:
+            if char == "\n":
+                printed.append(self._take_word() + "\n")
+                self.column = 0
+                self.spaces = ""
+            elif char == " ":
+                printed.append(self._take_word())
+                self.spaces += " "
+            else:
+                self.word += char
+        return "".join(printed)
+
+    def _take_word(self) -> str:
+        """
+        Place the collected word on the current line, or on the next one if it does not fit.
+        Returns:
+            str: The word with what goes before it (its spaces, or a line break).
+        """
+        if not self.word:
+            return ""
+        if self.column and self.column + len(self.spaces) + len(self.word) > self.width:
+            placed = "\n" + self.word
+            self.column = len(self.word)
+        else:
+            placed = self.spaces + self.word
+            self.column += len(placed)
+        self.word = self.spaces = ""
+        return placed
 
 
 async def run_agent(config_file, profile=None, model=None, base_url=None, prompt=None, context="",
@@ -442,8 +553,8 @@ async def run_agent(config_file, profile=None, model=None, base_url=None, prompt
     Returns:
         int: The exit code.
     """
-    console = Console(highlight=False, soft_wrap=True)  # Never re-wrap lines
-    output = Output(console)
+    console = Console(highlight=False, soft_wrap=True)  # Never re-wrap lines; Output wraps
+    output = Output(console)  # Replaced by the configured layout once the config is read
     agent: Optional[MCPAgent] = None
     console.print()  # Blank line before anything the agent prints
 
@@ -454,15 +565,17 @@ async def run_agent(config_file, profile=None, model=None, base_url=None, prompt
             prompt: The user's message.
         """
         assert agent is not None  # Set before the first prompt
+        output.start()
         try:
             answer = await agent.ask(prompt, on_text=output.text)
             if not output.in_text:
                 output.text(answer)  # Nothing was streamed (e.g. a non-streaming reply)
         finally:
-            output.end()
+            output.finish()
 
     try:
         mcp_client = MCPClient(config_file)
+        output = Output(console, load_output_settings(mcp_client.config_data, config_file))
         models = load_models(mcp_client.config_data, config_file)
         settings = resolve_model(models, profile=profile, model=model, base_url=base_url)
         agent = MCPAgent(mcp_client, base_url=settings["base_url"], model=settings["model"],
@@ -470,26 +583,24 @@ async def run_agent(config_file, profile=None, model=None, base_url=None, prompt
                          instructions=load_instructions(mcp_client.config_data, config_file),
                          context=context, trace=output.line if trace else None)
         await agent.connect()
-        routes = agent.routes.values()
-        several_servers = len({server for server, _, _ in routes}) > 1
-        tools = ", ".join(f"{server}/{name}" if several_servers else name for server, name, _ in routes)
-        console.print(f"{agent.provider} model: {agent.model} @ {agent.base_url}", markup=False)
-        console.print(f"Tools: {tools} (sequential)", markup=False)
+        servers = len({server for server, _, _ in agent.routes.values()})
+        tools = f"{len(agent.routes)} tools" + (f" from {servers} servers" if servers > 1 else "")
+        output.line(f"{agent.provider} model: {agent.model} @ {agent.base_url}, {tools} (sequential)")
         if prompt is not None:
             await display_answer(prompt)
             return 0
-        console.print("Ask me to use a tool. /history shows messages, /reset clears them, exit quits.")
+        output.line("Ask me to use a tool. /history shows messages, /reset clears them, exit quits.")
         session = PromptSession()
         while True:
             try:
-                prompt = (await session.prompt_async("You > ")).strip()
+                prompt = (await session.prompt_async(ANSI("\x1b[90mYou > \x1b[0m"))).strip()
             except (EOFError, KeyboardInterrupt):
                 return 0
             if prompt.lower() in {"exit", "quit", "q"}:
                 return 0
             if prompt == "/reset":
                 agent.history = []
-                console.print("History cleared.")
+                output.line("History cleared.")
             elif prompt == "/history":
                 console.print(json.dumps(agent.history, indent=2, ensure_ascii=False), markup=False)
             elif prompt:

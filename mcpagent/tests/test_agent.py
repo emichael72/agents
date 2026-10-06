@@ -19,15 +19,19 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import io
+
 import httpx
 import json5
 from aiohttp import web
 from aiohttp.test_utils import TestServer
+from rich.console import Console
 
 from mcpagent import MCPClient, MCPService
 from mcpagent.client.client import DEFAULT_CONFIG as CLIENT_CONFIG
 from mcpagent.server.service import DEFAULT_CONFIG as SERVER_CONFIG
-from mcpagent.client.agent import MCPAgent, load_instructions, load_models, resolve_model
+from mcpagent.client.agent import (MCPAgent, Output, load_instructions, load_models, load_output_settings,
+                                   resolve_model, wrap)
 
 
 def message(text):
@@ -320,6 +324,28 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         local.tools = self.agent.tools
         self.assertEqual(await local.ask('Hello'), 'Hi')
         self.assertEqual(seen, [('http://boba:1234/v1/responses', 'Bearer lm-studio')])
+
+
+class OutputTests(unittest.TestCase):
+    """The terminal layout shared by the three agents (README.md, "Terminal output")."""
+
+    def test_layout_settings_come_from_the_shared_context_file(self):
+        settings = load_output_settings(json5.loads(CLIENT_CONFIG.read_text()), CLIENT_CONFIG)
+        self.assertEqual((settings['width'], settings['show_time']), (120, True))
+
+    def test_lines_and_streamed_answer_wrap_and_the_response_is_timed(self):
+        printed = io.StringIO()
+        output = Output(Console(file=printed), {'width': 30, 'show_time': True})
+        self.assertEqual(wrap('one two three four five six seven', 15), ['one two three', '  four five six', '  seven'])
+        answer = 'The quiz service is running and pull request number one is still waiting for its quiz.'
+        for i in range(0, len(answer), 7):
+            output.text(answer[i:i + 7])
+        output.finish()
+        body = [line for line in printed.getvalue().split('\n') if line and not line.startswith('Response time')]
+        self.assertTrue(all(len(line) <= 30 for line in body))
+        self.assertEqual(' '.join(body), answer)
+        self.assertRegex(printed.getvalue(), r'\n\nResponse time: \d+\.\ds\n$')
+
 
 if __name__ == '__main__':
     unittest.main()

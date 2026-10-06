@@ -166,5 +166,38 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(history[-1].parts[0].content, "3 messages so far")
 
 
+class OutputTests(unittest.TestCase):
+    """The shared terminal layout (README.md, "Terminal output")."""
+
+    def setUp(self):
+        self.printed = io.StringIO()
+        self.output = agent.Output(Console(file=self.printed), {"width": 30, "show_time": True})
+
+    def test_lines_wrap_with_an_indent_and_keep_long_words_whole(self):
+        url = "http://minion:8000/q/" + "x" * 40
+        lines = agent.wrap("← mr_quiz: the quiz is waiting and the merge is blocked " + url, 30)
+        self.assertTrue(all(len(line) <= 30 for line in lines if line.strip() != url))
+        self.assertTrue(all(line.startswith("  ") for line in lines[1:]))
+        self.assertEqual(lines[-1], "  " + url)
+        self.assertEqual(agent.wrap("short\nlines", 30), ["short", "lines"])
+
+    def test_streamed_answer_wraps_between_words_and_is_timed(self):
+        answer = "The quiz service is running and pull request number one is still waiting for its quiz."
+        for i in range(0, len(answer), 7):  # Chunks split mid-word, as models stream
+            self.output.text(answer[i:i + 7])
+        self.output.finish()
+        lines = self.printed.getvalue().split("\n")
+        body = [line for line in lines if line and not line.startswith("Response time")]
+        self.assertTrue(all(len(line) <= 30 for line in body))
+        self.assertEqual(" ".join(body), answer)
+        self.assertEqual(lines[0], "")  # Blank line before the answer
+        self.assertRegex(self.printed.getvalue(), r"\n\nResponse time: \d+\.\ds\n$")
+
+    def test_layout_settings_come_from_the_shared_context_file(self):
+        settings = agent.load_output_settings()
+        self.assertEqual(settings["width"], 120)
+        self.assertTrue(settings["show_time"])
+
+
 if __name__ == "__main__":
     unittest.main()

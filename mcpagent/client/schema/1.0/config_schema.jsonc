@@ -27,6 +27,10 @@
 			"type": "string",
 			"description": "JSON file with the model profiles (\"default\" and \"profiles\"), relative to the config file."
 		},
+		"output_file": {
+			"type": "string",
+			"description": "JSON file with the terminal layout (\"width\", \"show_time\"), relative to the config file."
+		},
 		"log_level": {
 			"type": "string",
 			"enum": [

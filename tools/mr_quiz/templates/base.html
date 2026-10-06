@@ -3,37 +3,51 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{% block title %}Developer Quiz{% endblock %}</title>
+  <title>{% block title %}Merge Request Quiz{% endblock %}</title>
   <style>
+    /* Intel palette: Classic Blue, Energy Blue, carbon text on light gray; flat, square corners */
     :root {
+      --classic-blue: #0068b5;
+      --classic-blue-dark: #00285a;
+      --energy-blue: #00c7fd;
+      --carbon: #262626;
+      --gray-text: #5e5e5e;
+      --line: #d9d9d9;
+      --surface: #ffffff;
+      --page: #f4f4f4;
+      --option: #f7f7f7;
+      --option-hover: #e8f3fb;
+      --success: #1e7d32;
+      --failure: #e96115;
+
       color-scheme: light;
-      font-family: system-ui, sans-serif;
-      color: #18332e;
-      background: #f2f5f1;
+      font-family: "IntelOne Display", "Intel Clear", "Segoe UI", system-ui, sans-serif;
+      color: var(--carbon);
+      background: var(--page);
     }
     body { margin: 0; }
 
     header {
-      background: #133e35;
-      color: white;
-      padding: 24px max(24px, calc((100% - 860px) / 2));
+      background: var(--classic-blue);
+      border-bottom: 4px solid var(--energy-blue);
+      padding: 20px max(24px, calc((100% - 860px) / 2));
     }
     header a {
       color: white;
       text-decoration: none;
-      font-weight: 700;
-      letter-spacing: .04em;
+      font-size: 20px;
+      font-weight: 600;
     }
 
     main { max-width: 860px; margin: 40px auto; padding: 0 24px 60px; }
-    h1 { font-size: 36px; letter-spacing: -.04em; }
+    h1 { font-size: 34px; font-weight: 400; color: var(--classic-blue-dark); }
     p { line-height: 1.6; }
-    a { color: #21664e; }
+    a { color: var(--classic-blue); }
     code { font-family: ui-monospace, monospace; }
-    small, .muted { color: #5b6e66; }
+    small, .muted { color: var(--gray-text); }
 
     .eyebrow {
-      color: #466b60;
+      color: var(--classic-blue);
       text-transform: uppercase;
       font-size: 12px;
       letter-spacing: .12em;
@@ -41,39 +55,40 @@
     }
 
     .card, fieldset {
-      border: 1px solid #cddbd2;
-      background: white;
-      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 0;
       padding: 26px;
       margin: 24px 0;
     }
-    fieldset legend { padding: 0 10px; font-weight: 700; }
+    fieldset legend { padding: 0 10px; font-weight: 700; color: var(--classic-blue-dark); }
 
     label {
       display: block;
       padding: 14px;
       margin: 10px 0;
-      background: #f4f7f4;
-      border-radius: 8px;
+      background: var(--option);
+      border-left: 3px solid transparent;
       cursor: pointer;
     }
-    label:hover { background: #e8f0e7; }
-    input { accent-color: #21664e; margin-right: 12px; }
+    label:hover { background: var(--option-hover); border-left-color: var(--classic-blue); }
+    input { accent-color: var(--classic-blue); margin-right: 12px; }
     .field {
       font: inherit;
       padding: 10px 12px;
       margin: 6px 0 0;
-      border: 1px solid #cddbd2;
-      border-radius: 8px;
+      border: 1px solid var(--line);
+      border-radius: 0;
       width: min(320px, 100%);
       box-sizing: border-box;
     }
+    .field:focus { outline: 2px solid var(--energy-blue); border-color: var(--classic-blue); }
 
     button, .button {
       display: inline-block;
       border: 0;
-      border-radius: 8px;
-      background: #21664e;
+      border-radius: 0;
+      background: var(--classic-blue);
       color: white;
       padding: 14px 22px;
       font: inherit;
@@ -81,17 +96,18 @@
       cursor: pointer;
       text-decoration: none;
     }
+    button:hover, .button:hover { background: var(--classic-blue-dark); }
 
     .status { font-weight: 700; }
-    .success { border-left: 5px solid #21664e; }
-    .failure { border-left: 5px solid #b57526; }
+    .success { border-left: 5px solid var(--success); }
+    .failure { border-left: 5px solid var(--failure); }
     .meta { display: flex; gap: 22px; flex-wrap: wrap; }
-    .footer { margin-top: 32px; color: #5b6e66; font-size: 14px; }
+    .footer { margin-top: 32px; color: var(--gray-text); font-size: 14px; }
   </style>
 </head>
 <body>
   <header>
-    <a href="/">MR QUIZ / Developer understanding</a>
+    <a href="/">Merge Request Quiz</a>
   </header>
   <main>
     {% block content %}{% endblock %}

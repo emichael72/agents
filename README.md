@@ -39,7 +39,7 @@ Every agent scans this folder at startup, so a tool added there is available to 
 without code changes. [tools/README.md](tools/README.md) describes the manifest and how to add
 a tool. Current tools: `greet_user`, `get_rand`, `count_lines`, `echo_message`, `get_system_info`,
 `current_time`, `calculate`, `list_files`, `search_text`, `disk_usage`, `git_log` and `mr_quiz`
-(a merge gate that quizzes a developer on their pull request; see
+(Merge Request Quiz: a merge gate that quizzes a developer on their pull request; see
 [tools/mr_quiz/README.md](tools/mr_quiz/README.md)).
 
 ```bash
@@ -53,6 +53,8 @@ change on its next start. None of this is hard-coded in the agents.
 
 - `context/instructions.json`: the instructions (system prompt) given to the model, as a list of
   lines.
+- `context/output.json`: the terminal layout: `width` (120) and `show_time` (true). See
+  "Terminal output" below.
 - `context/models.json`: the model profiles. `"default"` names the profile used when no flag picks
   one; it ships with `local` (an LM Studio server) and `openai`. The `local` profile expects LM
   Studio at `http://boba:1234/v1`; point it at another host with `LOCAL_LLM_BASE_URL` or by
@@ -85,6 +87,35 @@ All three agents take the same options: `--profile NAME` (or the shortcuts `--lo
 `--openai`) picks a profile, and `--model` / `--base-url` override it for one run. Precedence is
 the command line, then the `*_env` variables, then the file. To add a model, add a profile (for
 example `"mistral": {...}`) and pass `--profile mistral`.
+
+## Terminal output
+
+All three agents print a turn the same way, so their output can be compared line for line:
+
+```text
+Local model server model: qwen/qwen3-coder-30b @ http://boba:1234/v1, 12 tools (sequential)
+→ mr_quiz({})
+← mr_quiz: Quiz service: running at http://minion:8000
+  PR #1 'Compute pi using the C math library' by emichael72 at 135c35a: quiz waiting, merge blocked: …
+
+The quiz service is running. Pull request #1 is still waiting for its quiz, so its merge is blocked.
+
+Response time: 6.3s
+```
+
+1. **Only the model's answer is in the terminal's normal color.** Everything else (the banner, the
+   chat hints and `You >` prompt, tool calls `→`, results `←`, failures `✗`, and the response time)
+   is dark gray (ANSI 90). Errors are red.
+2. **Everything fits in `width` columns** (`context/output.json`, 120), or in the terminal if it is
+   narrower. Gray lines wrap with a two-space indent; the streamed answer wraps between words as
+   it arrives. A word longer than the width, such as a URL, is never broken.
+3. **The answer has exactly one blank line before and after it.** A tool call prints together with
+   its result, in the order they ran. `--quiet` hides the tool lines.
+4. **Each response ends with `Response time: N.Ns`**: from sending the prompt to the end of the
+   answer, tools included. `"show_time": false` turns it off.
+
+Each agent implements this in an `Output` class (`mcpagent/client/agent.py`, `pydantic/agent.py`,
+`vercel/agent.ts`), with tests that check the wrapping and the timing line.
 
 ## MCPAgent
 
