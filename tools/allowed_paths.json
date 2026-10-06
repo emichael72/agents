@@ -1,5 +1,5 @@
 {
-  "description": "Folders the tools that take a path may use: ls, view_file, wc, search_text, df, git, make, gcc and doxy. Each key is the name the model uses as the first part of a path (core_dump/src means src inside core_dump); each value is the folder, absolute, starting with ~, or relative to the tools folder. Files and folders inside these folders are allowed; nothing outside them.",
+  "description": "Folders the tools that take a path may use: ls, cat, wc, search_text, df, git, make, gcc and doxy. Each key is the name the model uses as the first part of a path (core_dump/src means src inside core_dump); each value is the folder, absolute, starting with ~, or relative to the tools folder. Files and folders inside these folders are allowed; nothing outside them.",
   "paths": {
     "core_dump": "~/projects/core_dump",
     "tools": "."

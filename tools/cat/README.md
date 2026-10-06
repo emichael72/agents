@@ -10,6 +10,6 @@ over 2 MB are refused.
 **Usage Example:**
 
 ```bash
-python3 view_file/view_file.py core_dump/src/modules/pi.c
-python3 view_file/view_file.py core_dump/src/main.c --start 40 --count 20
+python3 cat/cat.py core_dump/src/modules/pi.c
+python3 cat/cat.py core_dump/src/main.c --start 40 --count 20
 ```

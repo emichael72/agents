@@ -68,7 +68,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             ('greet', {}, f"Hello, {os.environ['USER']}!"),  # no name: the shell user
             ('rand', {'max': 1}, '1-1): 1'),
             ('wc', {'file': 'tools/greet/README.md'}, 'lines.'),
-            ('view_file', {'path': 'tools/greet/tool.json', 'count': 2}, 'lines 1-2 of'),
+            ('cat', {'path': 'tools/greet/tool.json', 'count': 2}, 'lines 1-2 of'),
             ('sysinfo', {}, 'machine='),
             ('time', {'timezone': 'UTC'}, 'UTC (UTC+00:00)'),
             ('calc', {'expression': '(17 * 23) + sqrt(144)'}, '= 403'),
@@ -111,7 +111,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_path_tools_stay_inside_the_allowed_folders(self):
         for path in ('tools/..', 'tools/greet/../..', 'etc', '/etc'):
-            for name, args in [('ls', {'path': path}), ('view_file', {'path': path + '/passwd'}),
+            for name, args in [('ls', {'path': path}), ('cat', {'path': path + '/passwd'}),
                                ('wc', {'file': path + '/passwd'}), ('df', {'path': path}),
                                ('search_text', {'pattern': 'root', 'path': path}),
                                ('git', {'path': path, 'command': 'log'}), ('doxy', {'paths': path}),

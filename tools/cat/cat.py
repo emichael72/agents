@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Module: view_file.py
+Module: cat.py
 
 Description:
     Shows a text file to the agents, with line numbers, a range of lines at a time.
