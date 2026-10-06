@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import urlparse
 
-import httpx
+import aiohttp
 from jsonschema import ValidationError, validate
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import ANSI
@@ -137,6 +137,36 @@ def resolve_model(models: dict, profile: Optional[str] = None,
     }
 
 
+class Reply:
+    """A model server's reply to one request: its HTTP status and JSON body."""
+
+    def __init__(self, status_code: int, body: Optional[dict]):
+        """
+        Args:
+            status_code: The HTTP status.
+            body: The parsed JSON body; None if it was not JSON.
+        """
+        self.status_code = status_code
+        self.body = body
+
+    @property
+    def is_error(self) -> bool:
+        """Whether the status is an HTTP error (400 or above)."""
+        return self.status_code >= 400
+
+    def json(self) -> dict:
+        """
+        The JSON body.
+        Returns:
+            dict: The body.
+        Raises:
+            ValueError: If the body was not JSON.
+        """
+        if self.body is None:
+            raise ValueError("The reply was not JSON")
+        return self.body
+
+
 class MCPAgent:
     """
     An agent whose tools are those of the configured MCP servers.
@@ -149,7 +179,7 @@ class MCPAgent:
     def __init__(self, mcp_client: MCPClient, *, base_url: str, model: str, api_key: str,
                  provider: str = "OpenAI", timeout: float = 60.0, instructions: str = "",
                  trace: Optional[Callable[[str], None]] = None,
-                 api_transport=None, max_tool_calls: int = 8, context: str = ""):
+                 max_tool_calls: int = 8, context: str = ""):
         """
         Set up the agent; call `connect()` before `ask()`.
         Args:
@@ -162,7 +192,6 @@ class MCPAgent:
             instructions: The model's instructions (see `load_instructions`).
             trace: Called with a line for each tool call ("→ tool(args)"), result ("← tool: output")
                 and failure ("✗ tool: message").
-            api_transport: Optional httpx transport, used by tests to stand in for the model server.
             max_tool_calls: Maximum tool calls in one user turn.
             context: Extra instructions appended to `instructions`.
         """
@@ -180,12 +209,11 @@ class MCPAgent:
         self.routes = {}
         self.usage: list[tuple[int, int]] = []  # Tokens per model call of the last turn
         self.timeouts = {}  # Seconds to wait per tool alias, from the server's tools/list _meta
-        # A dedicated client keeps the API key separate from MCP HTTP headers.
-        self.api = httpx.AsyncClient(
-            base_url=base_url + "/",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=timeout, transport=api_transport,
-        )
+        # A dedicated session keeps the API key separate from MCP HTTP headers; it is opened on
+        # first use, inside the running event loop.
+        self._api_key = api_key
+        self._timeout = timeout
+        self._api: Optional[aiohttp.ClientSession] = None
 
     async def connect(self):
         """
@@ -270,24 +298,41 @@ class MCPAgent:
         self.trace(f"{'✗' if result.get('isError') else '←'} {name}: {text}")
         return result
 
-    async def _request_response(self, payload, on_text=None):
+    def _session(self) -> aiohttp.ClientSession:
+        """The HTTP session for the model server, opened on first use."""
+        if self._api is None or self._api.closed:
+            # Connect and read timeouts, not a total one: a streamed answer may take a while
+            timeout = aiohttp.ClientTimeout(total=None, sock_connect=self._timeout, sock_read=self._timeout)
+            self._api = aiohttp.ClientSession(headers={"Authorization": f"Bearer {self._api_key}"}, timeout=timeout)
+        return self._api
+
+    @staticmethod
+    async def _body(response: aiohttp.ClientResponse) -> Optional[dict]:
+        """Read a response's JSON body, or None if it is not JSON."""
+        try:
+            return await response.json(content_type=None)
+        except (ValueError, aiohttp.ContentTypeError):
+            return None
+
+    async def _request_response(self, payload, on_text=None) -> Reply:
         """
         Send one Responses request, streaming text deltas when a callback is given.
         Args:
             payload: The Responses API request body.
             on_text: Called with each text delta; None makes a single non-streaming request.
         Returns:
-            httpx.Response: The final response; when streaming, a response built from the
-            completed event.
+            Reply: The final reply; when streaming, the response in the completed event.
         """
+        url = self.base_url + "/responses"
         if on_text is None:
-            return await self.api.post("responses", json=payload)
-        async with self.api.stream("POST", "responses", json={**payload, "stream": True}) as response:
-            if response.is_error:
-                await response.aread()
-                return response
+            async with self._session().post(url, json=payload) as response:
+                return Reply(response.status, await self._body(response))
+        async with self._session().post(url, json={**payload, "stream": True}) as response:
+            if response.status >= 400:
+                return Reply(response.status, await self._body(response))
             data_lines = []
-            async for line in response.aiter_lines():
+            async for raw in response.content:  # One line at a time, however the bytes arrive
+                line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
                 if line.startswith("data:"):
                     data_lines.append(line[5:].lstrip())
                 elif not line and data_lines:
@@ -297,7 +342,7 @@ class MCPAgent:
                     if kind in {"response.output_text.delta", "response.refusal.delta"}:
                         on_text(event.get("delta", ""))
                     elif kind in {"response.completed", "response.incomplete", "response.failed"}:
-                        return httpx.Response(200, json=event["response"])
+                        return Reply(200, event["response"])
                     elif kind == "error":
                         raise RuntimeError(f"{self.provider} stream failed. Earlier tool calls may have completed; no retry was made.")
             raise RuntimeError(f"{self.provider} stream ended before completion. Earlier tool calls may have completed; no retry was made.")
@@ -376,7 +421,7 @@ class MCPAgent:
                         "output": json.dumps(result, ensure_ascii=False),
                     })
             raise RuntimeError("Tool-call limit reached.")
-        except httpx.RequestError:
+        except (aiohttp.ClientError, asyncio.TimeoutError):
             self.history = []
             raise RuntimeError(f"Could not reach {self.provider} at {self.base_url}. Check your network/proxy. Earlier tool calls may have completed; they were not retried.") from None
         except Exception:
@@ -389,7 +434,8 @@ class MCPAgent:
         try:
             await self.mcp.close(close_all=True)
         finally:
-            await self.api.aclose()
+            if self._api is not None:
+                await self._api.close()
 
 
 def readable(output: str) -> str:

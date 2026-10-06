@@ -4,8 +4,8 @@ Module: test_agent.py
 Description:
     Tests for the agent loop (`MCPAgent`), model profiles and shared instructions.
 
-    A real MCP server runs the shared tools; the model is replaced by scripted responses
-    through `httpx.MockTransport`, so no model server or API key is needed.
+    A real MCP server runs the shared tools; the model is a small aiohttp server answering with
+    scripted responses, so no model server or API key is needed.
 """
 import sys
 from pathlib import Path
@@ -21,7 +21,6 @@ from unittest.mock import patch
 
 import io
 
-import httpx
 import json5
 from aiohttp import web
 from aiohttp.test_utils import TestServer
@@ -91,17 +90,28 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.status = 200
         self.error_code = None
 
-        def respond(request):
-            self.assertEqual(str(request.url), 'https://api.openai.com/v1/responses')
-            self.assertEqual(request.headers['Authorization'], 'Bearer test-key-not-real')
-            self.requests.append(json.loads(request.content))
-            if self.status != 200:
-                return httpx.Response(self.status, json={"error": {"message": "test-key-not-real", "code": self.error_code}})
-            return httpx.Response(200, json={"status": "completed", "output": self.outputs.pop(0)})
+        self.model_handler = None  # A test can replace how the model server answers
 
-        self.agent = MCPAgent(MCPClient(self.config), base_url='https://api.openai.com/v1', model='gpt-4.1-mini',
-                               api_key='test-key-not-real', trace=self.traces.append,
-                               api_transport=httpx.MockTransport(respond), max_tool_calls=2)
+        async def responses(request):
+            if self.model_handler:
+                return await self.model_handler(request)
+            self.assertEqual(request.path, '/v1/responses')
+            self.assertEqual(request.headers['Authorization'], 'Bearer test-key-not-real')
+            self.requests.append(await request.json())
+            if self.status != 200:
+                return web.json_response({"error": {"message": "test-key-not-real", "code": self.error_code}},
+                                         status=self.status)
+            return web.json_response({"status": "completed", "output": self.outputs.pop(0)})
+
+        model_app = web.Application()
+        model_app.router.add_post('/v1/responses', responses)
+        self.model_server = TestServer(model_app)
+        await self.model_server.start_server()
+        self.addAsyncCleanup(self.model_server.close)
+        self.model_url = str(self.model_server.make_url('/v1'))
+        self.agent = MCPAgent(MCPClient(self.config), base_url=self.model_url, model='gpt-4.1-mini',
+                               api_key='test-key-not-real', trace=self.traces.append, max_tool_calls=2)
+        self.agent.local = False  # Behave as with OpenAI (its error hints), though the stand-in is local
         self.addAsyncCleanup(self.agent.close)
         await self.agent.connect()
         self.aliases = {name: alias for alias, (_, name, _) in self.agent.routes.items()}
@@ -143,30 +153,26 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         requests = []
         alias = self.aliases['greet']
 
-        class Stream(httpx.AsyncByteStream):
-            async def __aiter__(self):
-                if len(requests) == 1:
-                    output = [call(alias, {'name': 'Alice'})]
-                else:
-                    for text in ['Hello, ', 'Alice!']:
-                        event = {'type': 'response.output_text.delta', 'delta': text}
-                        encoded = ('data: ' + json.dumps(event) + '\n\n').encode()
-                        # Exercise events split across network chunks.
-                        yield encoded[:13]
-                        yield encoded[13:]
-                        assert chunks[-1] == text
-                    output = [message('Hello, Alice!')]
-                event = {'type': 'response.completed',
-                         'response': {'status': 'completed', 'output': output}}
-                yield ('data: ' + json.dumps(event) + '\n\n').encode()
+        async def stream(request):
+            requests.append(await request.json())
+            response = web.StreamResponse(headers={'Content-Type': 'text/event-stream'})
+            await response.prepare(request)
+            if len(requests) == 1:
+                output = [call(alias, {'name': 'Alice'})]
+            else:
+                for text in ['Hello, ', 'Alice!']:
+                    event = {'type': 'response.output_text.delta', 'delta': text}
+                    encoded = ('data: ' + json.dumps(event) + '\n\n').encode()
+                    # Exercise events split across network chunks.
+                    await response.write(encoded[:13])
+                    await response.write(encoded[13:])
+                output = [message('Hello, Alice!')]
+            event = {'type': 'response.completed', 'response': {'status': 'completed', 'output': output}}
+            await response.write(('data: ' + json.dumps(event) + '\n\n').encode())
+            await response.write_eof()
+            return response
 
-        def respond(request):
-            requests.append(json.loads(request.content))
-            return httpx.Response(200, stream=Stream())
-
-        await self.agent.api.aclose()
-        self.agent.api = httpx.AsyncClient(base_url='https://api.openai.com/v1/',
-                                         transport=httpx.MockTransport(respond))
+        self.model_handler = stream
         self.assertEqual(await self.agent.ask('Greet Alice', on_text=chunks.append), 'Hello, Alice!')
         self.assertEqual(chunks, ['Hello, ', 'Alice!'])
         self.assertTrue(all(request['stream'] for request in requests))
@@ -174,15 +180,14 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.agent.history[-1], message('Hello, Alice!'))
 
     async def test_interrupted_stream_clears_history_without_retry(self):
-        await self.agent.api.aclose()
         requests = []
 
-        def respond(request):
+        async def cut_short(request):  # A stream that ends without its completed event
             requests.append(request)
-            return httpx.Response(200, content='data: {"type":"response.output_text.delta","delta":"Hi"}\n\n')
+            return web.Response(text='data: {"type":"response.output_text.delta","delta":"Hi"}\n\n',
+                                content_type='text/event-stream')
 
-        self.agent.api = httpx.AsyncClient(base_url='https://api.openai.com/v1/',
-                                         transport=httpx.MockTransport(respond))
+        self.model_handler = cut_short
         self.agent.history = [message('Earlier answer')]
         chunks = []
         with self.assertRaisesRegex(RuntimeError, 'before completion'):
@@ -316,18 +321,21 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
     async def test_local_profile_sends_its_own_key_to_its_own_server(self):
         seen = []
 
-        def respond(request):
-            seen.append((str(request.url), request.headers['Authorization']))
-            return httpx.Response(200, json={"status": "completed", "output": [message('Hi')]})
+        async def respond(request):
+            seen.append((request.path, request.headers['Authorization']))
+            return web.json_response({"status": "completed", "output": [message('Hi')]})
 
-        settings = resolve_model(self.shipped_models(), 'local')
+        self.model_handler = respond
+        settings = resolve_model(self.shipped_models(), 'local', base_url=self.model_url)
         local = MCPAgent(self.agent.mcp, base_url=settings['base_url'], model=settings['model'],
-                           api_key=settings['api_key'], provider=settings['name'],
-                           api_transport=httpx.MockTransport(respond))
-        self.addAsyncCleanup(local.api.aclose)
+                           api_key=settings['api_key'], provider=settings['name'])
         local.tools = self.agent.tools
-        self.assertEqual(await local.ask('Hello'), 'Hi')
-        self.assertEqual(seen, [('http://boba:1234/v1/responses', 'Bearer lm-studio')])
+        try:
+            self.assertEqual(await local.ask('Hello'), 'Hi')
+        finally:
+            if local._api is not None:
+                await local._api.close()
+        self.assertEqual(seen, [('/v1/responses', 'Bearer lm-studio')])  # The local profile's own key
 
 
 class OutputTests(unittest.TestCase):

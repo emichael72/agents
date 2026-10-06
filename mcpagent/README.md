@@ -79,7 +79,7 @@ explain what happened". The tools are listed in [../tools/README.md](../tools/RE
 | --- | --- | --- | --- |
 | Agent loop | `MCPAgent.ask()`, hand-written | `Agent.run_stream_events()` | `ToolLoopAgent.stream()` |
 | Instructions | `../context/instructions.json`, named by `instructions_file` in `client.jsonc` | `../context/instructions.json` → `load_instructions()` | `../context/instructions.json` → `loadInstructions()` |
-| Model provider | raw `httpx`, `/v1/responses` | `OpenAIChatModel` | `@ai-sdk/openai-compatible` |
+| Model provider | raw `aiohttp`, `/v1/responses` | `OpenAIChatModel` | `@ai-sdk/openai-compatible` |
 | Tools | `../tools/*/tool.json`, loaded by the server (`tools_dir`) | `../tools/*/tool.json` → `Tool.from_schema` | `../tools/*/tool.json` → `z.fromJSONSchema` |
 | Argument validation | `jsonschema.validate` | `jsonschema.validate` | zod, from the same JSON schema |
 | Tool failure | `isError` result | `ToolFailed` | thrown `Error` → `tool-error` |
