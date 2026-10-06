@@ -22,6 +22,7 @@ os.environ["QUIZ_DATA_DIR"] = IMPORT_DATA.name
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import changes  # noqa: E402
+import clone  # noqa: E402
 import quiz  # noqa: E402
 import pr_gate  # noqa: E402
 import server  # noqa: E402
@@ -524,6 +525,64 @@ class ServiceControlTests(unittest.TestCase):
         with patch.object(pr_gate.subprocess, "run", return_value=missing), \
                 self.assertRaisesRegex(ValueError, "install.sh --gate install"):
             pr_gate.control("start")
+
+
+class CloneSyncTests(unittest.TestCase):
+    """The service keeps the local clone current, only when that is safe."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = Path(self.temp.name)
+        self.remote, self.clone, self.other = root / "remote.git", root / "clone", root / "other"
+        self.git("init", "-q", "--bare", "-b", "main", str(self.remote), cwd=root)
+        self.git("clone", "-q", str(self.remote), str(self.other), cwd=root)
+        self.commit(self.other, "a.c", "First")
+        self.git("clone", "-q", str(self.remote), str(self.clone), cwd=root)
+
+    def git(self, *args, cwd):
+        subprocess.run(["git", "-c", "user.name=T", "-c", "user.email=t@x", *args], cwd=cwd, check=True,
+                       capture_output=True)
+
+    def commit(self, repo, name, message):
+        (repo / name).write_text(message + "\n")
+        self.git("add", name, cwd=repo)
+        self.git("commit", "-q", "-m", message, cwd=repo)
+        self.git("push", "-q", "origin", "main", cwd=repo)
+
+    def test_new_commits_on_github_reach_a_clean_clone(self):
+        self.assertEqual(clone.sync_clone(str(self.clone))[0], "current")
+        self.commit(self.other, "b.c", "Second")
+        outcome, message = clone.sync_clone(str(self.clone))
+        self.assertEqual(outcome, "updated", message)
+        self.assertIn("Second", message)
+        self.assertTrue((self.clone / "b.c").exists())
+
+    def test_work_in_progress_local_commits_and_other_branches_are_left_alone(self):
+        self.commit(self.other, "b.c", "Second")
+        (self.clone / "draft.c").write_text("int x;\n")  # An agent is working: even a new file counts
+        self.assertIn("changes in progress", clone.sync_clone(str(self.clone))[1])
+        self.assertFalse((self.clone / "b.c").exists())
+        (self.clone / "draft.c").unlink()
+        self.git("checkout", "-q", "-b", "topic", cwd=self.clone)
+        self.assertIn("not on main", clone.sync_clone(str(self.clone))[1])
+        self.git("checkout", "-q", "main", cwd=self.clone)
+        (self.clone / "local.c").write_text("int y;\n")
+        self.git("add", "local.c", cwd=self.clone)
+        self.git("commit", "-q", "-m", "Local only", cwd=self.clone)
+        self.assertIn("commits that are not on GitHub", clone.sync_clone(str(self.clone))[1])
+        self.assertEqual(clone.sync_clone(str(Path(self.temp.name)))[0], "skipped")  # Not a clone
+
+    def test_the_poller_syncs_on_its_own_schedule(self):
+        poller = server.Poller()
+        self.commit(self.other, "b.c", "Second")
+        with patch.object(quiz, "LOCAL_CLONE", str(self.clone)), patch.object(quiz, "SYNC_SECONDS", 60):
+            poller.sync_clone()
+            self.assertTrue((self.clone / "b.c").exists())
+            self.assertIn("fast-forwarded by 1 commit", poller.last_sync)
+            self.commit(self.other, "c.c", "Third")
+            poller.sync_clone()  # Not due yet
+            self.assertFalse((self.clone / "c.c").exists())
 
 
 if __name__ == "__main__":

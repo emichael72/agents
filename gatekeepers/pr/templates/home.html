@@ -15,6 +15,9 @@
       · watching for new commits{% if poller.last_poll %}, last checked {{ poller.last_poll }}{% endif %}
     {% endif %}
   </p>
+  {% if poller and poller.last_sync %}
+    <p class="muted">Local clone: {{ poller.last_sync }}</p>
+  {% endif %}
   {% if poller and poller.working %}
     <section class="card">Generating a quiz for pull request #{{ poller.working }}… reload in a minute.</section>
   {% endif %}

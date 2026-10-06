@@ -39,6 +39,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
 # Local imports
+import clone
 import quiz
 
 MAX_FAILURES = 3  # Generation attempts per revision before the poller gives up on it
@@ -68,6 +69,8 @@ class Poller:
         self.working: Optional[int] = None  # The PR being quizzed right now, for the home page
         self.last_poll: Optional[str] = None
         self.last_error: Optional[str] = None
+        self.last_sync: Optional[str] = None  # The local clone's last sync, for the home page
+        self._next_sync = 0.0
 
     def start(self) -> None:
         """Start polling in a background thread."""
@@ -87,7 +90,24 @@ class Poller:
             except Exception as exc:  # Keep polling whatever goes wrong
                 self.last_error = str(exc)
                 logger.warning("Poll failed: %s", exc)
+            self.sync_clone()
             self._stop.wait(self._interval)
+
+    def sync_clone(self) -> None:
+        """
+        Every SYNC_SECONDS, fast-forward the local clone (QUIZ_LOCAL_CLONE) to GitHub when it is
+        safe (see clone.sync_clone), so agents start from current code. Logged when it changes.
+        """
+        if not quiz.LOCAL_CLONE or time.monotonic() < self._next_sync:
+            return
+        self._next_sync = time.monotonic() + quiz.SYNC_SECONDS
+        try:
+            outcome, message = clone.sync_clone(quiz.LOCAL_CLONE)
+        except Exception as exc:  # Never stop polling for this
+            outcome, message = "skipped", str(exc)
+        if outcome == "updated" or (outcome == "skipped" and message != self.last_sync):
+            logger.info("Local clone: %s", message)
+        self.last_sync = f"{message} ({time.strftime('%H:%M:%S')})"
 
     def poll_once(self) -> list[int]:
         """

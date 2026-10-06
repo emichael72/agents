@@ -131,6 +131,8 @@ overrides the file.
 | `QUIZ_FAIL_ON_WARNINGS` | `true` | A compiler warning (`file:line: warning:`) fails the build check, like an error |
 | `QUIZ_ALLOW_SKIP` | `true` | Proof-of-concept mode: a **Skip quiz** button next to the answers unlocks the merge without answering. It appears only once the build, tests and documentation pass, and the check, the PR comment and the database record it as skipped. Set `false` to require the quiz |
 | `QUIZ_PR_COMMENT` | `true` | Post and keep up to date one comment on the pull request with the results and the quiz link |
+| `QUIZ_LOCAL_CLONE` | `~/projects/core_dump` | A local clone the service keeps current: every `QUIZ_SYNC_SECONDS` it fast-forwards the default branch from GitHub, so agents (whose shell has no network) start from the latest code. Only when the clone is on its default branch with no changes and no local commits; otherwise it waits. Empty turns it off |
+| `QUIZ_SYNC_SECONDS` | `30` | How often to sync the local clone |
 | `QUIZ_POLL_SECONDS` | `5` | Seconds between GitHub polls. Each poll that finds nothing new costs one of the 5,000 GitHub API requests per hour your `gh` login allows: 720 an hour at 5 seconds |
 | `QUIZ_MODEL_PROFILE` | empty: the models file's default | Model profile (`local` or `openai`) |
 | `QUIZ_WEB_USER`, `QUIZ_WEB_PASSWORD` | `user`, `pass` | The web sign-in |

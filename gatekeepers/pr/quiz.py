@@ -80,6 +80,8 @@ WEB_PASSWORD = setting("QUIZ_WEB_PASSWORD")
 BUILD_COMMAND = setting("QUIZ_BUILD_COMMAND", required=False)  # "" skips the build check
 TEST_TARGET = setting("QUIZ_TEST_TARGET", required=False)
 FAIL_ON_WARNINGS = setting("QUIZ_FAIL_ON_WARNINGS", required=False).lower() in ("true", "1", "yes")
+LOCAL_CLONE = setting("QUIZ_LOCAL_CLONE", required=False)  # Kept current with GitHub; "" for none
+SYNC_SECONDS = float(setting("QUIZ_SYNC_SECONDS", required=False) or 30)
 PR_COMMENT = setting("QUIZ_PR_COMMENT", required=False).lower() in ("true", "1", "yes")
 ALLOW_SKIP = setting("QUIZ_ALLOW_SKIP", required=False).lower() in ("true", "1", "yes")  # Proof-of-concept mode
 COMMENT_MARKER = "<!-- pr_gate -->"  # Finds the gate's own comment on a pull request
