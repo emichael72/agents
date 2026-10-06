@@ -4,7 +4,7 @@ Module: fs_gate.py
 
 Description:
     The file-system gate: the one rule for which files and folders the tools may touch, shared by
-    every tool that takes a path (ls, cat, ed, wc, search_text, df, git, make, gcc, doxy). The
+    every tool that takes a path (ls, cat, ed, wc, grep, find, df, git, make, gcc, doxy). The
     allowed folders are listed in context/paths.json. This folder holds no tool.json, so the
     agents do not offer it as a tool.
 

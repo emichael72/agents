@@ -1,0 +1,15 @@
+{
+  "description": "Searches file contents (like grep -rn) in a file or folder inside the allowed folders, e.g. core_dump. Shows matching lines as file:line:text, or only the matching files. Use find to search file names instead.",
+  "command": "python3",
+  "args": ["grep/grep.py"],
+  "params": [
+    {"name": "pattern", "type": "string", "description": "Extended regular expression to search for, e.g. print_pi or def [a-z_]+; plain text with fixed", "style": "positional"},
+    {"name": "path", "type": "string", "description": "File or folder to search, starting with an allowed folder name, e.g. core_dump/src; omit it to search tools", "style": "flag", "required": false},
+    {"name": "ignore_case", "type": "boolean", "description": "Match regardless of case", "style": "flag", "required": false},
+    {"name": "fixed", "type": "boolean", "description": "Treat the pattern as plain text, not a regular expression", "style": "flag", "required": false},
+    {"name": "files_only", "type": "boolean", "description": "List only the files that match, not the lines", "style": "flag", "required": false},
+    {"name": "context", "type": "integer", "description": "Lines to show before and after each match, 0 to 5 (default 0)", "style": "flag", "required": false},
+    {"name": "include", "type": "string", "description": "Only search files whose names match this glob, e.g. *.c or *.h", "style": "flag", "required": false}
+  ],
+  "resource": "grep/README.md"
+}

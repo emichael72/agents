@@ -43,7 +43,7 @@ def view(path: str, start: int = 1, count: int = MAX_LINES) -> str:
         raise ValueError(f"start must be 1 or more, and count 1 to {MAX_LINES}.")
     target, shown = fs_gate.resolve(path, "file")
     if target.stat().st_size > MAX_BYTES:
-        raise ValueError(f"'{shown}' is larger than {MAX_BYTES:,} bytes; search it with search_text instead.")
+        raise ValueError(f"'{shown}' is larger than {MAX_BYTES:,} bytes; search it with grep instead.")
     data = target.read_bytes()
     if b"\0" in data[:8192]:
         raise ValueError(f"'{shown}' is a binary file.")

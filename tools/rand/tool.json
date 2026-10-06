@@ -1,9 +1,0 @@
-{
-  "description": "Generates a random number up to a specified maximum (default 100).",
-  "command": "bash",
-  "args": ["rand/rand.sh"],
-  "params": [
-    {"name": "max", "type": "integer", "description": "Maximum range (default 100)", "style": "positional", "required": false}
-  ],
-  "resource": "rand/README.md"
-}

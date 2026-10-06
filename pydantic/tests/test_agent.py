@@ -28,7 +28,7 @@ import agent  # noqa: E402
 import toolset as tools_module  # noqa: E402
 
 CALLS = [("greet", {"name": "Alice"}), ("wc", {"file": "missing-file"}),
-         ("calc", {"expression": "6 * 7"})]
+         ("time", {"timezone": "UTC"})]
 
 
 async def scripted_model(messages, info: AgentInfo):
@@ -101,7 +101,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         answer = history[-1].parts[0].content
         self.assertIn("Hello, Alice!", answer)
         self.assertIn("not an allowed folder", answer)
-        self.assertIn("= 42", answer)
+        self.assertIn("(UTC+00:00)", answer)
         returns = [part.tool_name for message in history if isinstance(message, ModelRequest)
                    for part in message.parts if isinstance(part, ToolReturnPart)]
         self.assertEqual(returns, [name for name, _ in CALLS])
@@ -149,7 +149,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         lines = [line[:1] + " " + line[2:].split("(")[0].split(":")[0]
                  for line in self.output.getvalue().splitlines() if line[:1] in "→←✗" and line]
         self.assertEqual(lines, ["→ greet", "← greet", "→ wc", "✗ wc",
-                                 "→ calc", "← calc"])
+                                 "→ time", "← time"])
 
     def test_greet_without_name_greets_the_shell_user(self):
         greet = tool_function(tools_module.toolset, "greet")

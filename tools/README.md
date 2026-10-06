@@ -12,15 +12,14 @@ added here is available to all of them without code changes:
 | Tool | Runs | Parameters | Result |
 | --- | --- | --- | --- |
 | `greet` | Bash | `name` (optional) | A greeting for `name`, or for the shell user (`$USER`) |
-| `rand` | Bash | `max` (optional, default 100) | A random number from 1 to `max` |
 | `time` | Bash / `date` | `timezone` (optional, IANA name) | The current date and time |
 | `sysinfo` | Bash / `uname` | none | Hostname, OS, kernel release and CPU architecture |
-| `calc` | Python | `expression` | The value of an arithmetic expression (parsed safely, no `eval`) |
 | `ls` | Python | `path` (optional) | A folder's entries with sizes and dates (up to 200); no path lists the allowed folders |
 | `cat` | Python | `path`, `start`, `count` (optional) | A text file's lines, numbered, up to 200 per call |
 | `ed` | Python | `path`, `action`, `old`, `new`, `all`, `start`, `end`, `line` (by action) | Edits a file: replace exact text, replace or delete lines, insert, or write a whole file; shows the changed lines |
 | `wc` | Bash / `wc` | `file` | The file's line count |
-| `search_text` | Bash / `grep` | `pattern`, `path` (optional) | Matching lines as `file:line:text` (up to 50) |
+| `grep` | Python / `grep` | `pattern`, `path`, `ignore_case`, `fixed`, `files_only`, `context`, `include` (optional) | Matching lines as `file:line:text`, or the matching files (up to 50) |
+| `find` | Python / `find` | `path`, `name`, `type`, `max_depth`, `ignore_case` (optional) | Files and folders by name (up to 200) |
 | `df` | Bash / `du` | `path` (optional) | A file or folder's total size and file count |
 | `git` | Python / `git` | `path`, `command`, `args` (optional) | A read-only git command's output (log, status, diff, show, blame, ...) |
 | `make` | Python / `make` | `path`, `target` (optional) | Whether the build succeeded, and its output |
@@ -28,7 +27,7 @@ added here is available to all of them without code changes:
 | `doxy` | Bash / `doxygen` | `paths` (files or folders, space-separated) | Doxygen documentation problems as `file:line: message`, or "All documented" |
 | `mr_gate` | Python (shared `.venv`) | `pr` (optional) | Open PRs in the quiz-gated repository and their quiz state; see [mr_gate/README.md](mr_gate/README.md) |
 
-Every path a tool takes (`ls`, `cat`, `ed`, `wc`, `search_text`, `df`, `git`, `make`,
+Every path a tool takes (`ls`, `cat`, `ed`, `wc`, `grep`, `find`, `df`, `git`, `make`,
 `gcc`, `doxy`) must be inside the folders named in [`context/paths.json`](../context/paths.json);
 see "Allowed paths" below.
 
@@ -75,7 +74,7 @@ absolute, start with `~`, or are relative to the agents repository:
 
 So `wc` takes `core_dump/README.md` or `tools/greet/README.md`, and nothing outside
 those folders (`..` and symbolic links are resolved before the check). Every tool that takes a
-path (`ls`, `cat`, `ed`, `wc`, `search_text`, `df`, `git`, `make`, `gcc`,
+path (`ls`, `cat`, `ed`, `wc`, `grep`, `find`, `df`, `git`, `make`, `gcc`,
 `doxy`) checks it with the file-system gate, [`fs_gate/fs_gate.py`](fs_gate/fs_gate.py): Python
 tools import it, and Bash tools run `python3 fs_gate/fs_gate.py <path> [--dir|--file]`, which prints
 the absolute path and the path as shown, or an error. `fs_gate/` has no `tool.json`, so it is not

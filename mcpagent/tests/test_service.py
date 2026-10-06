@@ -66,15 +66,15 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         for name, args, expected in [
             ('greet', {'name': 'Alice Smith'}, 'Hello, Alice Smith!'),
             ('greet', {}, f"Hello, {os.environ['USER']}!"),  # no name: the shell user
-            ('rand', {'max': 1}, '1-1): 1'),
             ('wc', {'file': 'tools/greet/README.md'}, 'lines.'),
             ('cat', {'path': 'tools/greet/tool.json', 'count': 2}, 'lines 1-2 of'),
             ('sysinfo', {}, 'machine='),
             ('time', {'timezone': 'UTC'}, 'UTC (UTC+00:00)'),
-            ('calc', {'expression': '(17 * 23) + sqrt(144)'}, '= 403'),
             ('ls', {'path': 'tools/greet'}, 'tool.json'),
             ('ls', {}, 'Allowed folders'),
-            ('search_text', {'pattern': 'AGENT_NAME', 'path': 'tools/greet'}, 'tools/greet/greet.sh:'),
+            ('grep', {'pattern': 'AGENT_NAME', 'path': 'tools/greet'}, 'tools/greet/greet.sh:'),
+            ('grep', {'pattern': 'agent_name', 'path': 'tools/greet', 'ignore_case': True, 'files_only': True}, 'tools/greet/greet.sh'),
+            ('find', {'path': 'tools', 'name': 'greet*', 'type': 'f'}, 'tools/greet/greet.sh'),
             ('df', {'path': 'tools/greet'}, 'tools/greet: '),
             ('git', {'path': 'tools', 'command': 'log', 'args': '-1 --date=short --format="%h %ad %s"'}, ' 20'),
         ]:
@@ -113,7 +113,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         for path in ('tools/..', 'tools/greet/../..', 'etc', '/etc'):
             for name, args in [('ls', {'path': path}), ('cat', {'path': path + '/passwd'}),
                                ('wc', {'file': path + '/passwd'}), ('df', {'path': path}),
-                               ('search_text', {'pattern': 'root', 'path': path}),
+                               ('grep', {'pattern': 'root', 'path': path}), ('find', {'path': path}),
                                ('git', {'path': path, 'command': 'log'}), ('doxy', {'paths': path}),
                                ('make', {'path': path}), ('gcc', {'sources': path + '/x.c'})]:
                 result = (await self.rpc('tools/call', {'name': name, 'arguments': args}))['result']
@@ -214,7 +214,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         for arguments in ({'name': 123}, {'name': 'Alice', 'extra': True}, []):
             result = await self.rpc('tools/call', {'name': 'greet', 'arguments': arguments})
             self.assertEqual(result['error']['code'], -32602)
-        for name, args in [('rand', {'max': 0}), ('wc', {'file': 'missing-file'})]:
+        for name, args in [('time', {'timezone': 'Not/AZone'}), ('wc', {'file': 'missing-file'})]:
             result = await self.rpc('tools/call', {'name': name, 'arguments': args})
             self.assertTrue(result['result']['isError'])
 
