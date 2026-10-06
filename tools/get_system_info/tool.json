@@ -1,0 +1,7 @@
+{
+  "description": "Return information about the machine running the tools: hostname, OS, kernel release and CPU architecture.",
+  "command": "bash",
+  "args": ["get_system_info/get_system_info.sh"],
+  "params": [],
+  "resource": "get_system_info/README.md"
+}

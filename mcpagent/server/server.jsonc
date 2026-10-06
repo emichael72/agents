@@ -1,0 +1,80 @@
+/*
+    MCP Agent server configuration
+    ------------------------------
+
+    Note: This file uses JSONC — an extended JSON format that supports inline comments and multi-line strings.
+    This allows for improved readability and documentation which are not valid standard JSON.
+
+	Purpose:
+	  Defines the configuration for the MCP service, including:
+	    - General project metadata
+	    - MCP server bind/port settings
+	    - Where to find the tools (the shared agents/tools folder)
+	    - Templates (pre-baked example tool calls)
+
+	Top-level keys:
+	  project_name              : Human-readable project identifier
+	  description               : Longer text describing the project purpose
+	  mcp_server_port           : TCP port the MCP service listens on
+	  mcp_server_bind_address   : Bind address (use "0.0.0.0" for all interfaces)
+	  version                   : Semantic version string for this config
+	  tools_dir                 : Folder scanned for <tool>/tool.json manifests (relative to this file)
+	  tools_env                 : Environment variables added to every discovered tool
+	  tools                     : (optional) Extra inline tool definitions, same shape as a tool.json
+	  templates                 : Example tool invocations
+*/
+
+{
+	"project_name": "MCP Agent",
+	// Short project identifier
+	"description": "Serves the shared agents/tools folder over MCP.",
+	"mcp_server_port": 6275,
+	// Optional: whether to display curl/SSE usage examples in the greeting banner
+	"show_usage_examples": false,
+	// Optional: if true, auto-patch VS Code configuration files (mcp.json) for MCP integration
+	"patch_vscode_config": false,
+	// Port MCP server listens on
+	"mcp_server_bind_address": "127.0.0.1",
+	// Optional: Prefix automatically added to all tool names (null = no prefix)
+	"tools_prefix": null,
+	// 0.0.0.0 = all interfaces; 127.0.0.1 = localhost only
+	"version": "1.0.0",
+	// Config version
+
+	// Tools live in the shared agents/tools folder; each <tool>/tool.json describes one tool.
+	// Paths in a manifest are relative to that folder, which is also the tools' working directory.
+	"tools_dir": "../../tools",
+	// Lets tools such as greet_user say which agent ran them
+	"tools_env": {"AGENT_NAME": "MCP Agent"},
+
+	"templates": {
+		/*
+		Templates are **predefined example invocations** of tools.
+		They provide convenience shortcuts and documentation for common usage patterns.
+
+		Schema:
+		  description : Human-readable explanation of what this template does
+		  command     : The tool name (must match a key under "tools")
+		  args        : Arguments to pre-fill for this example
+		*/
+
+		"say_hello": {
+			"description": "Template to greet a specific user using greet_user",
+			"command": "greet_user",
+			// Must match one of the tools above
+			"args": {
+				"name": "Alice"
+				// Predefined argument
+			}
+		},
+		"pick_number": {
+			"description": "Template to generate a random number up to 100 using get_rand",
+			"command": "get_rand",
+			// Must match one of the tools above
+			"args": {
+				"max": 100
+				// Predefined maximum value
+			}
+		}
+	}
+}

@@ -1,0 +1,9 @@
+{
+  "description": "Lists the files and folders in a folder, with sizes and dates.",
+  "command": "bash",
+  "args": ["list_files/list_files.sh"],
+  "params": [
+    {"name": "path", "type": "string", "description": "Folder to list, relative to the tools folder (e.g. greet_user or ..); omit it for the tools folder itself", "style": "positional", "required": false}
+  ],
+  "resource": "list_files/README.md"
+}

@@ -1,0 +1,22 @@
+// MCP Agent client configuration: which MCP servers to use and which model drives the chat.
+// Validated against schema/<schema_version>/config_schema.jsonc (next to this file).
+{
+  "log_level": "ERROR",
+  "debug_json_box": false,
+  "schema_version": "1.0",
+
+  // Instructions (system prompt) for the model, shared by all three agents. Relative to this file.
+  "instructions_file": "../../context/instructions.json",
+
+  // Model profiles, shared by all three agents. Relative to this file. --profile (or --local /
+  // --openai) picks one; with neither, the file's "default" is used.
+  "models_file": "../../context/models.json",
+
+  "servers": [{
+    "server_id": "tools",
+    "description": "The shared agents/tools folder, served by mcpagent/server/server.jsonc.",
+    "enabled": true,
+    "transport": "HTTP",
+    "config": {"url": "http://127.0.0.1:6275/", "sse_url": "http://127.0.0.1:6275/sse"}
+  }]
+}

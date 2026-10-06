@@ -1,0 +1,10 @@
+{
+  "description": "Finds the lines that match a regular expression in a file, or in all files under a folder. Returns file:line:text for each match.",
+  "command": "bash",
+  "args": ["search_text/search_text.sh"],
+  "params": [
+    {"name": "pattern", "type": "string", "description": "Extended regular expression to search for, e.g. AGENT_NAME or def [a-z_]+", "style": "positional"},
+    {"name": "path", "type": "string", "description": "File or folder to search, relative to the tools folder; omit it to search the tools folder", "style": "positional", "required": false}
+  ],
+  "resource": "search_text/README.md"
+}

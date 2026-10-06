@@ -1,0 +1,9 @@
+{
+  "description": "Prints a greeting for the given name. Omit name to greet the current user (for example, when asked to greet me).",
+  "command": "bash",
+  "args": ["greet_user/greet_user.sh"],
+  "params": [
+    {"name": "name", "type": "string", "description": "Name of the user to greet; omit it to greet the current user", "style": "flag", "required": false}
+  ],
+  "resource": "greet_user/README.md"
+}
