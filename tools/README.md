@@ -13,7 +13,7 @@ added here is available to all of them without code changes:
 | --- | --- | --- | --- |
 | `greet` | Bash | `name` (optional) | A greeting for `name`, or for the shell user (`$USER`) |
 | `time` | Bash / `date` | `timezone` (optional, IANA name) | The current date and time |
-| `sysinfo` | Bash / `uname` | none | Hostname, OS, kernel release and CPU architecture |
+| `sysinfo` | Python | `section` (optional) | The system, CPU utilization and load, memory, disks, network, GPU, busiest processes and software versions (Python, gcc, ...) |
 | `ls` | Python | `path` (optional) | A folder's entries with sizes and dates (up to 200); no path lists the allowed folders |
 | `cat` | Python | `path`, `start`, `count` (optional) | A text file's lines, numbered, up to 200 per call |
 | `ed` | Python | `path`, `action`, `old`, `new`, `all`, `start`, `end`, `line` (by action) | Edits a file: replace exact text, replace or delete lines, insert, or write a whole file; shows the changed lines |

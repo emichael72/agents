@@ -1,7 +1,9 @@
 {
-  "description": "Return information about the machine running the tools: hostname, OS, kernel release and CPU architecture.",
-  "command": "bash",
-  "args": ["sysinfo/sysinfo.sh"],
-  "params": [],
+  "description": "Reports on the machine running the tools: system (OS, kernel, uptime), CPU (model, cores, current utilization, load, temperature), memory and swap use, disks, network interfaces, GPU, the busiest processes, and software versions (Python, gcc, make, git, node, ...). Ask for one section to keep it short.",
+  "command": "python3",
+  "args": ["sysinfo/sysinfo.py"],
+  "params": [
+    {"name": "section", "type": "string", "description": "One of system, cpu, memory, disk, network, gpu, processes, software; omit it for all", "style": "flag", "required": false}
+  ],
   "resource": "sysinfo/README.md"
 }

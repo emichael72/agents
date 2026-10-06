@@ -68,7 +68,8 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             ('greet', {}, f"Hello, {os.environ['USER']}!"),  # no name: the shell user
             ('wc', {'file': 'tools/greet/README.md'}, 'lines.'),
             ('cat', {'path': 'tools/greet/tool.json', 'count': 2}, 'lines 1-2 of'),
-            ('sysinfo', {}, 'machine='),
+            ('sysinfo', {'section': 'software'}, 'python (running this tool)'),
+            ('sysinfo', {}, '[cpu]'),
             ('time', {'timezone': 'UTC'}, 'UTC (UTC+00:00)'),
             ('ls', {'path': 'tools/greet'}, 'tool.json'),
             ('ls', {}, 'Allowed folders'),
