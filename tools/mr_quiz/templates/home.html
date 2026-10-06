@@ -1,12 +1,43 @@
-{% extends "base.html" %}{% block content %}
-<p class="eyebrow">Presentation demo · {{ user }}</p><h1>Understand the change.<br>Then merge it.</h1>
-<p>Answer a short assessment about your pull request. A passing result unlocks the quiz check for that exact revision.</p>
-<p class="muted">{{ repo }}{% if poller %} · watching for new commits{% if poller.last_poll %}, last checked {{ poller.last_poll }}{% endif %}{% endif %}</p>
-{% if poller and poller.working %}<section class="card">Generating a quiz for pull request #{{ poller.working }}… reload in a minute.</section>{% endif %}
-{% if poller and poller.last_error %}<section class="card failure">Last poll failed: {{ poller.last_error }}</section>{% endif %}
-{% for row in rows %}<section class="card"><div class="meta"><strong>Pull request #{{ row.pr }}</strong><code>{{ row.sha[:7] }}</code><span class="status">{{ 'Passed' if row.passed else 'Awaiting pass' }}</span></div>
-<p>Created {{ row.created }} UTC · GitHub status: {{ row.published or 'not delivered' }}</p>
-<a class="button" href="/q/{{ row.id }}">Open assessment →</a></section>
-{% else %}<section class="card">No assessments yet. Open a pull request against main and one is generated automatically.</section>{% endfor %}
-<p class="footer">This service permits a merge after a pass. It never merges a pull request automatically.</p>
+{% extends "base.html" %}
+
+{% block content %}
+  <p class="eyebrow">Presentation demo · {{ user }}</p>
+  <h1>Understand the change.<br>Then merge it.</h1>
+  <p>
+    Answer a short assessment about your pull request.
+    A passing result unlocks the quiz check for that exact revision.
+  </p>
+
+  {# What the GitHub poller is doing #}
+  <p class="muted">
+    {{ repo }}
+    {% if poller %}
+      · watching for new commits{% if poller.last_poll %}, last checked {{ poller.last_poll }}{% endif %}
+    {% endif %}
+  </p>
+  {% if poller and poller.working %}
+    <section class="card">Generating a quiz for pull request #{{ poller.working }}… reload in a minute.</section>
+  {% endif %}
+  {% if poller and poller.last_error %}
+    <section class="card failure">Last poll failed: {{ poller.last_error }}</section>
+  {% endif %}
+
+  {# One card per quiz, newest first #}
+  {% for row in rows %}
+    <section class="card">
+      <div class="meta">
+        <strong>Pull request #{{ row.pr }}</strong>
+        <code>{{ row.sha[:7] }}</code>
+        <span class="status">{{ 'Passed' if row.passed else 'Awaiting pass' }}</span>
+      </div>
+      <p>Created {{ row.created }} UTC · GitHub status: {{ row.published or 'not delivered' }}</p>
+      <a class="button" href="/q/{{ row.id }}">Open assessment →</a>
+    </section>
+  {% else %}
+    <section class="card">
+      No assessments yet. Open a pull request against main and one is generated automatically.
+    </section>
+  {% endfor %}
+
+  <p class="footer">This service permits a merge after a pass. It never merges a pull request automatically.</p>
 {% endblock %}

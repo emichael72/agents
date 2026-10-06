@@ -1,13 +1,39 @@
-{% extends "base.html" %}{% block title %}{{ title }} · Developer Quiz{% endblock %}{% block content %}
-<p class="eyebrow">Revision assessment · {{ row.developer }}</p><h1>{{ title }}</h1>
-<div class="meta"><a href="https://github.com/{{ repo }}/pull/{{ row.pr }}" rel="noreferrer">Pull request #{{ row.pr }}</a><code>{{ row.sha[:7] }}</code><span>{{ questions|length }} questions · 100% to pass</span></div>
-<p>Review the change, then choose one answer for each question. You can retry if needed.</p>
-{% if row.passed %}<p class="card success">This revision has already passed.</p>{% endif %}
-<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}">
-{% for question in questions %}{% set qi=loop.index0 %}
-<fieldset><legend>Question {{ loop.index }}</legend><p><strong>{{ question.question }}</strong></p>
-{% for option in question.options %}<label><input type="radio" name="q{{ qi }}" value="{{ loop.index0 }}" required>{{ option }}</label>{% endfor %}
-</fieldset>{% endfor %}
-<button type="submit">Check my understanding →</button></form>
-<p class="footer">Generated from the PR diff by {{ row.source }}. New commits require a new assessment.</p>
+{% extends "base.html" %}
+
+{% block title %}{{ title }} · Developer Quiz{% endblock %}
+
+{% block content %}
+  <p class="eyebrow">Revision assessment · {{ row.developer }}</p>
+  <h1>{{ title }}</h1>
+  <div class="meta">
+    <a href="https://github.com/{{ repo }}/pull/{{ row.pr }}" rel="noreferrer">Pull request #{{ row.pr }}</a>
+    <code>{{ row.sha[:7] }}</code>
+    <span>{{ questions|length }} questions · 100% to pass</span>
+  </div>
+  <p>Review the change, then choose one answer for each question. You can retry if needed.</p>
+
+  {% if row.passed %}
+    <p class="card success">This revision has already passed.</p>
+  {% endif %}
+
+  {# Only questions and choices reach the page; the answer key stays on the server #}
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% for question in questions %}
+      {% set qi = loop.index0 %}
+      <fieldset>
+        <legend>Question {{ loop.index }}</legend>
+        <p><strong>{{ question.question }}</strong></p>
+        {% for option in question.options %}
+          <label>
+            <input type="radio" name="q{{ qi }}" value="{{ loop.index0 }}" required>
+            {{ option }}
+          </label>
+        {% endfor %}
+      </fieldset>
+    {% endfor %}
+    <button type="submit">Check my understanding →</button>
+  </form>
+
+  <p class="footer">Generated from the PR diff by {{ row.source }}. New commits require a new assessment.</p>
 {% endblock %}

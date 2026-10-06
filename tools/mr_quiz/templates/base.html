@@ -1,16 +1,91 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{% block title %}Developer Quiz{% endblock %}</title>
-<style>
-:root{color-scheme:light;font-family:system-ui,sans-serif;color:#18332e;background:#f2f5f1}
-body{margin:0}header{background:#133e35;color:white;padding:24px max(24px,calc((100% - 860px)/2))}
-header a{color:white;text-decoration:none;font-weight:700;letter-spacing:.04em}
-main{max-width:860px;margin:40px auto;padding:0 24px 60px}h1{font-size:36px;letter-spacing:-.04em}
-p{line-height:1.6}.eyebrow{color:#466b60;text-transform:uppercase;font-size:12px;letter-spacing:.12em;font-weight:700}
-.card,fieldset{border:1px solid #cddbd2;background:white;border-radius:14px;padding:26px;margin:24px 0}
-fieldset legend{padding:0 10px;font-weight:700}label{display:block;padding:14px;margin:10px 0;background:#f4f7f4;border-radius:8px;cursor:pointer}
-label:hover{background:#e8f0e7}input{accent-color:#21664e;margin-right:12px}button,.button{display:inline-block;border:0;border-radius:8px;background:#21664e;color:white;padding:14px 22px;font:inherit;font-weight:600;cursor:pointer;text-decoration:none}
-a{color:#21664e}code{font-family:ui-monospace,monospace}small,.muted{color:#5b6e66}.status{font-weight:700}.success{border-left:5px solid #21664e}.failure{border-left:5px solid #b57526}
-.meta{display:flex;gap:22px;flex-wrap:wrap}.footer{margin-top:32px;color:#5b6e66;font-size:14px}
-</style></head><body><header><a href="/">MR QUIZ / Developer understanding</a></header>
-<main>{% block content %}{% endblock %}</main></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}Developer Quiz{% endblock %}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: system-ui, sans-serif;
+      color: #18332e;
+      background: #f2f5f1;
+    }
+    body { margin: 0; }
+
+    header {
+      background: #133e35;
+      color: white;
+      padding: 24px max(24px, calc((100% - 860px) / 2));
+    }
+    header a {
+      color: white;
+      text-decoration: none;
+      font-weight: 700;
+      letter-spacing: .04em;
+    }
+
+    main { max-width: 860px; margin: 40px auto; padding: 0 24px 60px; }
+    h1 { font-size: 36px; letter-spacing: -.04em; }
+    p { line-height: 1.6; }
+    a { color: #21664e; }
+    code { font-family: ui-monospace, monospace; }
+    small, .muted { color: #5b6e66; }
+
+    .eyebrow {
+      color: #466b60;
+      text-transform: uppercase;
+      font-size: 12px;
+      letter-spacing: .12em;
+      font-weight: 700;
+    }
+
+    .card, fieldset {
+      border: 1px solid #cddbd2;
+      background: white;
+      border-radius: 14px;
+      padding: 26px;
+      margin: 24px 0;
+    }
+    fieldset legend { padding: 0 10px; font-weight: 700; }
+
+    label {
+      display: block;
+      padding: 14px;
+      margin: 10px 0;
+      background: #f4f7f4;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    label:hover { background: #e8f0e7; }
+    input { accent-color: #21664e; margin-right: 12px; }
+
+    button, .button {
+      display: inline-block;
+      border: 0;
+      border-radius: 8px;
+      background: #21664e;
+      color: white;
+      padding: 14px 22px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+    }
+
+    .status { font-weight: 700; }
+    .success { border-left: 5px solid #21664e; }
+    .failure { border-left: 5px solid #b57526; }
+    .meta { display: flex; gap: 22px; flex-wrap: wrap; }
+    .footer { margin-top: 32px; color: #5b6e66; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/">MR QUIZ / Developer understanding</a>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
