@@ -63,7 +63,11 @@ bash pr_gate/pr_gate.sh serve                      # the web service and GitHub 
    correct answer among four distinct options), its choices shuffled, and its answer key stored in
    `data/quiz.sqlite3`; grading happens on the server. A pass lets the PR merge (the service never
    merges by itself).
-5. A new commit, or a change on `main`, needs a new assessment: the old one can no longer be
+5. **The pull request gets one comment** from the gate, kept up to date: the build and tests, the
+   documentation, and the quiz link (or why there is none yet). Each new revision and each quiz
+   result edits the same comment, found by a hidden `<!-- pr_gate -->` marker, rather than adding
+   another. `QUIZ_PR_COMMENT` turns it off; a comment that cannot be posted never blocks the check.
+6. A new commit, or a change on `main`, needs a new assessment: the old one can no longer be
    submitted, and the poller makes the next one. Fixing documentation problems therefore means
    pushing the fix.
 
@@ -109,6 +113,7 @@ set in the environment (for example in `~/.config/pr-gate.env` for the service) 
 | `QUIZ_BASE_URL` | `http://minion:8000` | Where the PR's Details link points |
 | `QUIZ_BUILD_COMMAND` | `make` | How to build a PR's revision; empty skips the build check |
 | `QUIZ_TEST_TARGET` | `check` | The make target that runs the tests, when the Makefile has it |
+| `QUIZ_PR_COMMENT` | `true` | Post and keep up to date one comment on the pull request with the results and the quiz link |
 | `QUIZ_POLL_SECONDS` | `5` | Seconds between GitHub polls. Each poll that finds nothing new costs one of the 5,000 GitHub API requests per hour your `gh` login allows: 720 an hour at 5 seconds |
 | `QUIZ_MODEL_PROFILE` | empty: the models file's default | Model profile (`local` or `openai`) |
 | `QUIZ_WEB_USER`, `QUIZ_WEB_PASSWORD` | `user`, `pass` | The web sign-in |

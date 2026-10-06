@@ -25,6 +25,7 @@ Description:
 """
 
 import json
+import logging
 import os
 import re
 import secrets
@@ -78,6 +79,8 @@ WEB_USER = setting("QUIZ_WEB_USER")  # Demo sign-in, shown on the sign-in page
 WEB_PASSWORD = setting("QUIZ_WEB_PASSWORD")
 BUILD_COMMAND = setting("QUIZ_BUILD_COMMAND", required=False)  # "" skips the build check
 TEST_TARGET = setting("QUIZ_TEST_TARGET", required=False)
+PR_COMMENT = setting("QUIZ_PR_COMMENT", required=False).lower() in ("true", "1", "yes")
+COMMENT_MARKER = "<!-- pr_gate -->"  # Finds the gate's own comment on a pull request
 
 CONTEXT = "developer-quiz"  # The status check name branch protection requires
 MAX_DIFF_CHARS = 60_000
@@ -291,14 +294,74 @@ def gate_state(row: dict[str, Any], failed_attempt: bool = False) -> tuple[str, 
     return "pending", "Complete the developer quiz"
 
 
+def comment_body(row: dict[str, Any], failed_attempt: bool = False) -> str:
+    """
+    The gate's pull request comment for a revision: build and tests, documentation, and the quiz.
+    Args:
+        row: The quiz row.
+        failed_attempt: The developer just failed the quiz.
+    Returns:
+        str: Markdown, starting with COMMENT_MARKER.
+    """
+    url = f"{BASE_URL}/q/{row['id']}"
+
+    def first_line(report: str) -> str:
+        return (report or "").strip().splitlines()[0].removeprefix("$ ").replace("|", "\\|")[:150] if report else ""
+
+    build = ("✅ " if row["build_ok"] else "❌ ") + (first_line(row["build_report"]) or "not checked")
+    docs = ("✅ " if row["docs_ok"] else "❌ ") + (first_line(row["docs_report"]) if row["docs_ok"]
+                                                 else "documentation problems; see the gate's page")
+    if not row["build_ok"] or not row["docs_ok"]:
+        quiz = f"🔒 Opens once the build, tests and documentation pass ([details]({url}))"
+    elif row["cosmetic"]:
+        quiz = "✅ Not needed: comments, formatting or documentation only"
+    elif row["passed"]:
+        quiz = f"✅ [Passed]({url})"
+    elif failed_attempt:
+        quiz = f"❌ Not passed yet: [try the quiz again]({url})"
+    else:
+        quiz = f"⏳ [Take the quiz]({url}) to unlock the merge"
+    return (f"{COMMENT_MARKER}\n**Pull Request Gate** · revision `{row['sha'][:7]}`\n\n"
+            f"| Check | Result |\n| --- | --- |\n| Build and tests | {build} |\n"
+            f"| Documentation | {docs} |\n| Quiz | {quiz} |\n")
+
+
+def publish_comment(row: dict[str, Any], failed_attempt: bool = False) -> None:
+    """
+    Post the gate's comment on the pull request, or update it: one comment per pull request, kept
+    current with the latest revision. A failure is logged, never raised: the status check is what
+    gates the merge.
+    Args:
+        row: The quiz row.
+        failed_attempt: The developer just failed the quiz.
+    """
+    if not PR_COMMENT:
+        return
+    body = comment_body(row, failed_attempt)
+    try:
+        comments = json.loads(gh("api", f"repos/{REPO}/issues/{row['pr']}/comments?per_page=100"))
+        mine = [c for c in comments if (c.get("body") or "").startswith(COMMENT_MARKER)]
+        if mine and mine[-1]["body"] == body:
+            return
+        if mine:
+            gh("api", f"repos/{REPO}/issues/comments/{mine[-1]['id']}", "--method", "PATCH", "--input", "-",
+               payload={"body": body})
+        else:
+            gh("api", f"repos/{REPO}/issues/{row['pr']}/comments", "--method", "POST", "--input", "-",
+               payload={"body": body})
+    except (RuntimeError, ValueError, KeyError, TypeError) as exc:
+        logging.getLogger("pr_gate").warning("PR #%s: could not post the gate's comment: %s", row["pr"], exc)
+
+
 def publish(row: dict[str, Any], failed_attempt: bool = False) -> None:
     """
-    Post a revision's status (see `gate_state`) and record what was posted.
+    Post a revision's status (see `gate_state`) and comment, and record what was posted.
     Args:
         row: The quiz row.
         failed_attempt: The developer just failed the quiz.
     """
     state, description = gate_state(row, failed_attempt)
+    publish_comment(row, failed_attempt)
     publish_status(row["sha"], state, description, f"{BASE_URL}/q/{row['id']}")
     with connect() as db:
         db.execute("UPDATE quizzes SET published=? WHERE id=?", (state, row["id"]))

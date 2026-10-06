@@ -223,6 +223,32 @@ class QuizTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "documentation"):
             quiz.submit(row["id"], [q.correct for q in quiz.Quiz.model_validate_json(row["content"]).questions])
 
+    def test_pull_request_gets_one_comment_with_the_quiz_link_kept_current(self):
+        comments, calls = [], []
+
+        def fake_gh(*args, payload=None):
+            calls.append((args, payload))
+            if args[1].endswith("/comments?per_page=100"):
+                return json.dumps(comments)
+            if "--method" in args and args[args.index("--method") + 1] == "POST" and args[1].endswith("/comments"):
+                comments.append({"id": 41, "body": payload["body"]})
+            elif "--method" in args and args[args.index("--method") + 1] == "PATCH":
+                comments[0]["body"] = payload["body"]
+            return "{}"
+
+        with patch.object(quiz, "PR_COMMENT", True), patch.object(quiz, "gh", side_effect=fake_gh):
+            row = quiz.get_quiz(self.qid)
+            quiz.publish(row)
+            self.assertEqual(len(comments), 1)
+            self.assertIn(f"[Take the quiz]({quiz.BASE_URL}/q/{self.qid})", comments[0]["body"])
+            self.assertIn("| Build and tests | ✅ make && make check: succeeded |", comments[0]["body"])
+            quiz.publish(row)  # Nothing changed: no new comment, no edit
+            self.assertEqual(sum(1 for args, _ in calls if "PATCH" in args or "POST" in args and "comments" in args[1]), 1)
+            quiz.submit(self.qid, self.answers)
+            self.assertEqual(len(comments), 1)  # Edited in place
+            self.assertIn("✅ [Passed]", comments[0]["body"])
+            self.assertTrue(comments[0]["body"].startswith(quiz.COMMENT_MARKER))
+
     def test_failed_build_or_tests_fail_the_check_and_show_on_the_page(self):
         report = "$ make && make check: FAILED\ncore_dump: invalid option or unexpected option argument"
         row = self.new_revision("c", dict(CODE_CHANGE, build_ok=False, build_report=report))
