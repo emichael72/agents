@@ -79,6 +79,7 @@ WEB_USER = setting("QUIZ_WEB_USER")  # Demo sign-in, shown on the sign-in page
 WEB_PASSWORD = setting("QUIZ_WEB_PASSWORD")
 BUILD_COMMAND = setting("QUIZ_BUILD_COMMAND", required=False)  # "" skips the build check
 TEST_TARGET = setting("QUIZ_TEST_TARGET", required=False)
+FAIL_ON_WARNINGS = setting("QUIZ_FAIL_ON_WARNINGS", required=False).lower() in ("true", "1", "yes")
 PR_COMMENT = setting("QUIZ_PR_COMMENT", required=False).lower() in ("true", "1", "yes")
 COMMENT_MARKER = "<!-- pr_gate -->"  # Finds the gate's own comment on a pull request
 
@@ -282,7 +283,7 @@ def gate_state(row: dict[str, Any], failed_attempt: bool = False) -> tuple[str, 
         tuple[str, str]: The state ("pending", "success" or "failure") and its description.
     """
     if not row["build_ok"]:
-        return "failure", "Build or tests failed; see Details"
+        return "failure", "Build or tests failed, or compiler warnings; see Details"
     if not row["docs_ok"]:
         return "failure", "Documentation problems in the changed files; see Details"
     if row["cosmetic"]:
@@ -554,7 +555,7 @@ def create_quiz(number: int, profile: Optional[str] = None, fixed: Optional[str]
     if not diff.strip() or len(diff) > MAX_DIFF_CHARS:
         raise ValueError(f"Diff must be nonempty and at most {MAX_DIFF_CHARS:,} characters.")
     publish_status(head, "pending", "Checking documentation and preparing the developer quiz", BASE_URL + "/")
-    inspection = changes.inspect_pr(gh, REPO, number, head, base, BUILD_COMMAND, TEST_TARGET)
+    inspection = changes.inspect_pr(gh, REPO, number, head, base, BUILD_COMMAND, TEST_TARGET, FAIL_ON_WARNINGS)
     if fixed:
         quiz, source = Quiz.model_validate_json(Path(fixed).read_text()), "fixed fixture"
         if quiz.cosmetic and inspection["code_files"]:

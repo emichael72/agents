@@ -37,7 +37,8 @@ bash pr_gate/pr_gate.sh serve                      # the web service and GitHub 
    - **Build and tests:** it runs `make` (`QUIZ_BUILD_COMMAND`) on the PR's files, then
      `make check` (`QUIZ_TEST_TARGET`) if the Makefile has a `check` target, inside the
      [`shell`](../shell/README.md) tool's sandbox: the downloaded tree is the only folder it sees,
-     with no network. A failure fails the check, with the end of the output on the quiz page.
+     with no network. A failure, or a compiler warning (`QUIZ_FAIL_ON_WARNINGS`), fails the check;
+     the quiz page shows the warnings, then the end of the output.
    - **Documentation:** it downloads the PR's files and runs `doxy` on the whole tree,
      keeping the problems in the files the PR changed. The whole tree is checked so that a
      function documented in an unchanged header still counts as documented.
@@ -113,6 +114,7 @@ set in the environment (for example in `~/.config/pr-gate.env` for the service) 
 | `QUIZ_BASE_URL` | `http://minion:8000` | Where the PR's Details link points |
 | `QUIZ_BUILD_COMMAND` | `make` | How to build a PR's revision; empty skips the build check |
 | `QUIZ_TEST_TARGET` | `check` | The make target that runs the tests, when the Makefile has it |
+| `QUIZ_FAIL_ON_WARNINGS` | `true` | A compiler warning (`file:line: warning:`) fails the build check, like an error |
 | `QUIZ_PR_COMMENT` | `true` | Post and keep up to date one comment on the pull request with the results and the quiz link |
 | `QUIZ_POLL_SECONDS` | `5` | Seconds between GitHub polls. Each poll that finds nothing new costs one of the 5,000 GitHub API requests per hour your `gh` login allows: 720 an hour at 5 seconds |
 | `QUIZ_MODEL_PROFILE` | empty: the models file's default | Model profile (`local` or `openai`) |

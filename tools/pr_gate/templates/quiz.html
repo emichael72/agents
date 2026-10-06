@@ -20,7 +20,7 @@
   {% else %}
     <section class="card failure">
       <strong>Build or tests failed</strong>
-      <p>This revision does not build or its tests fail, so it cannot merge. Fix it and push; the next revision is checked again.</p>
+      <p>This revision does not build cleanly (errors or compiler warnings) or its tests fail, so it cannot merge. Fix it and push; the next revision is checked again.</p>
       <pre class="report">{{ row.build_report }}</pre>
     </section>
   {% endif %}

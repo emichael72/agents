@@ -40,6 +40,7 @@ TOOLS_DIR = Path(__file__).resolve().parent.parent
 DOXY = TOOLS_DIR / "doxy" / "doxy.sh"
 SHELL = TOOLS_DIR / "shell" / "shell.py"
 REPORT_LINES = 60
+WARNING = re.compile(r"^\S+:\d+(:\d+)?: warning: ", re.M)  # gcc / clang: file:line[:column]: warning: ...
 
 C_EXTENSIONS = {".c", ".h", ".cc", ".cpp", ".hpp", ".cxx", ".hh"}
 DOC_EXTENSIONS = {".md", ".txt", ".rst", ".dox"}
@@ -103,7 +104,8 @@ def is_cosmetic(path: str, before: Optional[str], after: Optional[str]) -> bool:
     return False
 
 
-def check_build(tree: Path, build_command: str = "make", test_target: str = "check") -> tuple[bool, str]:
+def check_build(tree: Path, build_command: str = "make", test_target: str = "check",
+                fail_on_warnings: bool = True) -> tuple[bool, str]:
     """
     Build a tree and run its tests in the shell tool's sandbox, which sees only this tree.
     Args:
@@ -111,6 +113,7 @@ def check_build(tree: Path, build_command: str = "make", test_target: str = "che
         build_command: The build command line (QUIZ_BUILD_COMMAND); "" skips the check.
         test_target: The make target that runs the tests (QUIZ_TEST_TARGET), run when the Makefile
             defines it.
+        fail_on_warnings: Count compiler warnings as a failure (QUIZ_FAIL_ON_WARNINGS).
     Returns:
         tuple[bool, str]: Whether the build (and tests) succeeded, and the report: what ran and the
             end of its output.
@@ -129,12 +132,21 @@ def check_build(tree: Path, build_command: str = "make", test_target: str = "che
         return False, f"{command}: timed out."
     finally:
         shutil.rmtree(allowed.parent, ignore_errors=True)
-    lines = (result.stdout or result.stderr).rstrip().removeprefix("Error: ").splitlines()
+    output = (result.stdout or result.stderr).rstrip().removeprefix("Error: ")
+    warnings = [line for line in output.splitlines() if WARNING.match(line)]
+    lines = output.splitlines()
     if len(lines) > REPORT_LINES:
         lines = [f"... {len(lines) - REPORT_LINES} earlier lines"] + lines[-REPORT_LINES:]
     note = "" if has_tests else f" (no '{test_target}' target in the Makefile, so no tests ran)"
-    summary = f"$ {command}{note}: " + ("succeeded" if result.returncode == 0 else "FAILED")
-    return result.returncode == 0, "\n".join([summary, *lines])
+    ok = result.returncode == 0 and not (fail_on_warnings and warnings)
+    if result.returncode != 0:
+        outcome = "FAILED"
+    elif warnings:
+        outcome = f"built with {len(warnings)} compiler warning(s)" + (", which fail the check" if fail_on_warnings else "")
+    else:
+        outcome = "succeeded"
+    # The warnings first: a long build's output is cut, and they may be in the part left out
+    return ok, "\n".join([f"$ {command}{note}: {outcome}", *warnings, *([""] if warnings else []), *lines])
 
 
 def check_docs(tree: Path, changed: list[str]) -> tuple[bool, str]:
@@ -205,8 +217,8 @@ def _read(root: Path, path: Optional[str]) -> Optional[str]:
     return (root / path).read_text(encoding="utf-8", errors="replace")
 
 
-def inspect_pr(gh, repo: str, number: int, head: str, base_sha: str,
-               build_command: str = "make", test_target: str = "check") -> dict[str, Any]:
+def inspect_pr(gh, repo: str, number: int, head: str, base_sha: str, build_command: str = "make",
+               test_target: str = "check", fail_on_warnings: bool = True) -> dict[str, Any]:
     """
     Inspect a PR revision: its documentation and whether it only changes comments and formatting.
     Args:
@@ -217,6 +229,7 @@ def inspect_pr(gh, repo: str, number: int, head: str, base_sha: str,
         base_sha: The tip of the branch the PR targets; the change is measured from the merge base.
         build_command: The build command line; "" skips the build check.
         test_target: The make target that runs the tests, when the Makefile defines it.
+        fail_on_warnings: Count compiler warnings as a build failure.
     Returns:
         dict: build_ok (bool), build_report (str), docs_ok (bool), docs_report (str), cosmetic
             (bool) and code_files (the changed files whose code changed, for the model's prompt).
@@ -240,6 +253,6 @@ def inspect_pr(gh, repo: str, number: int, head: str, base_sha: str,
         changed_c = [f["filename"] for f in files
                      if f["status"] != "removed" and Path(f["filename"]).suffix.lower() in C_EXTENSIONS]
         docs_ok, docs_report = check_docs(after_root, changed_c)
-        build_ok, build_report = check_build(after_root, build_command, test_target)
+        build_ok, build_report = check_build(after_root, build_command, test_target, fail_on_warnings)
     return {"build_ok": build_ok, "build_report": build_report, "docs_ok": docs_ok, "docs_report": docs_report,
             "cosmetic": not code_files, "code_files": code_files}

@@ -253,7 +253,7 @@ class QuizTests(unittest.TestCase):
         report = "$ make && make check: FAILED\ncore_dump: invalid option or unexpected option argument"
         row = self.new_revision("c", dict(CODE_CHANGE, build_ok=False, build_report=report))
         payload = self.mock_gh.call_args.kwargs["payload"]
-        self.assertEqual((payload["state"], payload["description"]), ("failure", "Build or tests failed; see Details"))
+        self.assertEqual((payload["state"], payload["description"]), ("failure", "Build or tests failed, or compiler warnings; see Details"))
         page = self.client.get("/q/" + row["id"]).text
         self.assertIn("invalid option or unexpected option argument", page)
         self.assertNotIn('name="q0"', page)
@@ -413,6 +413,14 @@ class ChangesTests(unittest.TestCase):
             ok, report = changes.check_build(tree)
             self.assertFalse(ok)
             self.assertIn("test failed", report)
+            # A compiler warning fails the check, unless warnings are allowed
+            (tree / "w.c").write_text("int main(void) { int unused; return 0; }\n")
+            (tree / "Makefile").write_text("all:\n\tcc -Wall -c w.c -o w.o\n")
+            ok, report = changes.check_build(tree)
+            self.assertFalse(ok)
+            self.assertIn("built with 1 compiler warning(s), which fail the check", report)
+            self.assertIn("w.c:1:", report.splitlines()[1])  # The warning is listed first
+            self.assertTrue(changes.check_build(tree, fail_on_warnings=False)[0])
             (tree / "Makefile").write_text("all:\n\tcat /etc/passwd\n")  # The sandbox sees only the tree
             self.assertFalse(changes.check_build(tree)[0])
             (tree / "Makefile").unlink()
