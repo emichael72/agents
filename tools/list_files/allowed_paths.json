@@ -1,7 +1,0 @@
-{
-  "description": "Folders the list_files tool may list. Each key is the name the model uses as the first part of a path (core_dump/src lists src inside core_dump); each value is the folder, absolute, starting with ~, or relative to the tools folder. Sub-folders of these folders can be listed; nothing outside them.",
-  "paths": {
-    "core_dump": "~/projects/core_dump",
-    "tools": "."
-  }
-}

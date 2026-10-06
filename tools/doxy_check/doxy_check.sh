@@ -1,12 +1,14 @@
 #!/bin/bash
 
-# Usage: ./doxy_check.sh <path> [<path> ...]
+# Usage: ./doxy_check.sh <allowed name>/<path> [...]
 # Checks that C/C++ sources and headers are documented with Doxygen, using the settings in
-# Doxyfile.check (next to this script). Each path is a file or a folder (searched recursively);
-# one argument may also hold several paths separated by spaces. Documentation problems are the
-# result, not a failure: the script exits nonzero only when the check itself cannot run.
+# Doxyfile.check (next to this script). Each path is a file or a folder (searched recursively)
+# inside tools/allowed_paths.json's folders; one argument may also hold several paths separated by
+# spaces. Documentation problems are the result, not a failure: the script exits nonzero only when
+# the check itself cannot run.
 
 TOOL_DIR="$(cd "$(dirname "$0")" && pwd)"
+TOOLS_DIR="$(dirname "$TOOL_DIR")"
 CONFIG="$TOOL_DIR/Doxyfile.check"
 MAX_LINES=100
 EXTENSIONS="c|h|cc|cpp|hpp|cxx|hh"
@@ -33,21 +35,23 @@ fi
 
 INPUT=""
 FILE_LIST=()
+ABSOLUTE=()  # Each path as resolved, and as shown in the report
+SHOWN=()
 for path in "${PATHS[@]}"; do
-  path="${path/#\~/$HOME}"  # The shell did not expand ~ in a path the model passed
-  if [ -d "$path" ]; then
-    mapfile -t -O "${#FILE_LIST[@]}" FILE_LIST < <(find "$path" -type f -regextype posix-extended -regex ".*\.($EXTENSIONS)$")
-  elif [ -f "$path" ]; then
-    if ! [[ "$path" =~ \.($EXTENSIONS)$ ]]; then
-      echo "Error: '$path' is not a C/C++ source or header (.c, .h, .cc, .cpp, .hpp, .cxx, .hh)"
-      exit 1
-    fi
-    FILE_LIST+=("$path")
-  else
-    echo "Error: '$path' not found"
+  # Check the path against tools/allowed_paths.json (prints "<absolute path><TAB><path as shown>")
+  resolved="$(python3 "$TOOLS_DIR/allowed_paths.py" "$path")" || { echo "$resolved"; exit 1; }
+  IFS=$'\t' read -r target shown <<< "$resolved"
+  if [ -d "$target" ]; then
+    mapfile -t -O "${#FILE_LIST[@]}" FILE_LIST < <(find "$target" -type f -regextype posix-extended -regex ".*\.($EXTENSIONS)$")
+  elif ! [[ "$target" =~ \.($EXTENSIONS)$ ]]; then
+    echo "Error: '$path' is not a C/C++ source or header (.c, .h, .cc, .cpp, .hpp, .cxx, .hh)"
     exit 1
+  else
+    FILE_LIST+=("$target")
   fi
-  INPUT+=" \"$(realpath "$path")\""
+  ABSOLUTE+=("$target")
+  SHOWN+=("$shown")
+  INPUT+=" \"$target\""
 done
 FILES=${#FILE_LIST[@]}
 if [ "$FILES" -eq 0 ]; then
@@ -78,8 +82,11 @@ for file in "${FILE_LIST[@]}"; do
   fi
 done
 
-# Show paths relative to the working folder when they are inside it
-PROBLEMS="$(sed -e "s|^$PWD/||" -e 's|: warning: |: |' "$WORK/warnings.log" 2>/dev/null)"
+# Show paths as the model gave them (<allowed name>/...)
+PROBLEMS="$(sed -e 's|: warning: |: |' "$WORK/warnings.log" 2>/dev/null)"
+for i in "${!ABSOLUTE[@]}"; do
+  PROBLEMS="${PROBLEMS//${ABSOLUTE[$i]}/${SHOWN[$i]}}"
+done
 COUNT=$(grep -cE '^[^ ].*:[0-9]+: ' <<< "$PROBLEMS")
 VERSION="$(doxygen --version)"
 

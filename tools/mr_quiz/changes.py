@@ -23,7 +23,9 @@ Description:
 
 import io
 import json
+import os
 import re
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -107,11 +109,16 @@ def check_docs(tree: Path, changed: list[str]) -> tuple[bool, str]:
     """
     if not changed:
         return True, "No C/C++ files changed."
+    # doxy_check only reads folders that allowed-paths file names: allow just this tree, as "pr"
+    allowed = Path(tempfile.mkdtemp()) / "allowed_paths.json"
+    allowed.write_text(json.dumps({"paths": {"pr": str(Path(tree).resolve())}}))
     try:
-        result = subprocess.run(["bash", str(DOXY_CHECK), "."], cwd=tree, capture_output=True,
-                                text=True, timeout=120)
+        result = subprocess.run(["bash", str(DOXY_CHECK), "pr"], cwd=tree, capture_output=True, text=True,
+                                timeout=120, env={**os.environ, "TOOLS_ALLOWED_PATHS": str(allowed)})
     except subprocess.TimeoutExpired:
         return False, "The documentation check timed out."
+    finally:
+        shutil.rmtree(allowed.parent, ignore_errors=True)
     if result.returncode:
         return False, "The documentation check could not run: " + (result.stdout or result.stderr).strip()
 
@@ -123,7 +130,8 @@ def check_docs(tree: Path, changed: list[str]) -> tuple[bool, str]:
         elif re.match(r"^[^ ].*:\d+: ", line):
             problems.append([line])
     wanted = set(changed)
-    kept = ["\n".join(p) for p in problems if p[0].split(":", 1)[0].removeprefix("./") in wanted]
+    problems = [[p[0].removeprefix("pr/"), *p[1:]] for p in problems]  # Paths as in the repository
+    kept = ["\n".join(p) for p in problems if p[0].split(":", 1)[0] in wanted]
     if not kept:
         return True, f"All {len(changed)} changed C/C++ file(s) are documented."
     return False, "\n".join(kept)

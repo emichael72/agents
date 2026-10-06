@@ -204,7 +204,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         await self.agent.ask('Count missing-file')
         result = json.loads(self.requests[-1]['input'][-1]['output'])
         self.assertTrue(result['isError'])
-        self.assertIn('file not found', result['content'][0]['text'])
+        self.assertIn('not an allowed folder', result['content'][0]['text'])
 
     async def test_call_limit_stops_repeated_execution(self):
         self.outputs = [[call(self.aliases['greet_user'], {'name': 'Alice'}, f'call-{n}')] for n in range(3)]

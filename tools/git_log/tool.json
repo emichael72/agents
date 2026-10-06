@@ -4,7 +4,7 @@
   "args": ["git_log/git_log.sh"],
   "params": [
     {"name": "count", "type": "integer", "description": "How many commits to show, 1 to 50 (default 10)", "style": "flag", "required": false},
-    {"name": "path", "type": "string", "description": "A folder inside the repository, relative to the tools folder; omit it for the repository the tools are in", "style": "flag", "required": false}
+    {"name": "path", "type": "string", "description": "A folder in the repository, starting with an allowed folder name, e.g. core_dump; omit it for tools (the agents repository)", "style": "flag", "required": false}
   ],
   "resource": "git_log/README.md"
 }

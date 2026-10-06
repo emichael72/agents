@@ -1,28 +1,31 @@
 #!/bin/bash
 
-# Usage: ./search_text.sh <pattern> [path]
-# Finds lines matching a regular expression in a file or folder (recursively), at most 50 matches
+# Usage: ./search_text.sh <pattern> [<allowed name>/<path>]
+# Finds lines matching a regular expression in a file or folder (recursively; default: tools), at
+# most 50 matches. The path must be inside tools/allowed_paths.json's folders.
 
 PATTERN="$1"
-TARGET="${2:-.}"
+TARGET="${2:-tools}"
 MAX_MATCHES=50
 
 if [ -z "$PATTERN" ]; then
   echo "Error: a search pattern is required"
   exit 1
 fi
-if [ ! -e "$TARGET" ]; then
-  echo "Error: '$TARGET' does not exist"
-  exit 1
-fi
+# Check the path against tools/allowed_paths.json (prints "<absolute path><TAB><path as shown>")
+TOOLS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+RESOLVED="$(python3 "$TOOLS_DIR/allowed_paths.py" "$TARGET")" || { echo "$RESOLVED"; exit 1; }
+IFS=$'\t' read -r TARGET SHOWN <<< "$RESOLVED"
 
-# -I skips binary files; -n adds line numbers; -E uses extended regular expressions
-MATCHES=$(grep -rInE --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.venv \
+# -I skips binary files; -n adds line numbers; -H always names the file; -E uses extended regular
+# expressions. Paths are then shown as the model gave them (<allowed name>/...).
+MATCHES=$(grep -rInHE --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.venv \
   --exclude-dir=__pycache__ -e "$PATTERN" -- "$TARGET" 2>&1)
 STATUS=$?
+MATCHES="${MATCHES//$TARGET/$SHOWN}"
 
 if [ $STATUS -eq 1 ]; then
-  echo "No matches for '$PATTERN' in $TARGET"
+  echo "No matches for '$PATTERN' in $SHOWN"
   exit 0
 elif [ $STATUS -ne 0 ]; then
   echo "Error: $MATCHES"

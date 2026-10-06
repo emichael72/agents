@@ -13,8 +13,8 @@ added here is available to all of them without code changes:
 | --- | --- | --- | --- |
 | `greet_user` | Bash | `name` (optional) | A greeting for `name`, or for the shell user (`$USER`) |
 | `get_rand` | Bash | `max` (optional, default 100) | A random number from 1 to `max` |
+| `view_file` | Python | `path`, `start` and `count` (optional) | A text file's lines, numbered, up to 200 per call; only inside the allowed folders |
 | `count_lines` | Bash / `wc` | `file` | The file's line count |
-| `echo_message` | Python | `message`, `repeat` (optional) | The message in uppercase, repeated |
 | `get_system_info` | Bash / `uname` | none | Hostname, OS, kernel release and CPU architecture |
 | `current_time` | Bash / `date` | `timezone` (optional, IANA name) | The current date and time |
 | `calculate` | Python | `expression` | The value of an arithmetic expression (parsed safely, no `eval`) |
@@ -52,9 +52,26 @@ added here is available to all of them without code changes:
 | `env` | Optional environment variables for the command. |
 | `resource` | Optional documentation file, served by MCPAgent as an MCP resource. |
 
-**Paths:** every path in a manifest is relative to this `tools/` folder, and this folder is also
-the working directory when a tool runs. So `count_lines` takes paths such as
-`greet_user/README.md`.
+**Paths:** every path in a manifest (`args`, `resource`) is relative to this `tools/` folder, and
+this folder is also the working directory when a tool runs.
+
+**Allowed paths:** a path the *model* passes must lie inside one of the folders named in
+[`allowed_paths.json`](allowed_paths.json), and starts with that folder's name:
+
+```json
+"paths": {
+  "core_dump": "~/projects/core_dump",
+  "tools": "."
+}
+```
+
+So `count_lines` takes `core_dump/README.md` or `tools/greet_user/README.md`, and nothing outside
+those folders (`..` and symbolic links are resolved before the check). Every tool that takes a
+path (`list_files`, `view_file`, `count_lines`, `search_text`, `disk_usage`, `git_log`,
+`doxy_check`) checks it with [`allowed_paths.py`](allowed_paths.py): Python tools import it, and
+Bash tools run `python3 allowed_paths.py <path> [--dir|--file]`, which prints the absolute path and
+the path as shown, or an error. To allow another folder, add a name to the JSON; it is read on
+every call.
 
 Each agent validates the model's arguments against the schema built from `params` before running
 the command (`jsonschema` in mcpagent and pydantic, zod in vercel). The agent also sets `AGENT_NAME`

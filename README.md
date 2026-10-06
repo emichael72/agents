@@ -37,7 +37,7 @@ committed.
 `tools/` holds one folder per tool: a `tool.json` manifest, the script and its `README.md`.
 Every agent scans this folder at startup, so a tool added there is available to all three
 without code changes. [tools/README.md](tools/README.md) describes the manifest and how to add
-a tool. Current tools: `greet_user`, `get_rand`, `count_lines`, `echo_message`, `get_system_info`,
+a tool. Current tools: `greet_user`, `get_rand`, `count_lines`, `view_file`, `get_system_info`,
 `current_time`, `calculate`, `list_files`, `search_text`, `disk_usage`, `git_log`, `doxy_check`
 (checks Doxygen documentation of C/C++ sources) and `mr_quiz`
 (Merge Request Quiz: a merge gate that quizzes a developer on their pull request; see

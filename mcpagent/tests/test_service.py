@@ -16,6 +16,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import json5
 from aiohttp.test_utils import TestClient, TestServer
@@ -66,15 +67,15 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             ('greet_user', {'name': 'Alice Smith'}, 'Hello, Alice Smith!'),
             ('greet_user', {}, f"Hello, {os.environ['USER']}!"),  # no name: the shell user
             ('get_rand', {'max': 1}, '1-1): 1'),
-            ('echo_message', {'message': 'hello world', 'repeat': 2}, 'HELLO WORLD'),
-            ('count_lines', {'file': 'greet_user/README.md'}, 'lines.'),
+            ('count_lines', {'file': 'tools/greet_user/README.md'}, 'lines.'),
+            ('view_file', {'path': 'tools/greet_user/tool.json', 'count': 2}, 'lines 1-2 of'),
             ('get_system_info', {}, 'machine='),
             ('current_time', {'timezone': 'UTC'}, 'UTC (UTC+00:00)'),
             ('calculate', {'expression': '(17 * 23) + sqrt(144)'}, '= 403'),
             ('list_files', {'path': 'tools/greet_user'}, 'tool.json'),
             ('list_files', {}, 'Allowed folders'),
-            ('search_text', {'pattern': 'AGENT_NAME', 'path': 'greet_user'}, 'greet_user.sh:'),
-            ('disk_usage', {'path': 'greet_user'}, 'greet_user: '),
+            ('search_text', {'pattern': 'AGENT_NAME', 'path': 'tools/greet_user'}, 'tools/greet_user/greet_user.sh:'),
+            ('disk_usage', {'path': 'tools/greet_user'}, 'tools/greet_user: '),
             ('git_log', {'count': 1}, ' 20'),  # "<hash> <date> <subject>"
         ]:
             result = (await self.rpc('tools/call', {'name': name, 'arguments': args}))['result']
@@ -90,23 +91,32 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as folder:
             for name, text in [('good.c', good), ('bad.c', bad), ('bare.h', bare)]:
                 (Path(folder) / name).write_text(text)
+            # Allow only the test folder, as "sample" (the tools read TOOLS_ALLOWED_PATHS instead)
+            allowed = Path(folder) / 'allowed_paths.json'
+            allowed.write_text(json.dumps({'paths': {'sample': folder}}))
 
             async def check(paths):
-                return (await self.rpc('tools/call', {'name': 'doxy_check', 'arguments': {'paths': paths}}))['result']
+                with patch.dict(os.environ, {'TOOLS_ALLOWED_PATHS': str(allowed)}):
+                    return (await self.rpc('tools/call', {'name': 'doxy_check', 'arguments': {'paths': paths}}))['result']
 
-            result = await check(f'{folder}/good.c')
+            result = await check('sample/good.c')
             self.assertFalse(result['isError'], result)
             self.assertIn('All documented: 1 file(s)', result['content'][0]['text'])
-            text = (await check(f'{folder}/bad.c {folder}/bare.h'))['content'][0]['text']
+            text = (await check('sample/bad.c sample/bare.h'))['content'][0]['text']
             self.assertIn('Documentation problems: 2 in 2 file(s)', text)
-            self.assertIn('bad.c:4: error: Member subtract', text)
-            self.assertIn('bare.h:1: error: File has no @file', text)
-            self.assertTrue((await check(f'{folder}/missing.c'))['isError'])
+            self.assertIn('sample/bad.c:4: error: Member subtract', text)
+            self.assertIn('sample/bare.h:1: error: File has no @file', text)
+            self.assertTrue((await check('sample/missing.c'))['isError'])
+            self.assertTrue((await check(f'{folder}/good.c'))['isError'])  # Absolute paths are not allowed
 
-    async def test_list_files_stays_inside_the_allowed_folders(self):
+    async def test_path_tools_stay_inside_the_allowed_folders(self):
         for path in ('tools/..', 'tools/greet_user/../..', 'etc', '/etc'):
-            result = (await self.rpc('tools/call', {'name': 'list_files', 'arguments': {'path': path}}))['result']
-            self.assertTrue(result['isError'], path)
+            for name, args in [('list_files', {'path': path}), ('view_file', {'path': path + '/passwd'}),
+                               ('count_lines', {'file': path + '/passwd'}), ('disk_usage', {'path': path}),
+                               ('search_text', {'pattern': 'root', 'path': path}), ('git_log', {'path': path}),
+                               ('doxy_check', {'paths': path})]:
+                result = (await self.rpc('tools/call', {'name': name, 'arguments': args}))['result']
+                self.assertTrue(result['isError'], (name, path))
         link = Path(__file__).resolve().parents[2] / 'tools' / 'greet_user' / 'escape-test-link'
         link.symlink_to('/etc')
         try:

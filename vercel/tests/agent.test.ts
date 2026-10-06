@@ -48,26 +48,26 @@ const quiet = { trace: false, write: () => {} };
 
 test('local tools run for real and failures reach the model', async () => {
   const agent = buildAgent(scriptedModel([
-    ['greet_user', { name: 'Alice' }], ['count_lines', { file: 'missing-file' }], ['echo_message', { message: 'hi', repeat: 2 }],
+    ['greet_user', { name: 'Alice' }], ['count_lines', { file: 'missing-file' }], ['calculate', { expression: '6 * 7' }],
   ]), localTools);
   const history = await ask(agent, 'Do everything', [], quiet);
   const answer = JSON.stringify(history.at(-1));
   assert.match(answer, /Hello, Alice!/);
-  assert.match(answer, /file not found/);
-  assert.match(answer, /HI\\\\nHI/);
+  assert.match(answer, /not an allowed folder/);
+  assert.match(answer, /= 42/);
 });
 
 test('each tool call prints next to its result', async () => {
   let printed = '';
   const agent = buildAgent(scriptedModel([
-    ['greet_user', { name: 'Alice' }], ['count_lines', { file: 'missing-file' }], ['echo_message', { message: 'hi' }],
+    ['greet_user', { name: 'Alice' }], ['count_lines', { file: 'missing-file' }], ['calculate', { expression: '6 * 7' }],
   ]), localTools);
   await ask(agent, 'Do everything', [], { trace: true, write: (text) => { printed += text; } });
   const lines = printed.replace(/\x1b\[[0-9;]*m/g, '').split('\n')
     .filter((line) => /^[→←✗] /.test(line))
     .map((line) => line.slice(0, 2) + line.slice(2).split(/[(:]/)[0]);
   assert.deepEqual(lines, ['→ greet_user', '← greet_user', '→ count_lines', '✗ count_lines',
-                           '→ echo_message', '← echo_message']);
+                           '→ calculate', '← calculate']);
 });
 
 test('greet_user without a name greets the shell user', async () => {

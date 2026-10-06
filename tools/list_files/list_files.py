@@ -5,62 +5,23 @@ Module: list_files.py
 Description:
     Lists a folder for the agents: folders first, then files, with sizes and modification dates.
 
-    Only the folders named in allowed_paths.json (next to this script), and folders inside them,
-    can be listed. A path starts with one of those names: `core_dump/src` lists `src` in the
-    folder named core_dump. Without a path, the tool lists the allowed names.
-
-    Key design points:
-      - Paths are resolved (symbolic links and `..` included) before the check, so nothing outside
-        an allowed folder can be reached.
-      - Output stops after MAX_ENTRIES entries.
+    Only the folders named in tools/allowed_paths.json, and folders inside them, can be listed
+    (see tools/allowed_paths.py). A path starts with one of those names: `core_dump/src` lists
+    `src` in the folder named core_dump. Without a path, the tool lists the allowed names.
+    Output stops after MAX_ENTRIES entries.
 """
 
 import argparse
-import json
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-ALLOWED_FILE = Path(__file__).resolve().parent / "allowed_paths.json"
-TOOLS_DIR = Path(__file__).resolve().parent.parent  # Relative allowed paths start here
 MAX_ENTRIES = 200
 
-
-def load_allowed(path: Path = ALLOWED_FILE) -> dict[str, Path]:
-    """
-    Read the allowed folders.
-    Args:
-        path: The JSON file (default: list_files/allowed_paths.json).
-    Returns:
-        dict[str, Path]: Each name and its resolved folder.
-    """
-    paths = json.loads(path.read_text(encoding="utf-8"))["paths"]
-    return {name: (TOOLS_DIR / Path(folder).expanduser()).resolve() for name, folder in paths.items()}
-
-
-def resolve(path: str, allowed: dict[str, Path]) -> tuple[Path, str]:
-    """
-    Turn a "<name>/<sub/path>" into a folder inside the allowed folder of that name.
-    Args:
-        path: The path the model gave.
-        allowed: The allowed folders, by name.
-    Returns:
-        tuple[Path, str]: The folder, and the path as it should be shown.
-    Raises:
-        ValueError: If the name is not allowed, the path leaves its folder, or it is not a folder.
-    """
-    name, _, rest = path.strip().strip("/").partition("/")
-    if name not in allowed:
-        raise ValueError(f"'{name}' is not an allowed folder. Allowed: {', '.join(sorted(allowed))}.")
-    base = allowed[name]
-    target = (base / rest).resolve()
-    if target != base and base not in target.parents:
-        raise ValueError(f"'{path}' is outside the allowed folder '{name}'.")
-    if not target.is_dir():
-        raise ValueError(f"'{path}' is not a folder.")
-    shown = name + ("/" + str(target.relative_to(base)) if target != base else "")
-    return target, shown
+# The shared allowed-paths rule lives in the tools folder
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import allowed_paths  # noqa: E402
 
 
 def human_size(size: int) -> str:
@@ -115,12 +76,9 @@ def main(argv: Optional[list[str]] = None) -> str:
     parser = argparse.ArgumentParser(description="List a folder inside the allowed folders.")
     parser.add_argument("path", nargs="?", help="<allowed name>/<sub/path>, e.g. core_dump/src")
     args = parser.parse_args(argv)
-    allowed = load_allowed()
     if not args.path:
-        width = max(map(len, allowed))
-        return "Allowed folders (list one with <name> or <name>/<sub/path>):\n" + "\n".join(
-            f"{name:<{width}}  {folder}" for name, folder in sorted(allowed.items()))
-    return listing(*resolve(args.path, allowed))
+        return allowed_paths.describe()
+    return listing(*allowed_paths.resolve(args.path, "dir"))
 
 
 if __name__ == "__main__":

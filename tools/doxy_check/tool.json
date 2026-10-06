@@ -3,7 +3,7 @@
   "command": "bash",
   "args": ["doxy_check/doxy_check.sh"],
   "params": [
-    {"name": "paths", "type": "string", "description": "One or more C/C++ files (.c, .h, .cc, .cpp, .hpp) or folders to check, separated by spaces; relative to the tools folder, or absolute (~ allowed)", "style": "positional"}
+    {"name": "paths", "type": "string", "description": "One or more C/C++ files (.c, .h, .cc, .cpp, .hpp) or folders to check, separated by spaces, each starting with an allowed folder name, e.g. core_dump/src", "style": "positional"}
   ],
   "resource": "doxy_check/README.md"
 }

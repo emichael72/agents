@@ -3,7 +3,7 @@
   "command": "bash",
   "args": ["disk_usage/disk_usage.sh"],
   "params": [
-    {"name": "path", "type": "string", "description": "File or folder to measure, relative to the tools folder (e.g. ../mcpagent); omit it for the tools folder", "style": "positional", "required": false}
+    {"name": "path", "type": "string", "description": "File or folder to measure, starting with an allowed folder name, e.g. core_dump; omit it for tools", "style": "positional", "required": false}
   ],
   "resource": "disk_usage/README.md"
 }

@@ -1,15 +1,16 @@
 #!/bin/bash
 
-# Usage: ./disk_usage.sh [path]
-# Prints the total size of a file or folder (default: the tools folder)
+# Usage: ./disk_usage.sh [<allowed name>/<path>]
+# Prints the total size of a file or folder (default: tools). The path must be inside
+# tools/allowed_paths.json's folders.
 
-TARGET="${1:-.}"
+TARGET="${1:-tools}"
 
-if [ ! -e "$TARGET" ]; then
-  echo "Error: '$TARGET' does not exist"
-  exit 1
-fi
+# Check the path against tools/allowed_paths.json (prints "<absolute path><TAB><path as shown>")
+TOOLS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+RESOLVED="$(python3 "$TOOLS_DIR/allowed_paths.py" "$TARGET")" || { echo "$RESOLVED"; exit 1; }
+IFS=$'\t' read -r TARGET SHOWN <<< "$RESOLVED"
 
 SIZE=$(du -sh -- "$TARGET" 2>/dev/null | cut -f1)
 FILES=$(find "$TARGET" -type f 2>/dev/null | wc -l)
-echo "$TARGET: $SIZE in $FILES files"
+echo "$SHOWN: $SIZE in $FILES files"

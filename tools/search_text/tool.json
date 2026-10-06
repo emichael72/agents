@@ -4,7 +4,7 @@
   "args": ["search_text/search_text.sh"],
   "params": [
     {"name": "pattern", "type": "string", "description": "Extended regular expression to search for, e.g. AGENT_NAME or def [a-z_]+", "style": "positional"},
-    {"name": "path", "type": "string", "description": "File or folder to search, relative to the tools folder; omit it to search the tools folder", "style": "positional", "required": false}
+    {"name": "path", "type": "string", "description": "File or folder to search, starting with an allowed folder name, e.g. core_dump/src; omit it to search tools", "style": "positional", "required": false}
   ],
   "resource": "search_text/README.md"
 }
