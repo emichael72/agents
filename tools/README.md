@@ -25,7 +25,7 @@ added here is available to all of them without code changes:
 | `make` | Python / `make` | `path`, `target` (optional) | Whether the build succeeded, and its output |
 | `gcc` | Python / `gcc` | `sources`, `output`, `flags` (optional) | Warnings and errors (a check), or a built program |
 | `doxy` | Bash / `doxygen` | `paths` (files or folders, space-separated) | Doxygen documentation problems as `file:line: message`, or "All documented" |
-| `mr_quiz` | Python (shared `.venv`) | `pr` (optional) | Open PRs in the quiz-gated repository and their quiz state; see [mr_quiz/README.md](mr_quiz/README.md) |
+| `mr_gate` | Python (shared `.venv`) | `pr` (optional) | Open PRs in the quiz-gated repository and their quiz state; see [mr_gate/README.md](mr_gate/README.md) |
 
 Every path a tool takes (`ls`, `cat`, `wc`, `search_text`, `df`, `git`, `make`,
 `gcc`, `doxy`) must be inside the folders named in [`allowed_paths.json`](allowed_paths.json);

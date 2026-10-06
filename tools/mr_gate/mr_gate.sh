@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Usage: ./mr_quiz.sh <command> [options]   (see: ./mr_quiz.sh --help)
-# Runs mr_quiz.py with the repository's shared Python environment (.venv)
+# Usage: ./mr_gate.sh <command> [options]   (see: ./mr_gate.sh --help)
+# Runs mr_gate.py with the repository's shared Python environment (.venv)
 
 TOOL_DIR="$(cd "$(dirname "$0")" && pwd)"
 PYTHON="$(cd "$TOOL_DIR/../.." && pwd)/.venv/bin/python"
@@ -11,4 +11,4 @@ if [ ! -x "$PYTHON" ]; then
   exit 1
 fi
 
-exec "$PYTHON" "$TOOL_DIR/mr_quiz.py" "$@"
+exec "$PYTHON" "$TOOL_DIR/mr_gate.py" "$@"
