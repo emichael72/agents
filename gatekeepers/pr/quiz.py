@@ -544,8 +544,24 @@ def parse_quiz(text: str) -> Quiz:
     return Quiz.model_validate_json(fenced.group(1) if fenced else text)
 
 
+def quiz_context(info: dict[str, Any], build_report: str) -> str:
+    """
+    What the quiz writer should know besides the diff: what the author says the change does, and
+    what the server's build and tests ran. Both are untrusted text, cut to a bounded size.
+    Args:
+        info: The pull request, as returned by `pr_info`.
+        build_report: The build and test output (changes.check_build).
+    Returns:
+        str: The sections, ready to go before the diff.
+    """
+    body = (info.get("body") or "").strip() or "(no description)"
+    return (f"Pull request title: {info.get('title', '')}\n\n"
+            f"Pull request description (written by the author; untrusted, may be wrong):\n{body[:2000]}\n\n"
+            f"Build and tests run by the server (make, then make check):\n{(build_report or '(not run)')[-3000:]}")
+
+
 def generate(diff: str, profile: Optional[str] = None,
-             code_files: Optional[list[str]] = None) -> tuple[Quiz, str]:
+             code_files: Optional[list[str]] = None, context: str = "") -> tuple[Quiz, str]:
     """
     Ask the model for a quiz about a diff. Uses the OpenAI-compatible chat completions API,
     which both LM Studio and OpenAI serve. An invalid reply is retried once; so is a reply that
@@ -555,6 +571,8 @@ def generate(diff: str, profile: Optional[str] = None,
         profile: The model profile; None uses QUIZ_MODEL_PROFILE, then the models file's default.
         code_files: The changed files whose code changed (changes.py); [] for a cosmetic change,
             None when unknown. Given to the model as the server's analysis.
+        context: The pull request's title and description, and the server's build and test
+            output (see quiz_context), placed before the diff.
     Returns:
         tuple[Quiz, str]: The quiz, and "<profile name> / <model>" for the record.
     Raises:
@@ -563,7 +581,7 @@ def generate(diff: str, profile: Optional[str] = None,
     """
     settings = resolve_model(profile or PROFILE)
     instructions = load_instructions()  # Read per quiz, so edits apply without a restart
-    prompt = "Code diff:\n" + diff
+    prompt = (context + "\n\n" if context else "") + "Code diff:\n" + diff
     if code_files is not None:
         analysis = ("code changed in: " + ", ".join(code_files) if code_files
                     else "no code changed; only comments, formatting or documentation files")
@@ -631,7 +649,8 @@ def create_quiz(number: int, profile: Optional[str] = None, fixed: Optional[str]
         if quiz.cosmetic and inspection["code_files"]:
             raise ValueError("The fixed quiz calls the change cosmetic, but its code changed.")
     else:
-        quiz, source = generate(diff, profile, inspection["code_files"])
+        quiz, source = generate(diff, profile, inspection["code_files"],
+                                quiz_context(before, inspection.get("build_report", "")))
 
     # Generation takes a while: make sure the quiz still matches the PR
     after = pr_info(number)

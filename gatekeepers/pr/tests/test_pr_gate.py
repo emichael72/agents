@@ -388,6 +388,18 @@ class ModelTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 quiz.generate("a small diff", "local")
 
+    def test_the_pull_request_and_test_output_reach_the_quiz_writer(self):
+        settings = {"name": "Local", "base_url": "http://x/v1", "model": "m", "api_key": "k", "timeout": 5}
+        context = quiz.quiz_context({"title": "Add -w", "body": "Works with -dpw."}, "$ make && make check: succeeded\n./core_dump -d")
+        with patch.object(quiz, "resolve_model", return_value=settings), patch.object(quiz.httpx, "post") as post:
+            post.return_value.json.return_value = reply(json.dumps(FIXTURE))
+            quiz.generate("a diff", "local", ["src/main.c"], context)
+        prompt = post.call_args.kwargs["json"]["messages"][1]["content"]
+        for part in ("Pull request title: Add -w", "untrusted, may be wrong):\nWorks with -dpw.",
+                     "./core_dump -d", "Code diff:\na diff"):
+            self.assertIn(part, prompt)
+        self.assertLess(prompt.index("Pull request title"), prompt.index("Code diff"))
+
     def test_a_code_change_called_cosmetic_is_rejected(self):
         settings = {"name": "Local", "base_url": "http://x/v1", "model": "m", "api_key": "k", "timeout": 5}
         cosmetic = json.dumps({"title": "Comment updates", "cosmetic": True, "questions": []})
