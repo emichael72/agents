@@ -94,6 +94,7 @@ change on its next start. None of this is hard-coded in the agents.
 | `api_key_env` | Environment variable holding the key; a profile never reads another profile's key |
 | `api_key` | Fallback when `api_key_env` is unset, for servers that need no real key; never put a secret here |
 | `timeout` | Request timeout in seconds; 300 leaves time for LM Studio to load a model |
+| `model_auto` | Ask the server which model is loaded (LM Studio's `/api/v0/models`) and use it; `model` is the fallback when none is loaded. `--model` and `model_env` still win |
 | `name` | Display name in the chat banner and error messages |
 
 All three agents take the same options: `--profile NAME` (or the shortcuts `--local` and

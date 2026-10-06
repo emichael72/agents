@@ -282,8 +282,12 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key-not-real'}):
             for name in ('LOCAL_LLM_BASE_URL', 'LOCAL_LLM_MODEL', 'LOCAL_LLM_API_KEY'):
                 os.environ.pop(name, None)
-            local = resolve_model(config)  # "default": "local"
+            with patch('mcpagent.client.agent.loaded_model', return_value=None):  # No loaded model reported
+                local = resolve_model(config)  # "default": "local"
             self.assertEqual((local['base_url'], local['model']), ('http://boba:1234/v1', 'qwen/qwen3-coder-30b'))
+            with patch('mcpagent.client.agent.loaded_model', return_value='qwen/loaded-now'):
+                self.assertEqual(resolve_model(config)['model'], 'qwen/loaded-now')  # model_auto
+                self.assertEqual(resolve_model(config, model='explicit')['model'], 'explicit')
             self.assertEqual(local['api_key'], 'lm-studio')  # the OpenAI key is never used for another server
             os.environ['LOCAL_LLM_MODEL'] = 'from-env'
             self.assertEqual(resolve_model(config, 'local')['model'], 'from-env')

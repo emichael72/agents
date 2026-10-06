@@ -29,11 +29,14 @@ const MAX_STEPS = ((JSON.parse(readFileSync(AGENT_FILE, 'utf8')) as { max_tool_c
 const gray = (text: string) => styleText('gray', text); // Everything except the model's answer
 
 type Profile = {
-  name?: string; base_url: string; base_url_env?: string; model: string; model_env?: string;
+  name?: string; base_url: string; base_url_env?: string; model: string; model_env?: string; model_auto?: boolean;
   api_key_env?: string; api_key?: string; timeout?: number;
 };
 type Models = { default?: string; profiles?: Record<string, Profile> };
-export type ModelSettings = { profile: string; name: string; baseURL: string; model: string; apiKey: string; timeout: number };
+export type ModelSettings = {
+  profile: string; name: string; baseURL: string; model: string; apiKey: string; timeout: number;
+  auto: boolean; // Ask the server which model is loaded (see loadedModel)
+};
 
 /** Read the shared model profiles file: "default" (a profile name) and "profiles" (by name). */
 export function loadModels(file = MODELS_FILE): Models {
@@ -43,7 +46,8 @@ export function loadModels(file = MODELS_FILE): Models {
 /**
  * Pick a model profile and apply overrides, the same way as the other two agents.
  * Precedence: explicit overrides (command line), then the environment variables the profile names
- * (model_env, base_url_env), then the profile's own values. The API key is read only from the
+ * (model_env, base_url_env), then the profile's own values; with model_auto, main() then asks the
+ * server for its loaded model (loadedModel). The API key is read only from the
  * profile's api_key_env (or its api_key fallback), so a key is never sent to another server.
  * @param models The model profiles, as returned by `loadModels`.
  * @param profile Profile name; undefined uses the profile named by "default".
@@ -71,7 +75,28 @@ export function resolveModel(models: Models, profile?: string,
     model: overrides.model || env(settings.model_env) || settings.model,
     apiKey,
     timeout: settings.timeout ?? 60,
+    auto: Boolean(settings.model_auto) && !overrides.model && !env(settings.model_env),
   };
+}
+
+/**
+ * Ask an LM Studio server which model is loaded (its /api/v0/models lists each model's state).
+ * @param baseURL The server's OpenAI-compatible base URL, e.g. http://boba:1234/v1.
+ * @param apiKey Sent as a bearer token, for servers that check it.
+ * @returns The first loaded language model's id, or undefined when none is loaded or the server
+ *   cannot tell (not LM Studio, unreachable).
+ */
+export async function loadedModel(baseURL: string, apiKey = ''): Promise<string | undefined> {
+  const root = baseURL.replace(/\/+$/, '').replace(/\/v1$/, '');
+  try {
+    const response = await fetch(`${root}/api/v0/models`, {
+      headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(3000),
+    });
+    const { data = [] } = await response.json() as { data?: { id: string; state?: string; type?: string }[] };
+    return data.find((m) => m.state === 'loaded' && (m.type === 'llm' || m.type === 'vlm'))?.id;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Create a model on an OpenAI-compatible server (LM Studio, OpenAI, ...) from resolved settings. */
@@ -464,6 +489,7 @@ async function main(): Promise<number> {
     }
     const profile = values.profile ?? (values.local ? 'local' : values.openai ? 'openai' : undefined);
     const settings = resolveModel(loadModels(), profile, { model: values.model, baseURL: values['base-url'] });
+    if (settings.auto) settings.model = (await loadedModel(settings.baseURL, settings.apiKey)) ?? settings.model;
     const tools = mcpClient ? await mcpClient.tools() : localTools;
     const agent = buildAgent(buildModel(settings), tools, values.parallel, settings.timeout);
     const toolCount = mcpUrl ? `${Object.keys(tools).length} tools from MCP server ${mcpUrl}` : `${Object.keys(tools).length} tools`;

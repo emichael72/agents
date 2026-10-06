@@ -22,6 +22,7 @@ import json
 import os
 import re
 import time
+import urllib.request
 from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import urlparse
@@ -73,12 +74,33 @@ def load_models(config_data: dict, config_file) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def loaded_model(base_url: str, api_key: str = "") -> Optional[str]:
+    """
+    Ask an LM Studio server which model is loaded (its /api/v0/models lists each model's state).
+    Args:
+        base_url: The server's OpenAI-compatible base URL, e.g. http://boba:1234/v1.
+        api_key: Sent as a bearer token, for servers that check it.
+    Returns:
+        Optional[str]: The first loaded language model's id, or None when none is loaded or the
+            server cannot tell (not LM Studio, unreachable).
+    """
+    root = base_url.rstrip("/").removesuffix("/v1")
+    request = urllib.request.Request(root + "/api/v0/models", headers={"Authorization": f"Bearer {api_key}"})
+    try:
+        with urllib.request.urlopen(request, timeout=3) as response:
+            models = json.loads(response.read()).get("data", [])
+    except (OSError, ValueError):
+        return None
+    return next((m["id"] for m in models if m.get("state") == "loaded" and m.get("type") in ("llm", "vlm")), None)
+
+
 def resolve_model(models: dict, profile: Optional[str] = None,
                   model: Optional[str] = None, base_url: Optional[str] = None) -> dict:
     """
     Pick a model profile and apply overrides.
     Precedence: explicit arguments (command line), then the environment variables the profile
-    names (model_env, base_url_env), then the profile's own values. The API key is read only
+    names (model_env, base_url_env), then, with "model_auto", the model loaded on the server
+    (LM Studio), then the profile's own values. The API key is read only
     from the profile's api_key_env (or its api_key fallback), so a key is never sent to a
     server it was not configured for.
     Args:
@@ -103,10 +125,13 @@ def resolve_model(models: dict, profile: Optional[str] = None,
     api_key = (os.environ.get(settings.get("api_key_env", ""), "") or settings.get("api_key", "")).strip()
     if not api_key:
         raise ValueError(f"Set {settings.get('api_key_env', 'an API key')} in the environment for the '{name}' profile.")
+    base_url = base_url or os.environ.get(settings.get("base_url_env", "")) or settings["base_url"]
+    model = model or os.environ.get(settings.get("model_env", "")) \
+        or (settings.get("model_auto") and loaded_model(base_url, api_key)) or settings["model"]
     return {
         "name": settings.get("name", name),
-        "base_url": base_url or os.environ.get(settings.get("base_url_env", "")) or settings["base_url"],
-        "model": model or os.environ.get(settings.get("model_env", "")) or settings["model"],
+        "base_url": base_url,
+        "model": model,
         "api_key": api_key,
         "timeout": float(settings.get("timeout", 60)),
     }

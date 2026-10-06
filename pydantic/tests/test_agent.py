@@ -125,8 +125,13 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key-not-real"}):
             for name in ("LOCAL_LLM_BASE_URL", "LOCAL_LLM_MODEL", "LOCAL_LLM_API_KEY"):
                 os.environ.pop(name, None)
-            local = agent.resolve_model(models)  # "default": "local"
+            with patch.object(agent, "loaded_model", return_value=None):  # The server reports no loaded model
+                local = agent.resolve_model(models)  # "default": "local"
             self.assertEqual((local["base_url"], local["model"]), ("http://boba:1234/v1", "qwen/qwen3-coder-30b"))
+            with patch.object(agent, "loaded_model", return_value="qwen/loaded-now") as asked:
+                self.assertEqual(agent.resolve_model(models)["model"], "qwen/loaded-now")  # model_auto
+                self.assertEqual(agent.resolve_model(models, model="explicit")["model"], "explicit")
+            asked.assert_called_once_with("http://boba:1234/v1", "lm-studio")
             self.assertEqual(local["api_key"], "lm-studio")  # the OpenAI key is never used for another server
             os.environ["LOCAL_LLM_MODEL"] = "from-env"
             self.assertEqual(agent.resolve_model(models, "local")["model"], "from-env")

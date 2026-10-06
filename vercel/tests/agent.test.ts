@@ -129,10 +129,12 @@ test('model profiles come from the shared models file', () => {
     const models = loadModels();
     const local = resolveModel(models); // "default": "local"
     assert.deepEqual([local.baseURL, local.model], ['http://boba:1234/v1', 'qwen/qwen3-coder-30b']);
+    assert.equal(local.auto, true); // model_auto: main() asks the server for its loaded model
     assert.equal(local.apiKey, 'lm-studio'); // the OpenAI key is never used for another server
     process.env.LOCAL_LLM_MODEL = 'from-env';
     assert.equal(resolveModel(models, 'local').model, 'from-env');
     assert.equal(resolveModel(models, 'local', { model: 'from-cli' }).model, 'from-cli');
+    assert.equal(resolveModel(models, 'local', { model: 'from-cli' }).auto, false); // An explicit model wins
     assert.equal(resolveModel(models, 'openai').apiKey, 'test-key-not-real');
     process.env.OPENAI_API_KEY = '';
     assert.throws(() => resolveModel(models, 'openai'), /OPENAI_API_KEY/);
