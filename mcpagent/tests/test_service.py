@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -164,6 +165,50 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(error, (command, text))
             self.assertFalse((Path(folder) / 'ro' / 'x').exists())
             self.assertFalse((Path(tools) / 'x').exists())
+
+    async def test_mr_submits_changes_on_a_new_branch(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            remote, repo, bin_dir = root / 'remote.git', root / 'repo', root / 'bin'
+            bin_dir.mkdir()
+            (bin_dir / 'gh').write_text('#!/bin/bash\necho "$@" > "$(dirname "$0")/gh-args"\n'
+                                        'echo https://github.com/example/repo/pull/7\n')
+            (bin_dir / 'gh').chmod(0o755)
+            run = lambda *args, cwd=root: subprocess.run(args, cwd=cwd, check=True, capture_output=True)
+            run('git', 'init', '-q', '--bare', '-b', 'main', str(remote))
+            run('git', 'clone', '-q', str(remote), str(repo))
+            (repo / 'a.c').write_text('int a;\n')
+            run('git', '-c', 'user.name=T', '-c', 'user.email=t@x', 'commit', '-q', '--allow-empty', '-m', 'start', cwd=repo)
+            run('git', 'add', 'a.c', cwd=repo)
+            run('git', '-c', 'user.name=T', '-c', 'user.email=t@x', 'commit', '-q', '-m', 'a', cwd=repo)
+            run('git', 'push', '-q', 'origin', 'main', cwd=repo)
+            run('git', 'remote', 'set-head', 'origin', 'main', cwd=repo)
+            allowed = root / 'paths.json'
+            allowed.write_text(json.dumps({'paths': {'proj': {'path': str(repo), 'access': 'rw'},
+                                                     'look': {'path': str(repo), 'access': 'r'}}}))
+            env = {'FS_GATE_PATHS': str(allowed), 'PATH': f"{bin_dir}:{os.environ['PATH']}",
+                   'GIT_AUTHOR_NAME': 'T', 'GIT_AUTHOR_EMAIL': 't@x', 'GIT_COMMITTER_NAME': 'T', 'GIT_COMMITTER_EMAIL': 't@x'}
+
+            async def mr(args):
+                with patch.dict(os.environ, env):
+                    result = (await self.rpc('tools/call', {'name': 'mr', 'arguments': args}))['result']
+                return result['isError'], result['content'][0]['text']
+
+            self.assertIn('no changes', (await mr({'path': 'proj', 'title': 'Nothing yet'}))[1])
+            (repo / 'b.c').write_text('int b;\n')
+            self.assertTrue((await mr({'path': 'look', 'title': 'Read-only folder'}))[0])
+            error, text = await mr({'path': 'proj', 'title': 'Add b.c', 'body': 'A second file.'})
+            self.assertFalse(error, text)
+            self.assertIn('Opened https://github.com/example/repo/pull/7', text)
+            self.assertIn('branch agent/add-b-c', text)
+            self.assertIn('--base main --head agent/add-b-c --title Add b.c', (bin_dir / 'gh-args').read_text())
+            heads = run('git', 'ls-remote', '--heads', str(remote)).stdout.decode()
+            self.assertIn('refs/heads/agent/add-b-c', heads)
+            branch = run('git', 'branch', '--show-current', cwd=repo).stdout.decode().strip()
+            self.assertEqual(branch, 'main')  # Back on main, which did not move
+            self.assertEqual(run('git', 'rev-list', '--count', 'main', cwd=repo).stdout.decode().strip(), '2')
+            (repo / 'c.c').write_text('int c;\n')
+            self.assertIn('already exists', (await mr({'path': 'proj', 'title': 'Add b.c'}))[1])
 
     async def test_ed_edits_inside_allowed_folders_and_protects_tools_and_git(self):
         with tempfile.TemporaryDirectory() as folder:

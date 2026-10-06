@@ -38,7 +38,7 @@ committed.
 Every agent scans this folder at startup, so a tool added there is available to all three
 without code changes. [tools/README.md](tools/README.md) describes the manifest and how to add
 a tool. Current tools: `shell` (ls, cat, grep, find, sed, make, gcc, git and more, in a sandbox),
-`ed` (edit files), `doxy`
+`ed` (edit files), `mr` (open a merge request), `doxy`
 (checks Doxygen documentation of C/C++ sources) and `mr_gate` (Merge Request Gate: a merge gate
 that quizzes a developer on their pull request; see [tools/mr_gate/README.md](tools/mr_gate/README.md)).
 Tools that take a path only reach the folders named in
@@ -55,6 +55,8 @@ change on its next start. None of this is hard-coded in the agents.
 
 - `context/instructions.json`: the instructions (system prompt) given to the model, as a list of
   lines.
+- `context/agent.json`: the agent loop: `max_tool_calls` (30), the most tool calls the model may
+  make while answering one prompt.
 - `context/output.json`: the terminal layout: `width` (120) and `show_time` (true). See
   "Terminal output" below.
 - `context/paths.json`: the folders the tools may use and their access (`r` read, `w` write,

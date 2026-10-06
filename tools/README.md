@@ -16,10 +16,11 @@ added here is available to all of them without code changes:
 | `sysinfo` | Python | `section` (optional) | The system, CPU utilization and load, memory, disks, network, GPU, busiest processes and software versions (Python, gcc, ...) |
 | `shell` | Python / `bwrap` | `cwd`, `command` | Runs a command line (ls, cat, grep, find, sed, make, gcc, git, ... joined with `\|`, `&&`, `;`) in an allowed folder, inside a sandbox; `help` lists the commands |
 | `ed` | Python | `path`, `action`, `old`, `new`, `all`, `start`, `end`, `line` (by action) | Edits a file: replace exact text, replace or delete lines, insert, or write a whole file; shows the changed lines |
+| `mr` | Python / `git`, `gh` | `path`, `title`, `body`, `branch` (optional) | Opens a merge request: the repository's uncommitted changes on a new branch, pushed, with a pull request into the default branch |
 | `doxy` | Bash / `doxygen` | `paths` (files or folders, space-separated) | Doxygen documentation problems as `file:line: message`, or "All documented" |
 | `mr_gate` | Python (shared `.venv`) | `pr` (optional) | Open PRs in the quiz-gated repository and their quiz state; see [mr_gate/README.md](mr_gate/README.md) |
 
-Every path a tool takes (`shell`, `ed`, `doxy`) must be inside the folders named in
+Every path a tool takes (`shell`, `ed`, `doxy`, `mr`) must be inside the folders named in
 [`context/paths.json`](../context/paths.json), with the access the tool needs; see "Allowed paths"
 below. Most file and build work goes through `shell`; see [shell/README.md](shell/README.md).
 

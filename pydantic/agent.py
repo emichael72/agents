@@ -46,9 +46,10 @@ CONTEXT_DIR = Path(__file__).resolve().parent.parent / "context"
 INSTRUCTIONS_FILE = CONTEXT_DIR / "instructions.json"
 MODELS_FILE = CONTEXT_DIR / "models.json"
 OUTPUT_FILE = CONTEXT_DIR / "output.json"  # Terminal layout
+AGENT_FILE = CONTEXT_DIR / "agent.json"  # Agent loop settings
 
-# Same cap as MCPAgent's max_tool_calls.
-LIMITS = UsageLimits(tool_calls_limit=8)
+# Tool calls per prompt, shared with the other agents (context/agent.json)
+LIMITS = UsageLimits(tool_calls_limit=int(json.loads(AGENT_FILE.read_text(encoding="utf-8")).get("max_tool_calls", 8)))
 
 console = Console(highlight=False, soft_wrap=True)  # Never re-wrap lines
 

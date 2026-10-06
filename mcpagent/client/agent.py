@@ -393,6 +393,22 @@ def load_output_settings(config_data: dict, config_file) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def load_agent_settings(config_data: dict, config_file) -> dict:
+    """
+    Read the agent loop settings from the file the client config names.
+    Args:
+        config_data: The parsed client config.
+        config_file: The config's path; "agent_file" is relative to its folder.
+    Returns:
+        dict: "max_tool_calls", or {} (the defaults) if none is configured.
+    """
+    agent_file = config_data.get("agent_file")
+    if not agent_file:
+        return {}
+    path = Path(config_file).resolve().parent / agent_file
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def wrap(text: str, width: int, indent: str = "  ") -> list[str]:
     """
     Word-wrap text to a width, the same way in all three agents. Each line wraps on its own;
@@ -581,7 +597,9 @@ async def run_agent(config_file, profile=None, model=None, base_url=None, prompt
         agent = MCPAgent(mcp_client, base_url=settings["base_url"], model=settings["model"],
                          api_key=settings["api_key"], provider=settings["name"], timeout=settings["timeout"],
                          instructions=load_instructions(mcp_client.config_data, config_file),
-                         context=context, trace=output.line if trace else None)
+                         context=context, trace=output.line if trace else None,
+                         max_tool_calls=int(load_agent_settings(mcp_client.config_data, config_file)
+                                            .get("max_tool_calls", 8)))
         await agent.connect()
         servers = len({server for server, _, _ in agent.routes.values()})
         tools = f"{len(agent.routes)} tools" + (f" from {servers} servers" if servers > 1 else "")

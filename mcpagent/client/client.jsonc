@@ -15,6 +15,9 @@
   // Terminal layout (wrap width, response time), shared by all three agents. Relative to this file.
   "output_file": "../../context/output.json",
 
+  // Agent loop settings (max_tool_calls), shared by all three agents. Relative to this file.
+  "agent_file": "../../context/agent.json",
+
   "servers": [{
     "server_id": "tools",
     "description": "The shared agents/tools folder, served by mcpagent/server/server.jsonc.",
