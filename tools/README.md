@@ -18,7 +18,7 @@ added here is available to all of them without code changes:
 | `get_system_info` | Bash / `uname` | none | Hostname, OS, kernel release and CPU architecture |
 | `current_time` | Bash / `date` | `timezone` (optional, IANA name) | The current date and time |
 | `calculate` | Python | `expression` | The value of an arithmetic expression (parsed safely, no `eval`) |
-| `list_files` | Bash / `ls` | `path` (optional) | A folder's entries with sizes and dates (up to 200) |
+| `list_files` | Python | `path` (optional, `<allowed folder>/<sub-folder>`) | A folder's entries with sizes and dates (up to 200); only folders allowed in `list_files/allowed_paths.json` |
 | `search_text` | Bash / `grep` | `pattern`, `path` (optional) | Matching lines as `file:line:text` (up to 50) |
 | `disk_usage` | Bash / `du` | `path` (optional) | A file or folder's total size and file count |
 | `git_log` | Bash / `git` | `count` (optional, 1-50), `path` (optional) | Recent commits: hash, date, subject |

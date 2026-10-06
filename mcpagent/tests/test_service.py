@@ -71,7 +71,8 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             ('get_system_info', {}, 'machine='),
             ('current_time', {'timezone': 'UTC'}, 'UTC (UTC+00:00)'),
             ('calculate', {'expression': '(17 * 23) + sqrt(144)'}, '= 403'),
-            ('list_files', {'path': 'greet_user'}, 'tool.json'),
+            ('list_files', {'path': 'tools/greet_user'}, 'tool.json'),
+            ('list_files', {}, 'Allowed folders'),
             ('search_text', {'pattern': 'AGENT_NAME', 'path': 'greet_user'}, 'greet_user.sh:'),
             ('disk_usage', {'path': 'greet_user'}, 'greet_user: '),
             ('git_log', {'count': 1}, ' 20'),  # "<hash> <date> <subject>"
@@ -101,6 +102,20 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('bad.c:4: error: Member subtract', text)
             self.assertIn('bare.h:1: error: File has no @file', text)
             self.assertTrue((await check(f'{folder}/missing.c'))['isError'])
+
+    async def test_list_files_stays_inside_the_allowed_folders(self):
+        for path in ('tools/..', 'tools/greet_user/../..', 'etc', '/etc'):
+            result = (await self.rpc('tools/call', {'name': 'list_files', 'arguments': {'path': path}}))['result']
+            self.assertTrue(result['isError'], path)
+        link = Path(__file__).resolve().parents[2] / 'tools' / 'greet_user' / 'escape-test-link'
+        link.symlink_to('/etc')
+        try:
+            result = (await self.rpc('tools/call', {'name': 'list_files',
+                                                    'arguments': {'path': 'tools/greet_user/escape-test-link'}}))['result']
+            self.assertTrue(result['isError'])
+            self.assertIn('outside the allowed folder', result['content'][0]['text'])
+        finally:
+            link.unlink()
 
     def test_tool_manifests_are_discovered(self):
         with tempfile.TemporaryDirectory() as folder:
