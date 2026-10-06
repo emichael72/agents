@@ -18,6 +18,7 @@ added here is available to all of them without code changes:
 | `calc` | Python | `expression` | The value of an arithmetic expression (parsed safely, no `eval`) |
 | `ls` | Python | `path` (optional) | A folder's entries with sizes and dates (up to 200); no path lists the allowed folders |
 | `cat` | Python | `path`, `start`, `count` (optional) | A text file's lines, numbered, up to 200 per call |
+| `ed` | Python | `path`, `action`, `old`, `new`, `all`, `start`, `end`, `line` (by action) | Edits a file: replace exact text, replace or delete lines, insert, or write a whole file; shows the changed lines |
 | `wc` | Bash / `wc` | `file` | The file's line count |
 | `search_text` | Bash / `grep` | `pattern`, `path` (optional) | Matching lines as `file:line:text` (up to 50) |
 | `df` | Bash / `du` | `path` (optional) | A file or folder's total size and file count |
@@ -27,7 +28,7 @@ added here is available to all of them without code changes:
 | `doxy` | Bash / `doxygen` | `paths` (files or folders, space-separated) | Doxygen documentation problems as `file:line: message`, or "All documented" |
 | `mr_gate` | Python (shared `.venv`) | `pr` (optional) | Open PRs in the quiz-gated repository and their quiz state; see [mr_gate/README.md](mr_gate/README.md) |
 
-Every path a tool takes (`ls`, `cat`, `wc`, `search_text`, `df`, `git`, `make`,
+Every path a tool takes (`ls`, `cat`, `ed`, `wc`, `search_text`, `df`, `git`, `make`,
 `gcc`, `doxy`) must be inside the folders named in [`allowed_paths.json`](allowed_paths.json);
 see "Allowed paths" below.
 
@@ -73,7 +74,7 @@ this folder is also the working directory when a tool runs.
 
 So `wc` takes `core_dump/README.md` or `tools/greet/README.md`, and nothing outside
 those folders (`..` and symbolic links are resolved before the check). Every tool that takes a
-path (`ls`, `cat`, `wc`, `search_text`, `df`, `git`, `make`, `gcc`,
+path (`ls`, `cat`, `ed`, `wc`, `search_text`, `df`, `git`, `make`, `gcc`,
 `doxy`) checks it with [`allowed_paths.py`](allowed_paths.py): Python tools import it, and
 Bash tools run `python3 allowed_paths.py <path> [--dir|--file]`, which prints the absolute path and
 the path as shown, or an error. To allow another folder, add a name to the JSON; it is read on

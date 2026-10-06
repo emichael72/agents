@@ -166,6 +166,37 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             result = (await self.rpc('tools/call', {'name': 'git', 'arguments': args}))['result']
             self.assertTrue(result['isError'], args)
 
+    async def test_ed_edits_inside_allowed_folders_and_protects_tools_and_git(self):
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / 'a.c').write_text('int a;\nint b;\nint b;\n')
+            (Path(folder) / '.git').mkdir()
+            allowed = Path(folder) / 'allowed_paths.json'
+            allowed.write_text(json.dumps({'paths': {'sample': folder, 'tools': str(Path(__file__).resolve().parents[2] / 'tools')}}))
+
+            async def ed(args):
+                with patch.dict(os.environ, {'TOOLS_ALLOWED_PATHS': str(allowed)}):
+                    result = (await self.rpc('tools/call', {'name': 'ed', 'arguments': args}))['result']
+                return result['isError'], result['content'][0]['text']
+
+            error, text = await ed({'path': 'sample/a.c', 'old': 'int a;', 'new': 'int alpha;'})
+            self.assertFalse(error, text)
+            self.assertIn('1  int alpha;', text)
+            error, text = await ed({'path': 'sample/a.c', 'old': 'int b;', 'new': 'int beta;'})
+            self.assertTrue(error)
+            self.assertIn('lines 2, 3', text)  # Ambiguous: where the matches are
+            self.assertFalse((await ed({'path': 'sample/a.c', 'old': 'int b;', 'new': 'int beta;', 'all': True}))[0])
+            self.assertFalse((await ed({'path': 'sample/a.c', 'action': 'lines', 'start': 3, 'new': ''}))[0])
+            self.assertFalse((await ed({'path': 'sample/a.c', 'action': 'insert', 'line': 0, 'new': '/* top */'}))[0])
+            self.assertFalse((await ed({'path': 'sample/b.h', 'action': 'write', 'new': '#pragma once'}))[0])
+            self.assertEqual((Path(folder) / 'a.c').read_text(), '/* top */\nint alpha;\nint beta;\n')
+            self.assertEqual((Path(folder) / 'b.h').read_text(), '#pragma once\n')
+            for args in ({'path': 'tools/allowed_paths.json', 'action': 'write', 'new': '{}'},
+                         {'path': 'sample/.git/config', 'action': 'write', 'new': 'x'},
+                         {'path': 'sample/../escape.c', 'action': 'write', 'new': 'x'},
+                         {'path': 'sample/a.c', 'old': 'missing', 'new': 'x'}):
+                self.assertTrue((await ed(args))[0], args)
+            self.assertFalse((Path(folder) / '.git' / 'config').exists())
+
     def test_tool_manifests_are_discovered(self):
         with tempfile.TemporaryDirectory() as folder:
             (Path(folder) / "hello").mkdir()

@@ -1,0 +1,16 @@
+{
+  "description": "Edits a text file inside the allowed folders. action replace (the default) swaps exact text old for new (old must match once, or set all); lines replaces lines start..end with new (empty new deletes them; take the numbers from cat); insert puts new after line (0 = top); write creates or overwrites the whole file with new. Shows the changed lines afterwards. Cannot change the tools folder or .git folders.",
+  "command": "python3",
+  "args": ["ed/ed.py"],
+  "params": [
+    {"name": "path", "type": "string", "description": "File to edit, starting with an allowed folder name, e.g. core_dump/src/main.c", "style": "positional"},
+    {"name": "action", "type": "string", "description": "replace (default), lines, insert or write", "style": "flag", "required": false},
+    {"name": "old", "type": "string", "description": "replace: the exact text to replace, including indentation; include enough lines to make it unique", "style": "flag", "required": false},
+    {"name": "new", "type": "string", "description": "The new text: the replacement, the lines to put in, or the whole file for write", "style": "flag", "required": false},
+    {"name": "all", "type": "boolean", "description": "replace: change every occurrence of old instead of requiring exactly one", "style": "flag", "required": false},
+    {"name": "start", "type": "integer", "description": "lines: first line to replace (1-based)", "style": "flag", "required": false},
+    {"name": "end", "type": "integer", "description": "lines: last line to replace (default: start)", "style": "flag", "required": false},
+    {"name": "line", "type": "integer", "description": "insert: the line to insert after; 0 inserts at the top", "style": "flag", "required": false}
+  ],
+  "resource": "ed/README.md"
+}
