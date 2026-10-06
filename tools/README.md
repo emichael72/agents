@@ -22,6 +22,7 @@ added here is available to all of them without code changes:
 | `search_text` | Bash / `grep` | `pattern`, `path` (optional) | Matching lines as `file:line:text` (up to 50) |
 | `disk_usage` | Bash / `du` | `path` (optional) | A file or folder's total size and file count |
 | `git_log` | Bash / `git` | `count` (optional, 1-50), `path` (optional) | Recent commits: hash, date, subject |
+| `mr_quiz` | Python (shared `.venv`) | `pr` (optional) | Open PRs in the quiz-gated repository and their quiz state; see [mr_quiz/README.md](mr_quiz/README.md) |
 
 ## The manifest
 

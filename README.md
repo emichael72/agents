@@ -38,7 +38,9 @@ committed.
 Every agent scans this folder at startup, so a tool added there is available to all three
 without code changes. [tools/README.md](tools/README.md) describes the manifest and how to add
 a tool. Current tools: `greet_user`, `get_rand`, `count_lines`, `echo_message`, `get_system_info`,
-`current_time`, `calculate`, `list_files`, `search_text`, `disk_usage` and `git_log`.
+`current_time`, `calculate`, `list_files`, `search_text`, `disk_usage`, `git_log` and `mr_quiz`
+(a merge gate that quizzes a developer on their pull request; see
+[tools/mr_quiz/README.md](tools/mr_quiz/README.md)).
 
 ```bash
 bash tools/greet_user/greet_user.sh --name Alice  # run a tool's script by hand

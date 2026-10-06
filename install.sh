@@ -5,7 +5,7 @@
 # Description:
 #   Installs everything needed to run the three agents:
 #     - A shared Python virtual environment (.venv) for MCPAgent and the Pydantic Agent,
-#       with both agents' pinned requirements. Both run from the source tree.
+#       with both agents' pinned requirements and the mr_quiz tool's. Both agents run from the source tree.
 #     - vercel/node_modules for the Vercel Agent, installed exactly as package-lock.json
 #       records (npm ci).
 #   Each step is checked, and the installer stops at the first failure.
@@ -18,7 +18,7 @@
 
 PYTHON_VENV_PATH=".venv"
 PYTHON_REQUIRED_MIN_VER="3.10"
-PYTHON_REQUIREMENTS_FILES="mcpagent/requirements.txt pydantic/requirements.txt"
+PYTHON_REQUIREMENTS_FILES="mcpagent/requirements.txt pydantic/requirements.txt tools/mr_quiz/requirements.txt"
 PYTHON_MODULES_TO_RUN="mcpagent.server mcpagent.client"  # Checked with python -m <module> --version
 PYTHON_VERIFY_MODULES="mcpagent pydantic_ai jsonschema httpx httpx2 aiohttp json5 prompt_toolkit rich"
 

@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% block content %}
+<p class="eyebrow">Assessment result</p><h1>{{ 'Ready to merge.' if result.passed else 'Take another look.' }}</h1>
+<section class="card {{ 'success' if result.passed else 'failure' }}">
+<p><strong>{{ result.score }} / {{ result.total }} correct on this attempt</strong></p>
+<p>{{ 'The quiz check is successful for this revision. Merge the PR in GitHub when ready.' if result.passed else 'The quiz check remains blocked. Review the diff and try again.' }}</p>
+<a class="button" href="{{ 'https://github.com/' ~ repo ~ '/pull/' ~ row.pr if result.passed else '/q/' ~ row.id }}">{{ 'View pull request' if result.passed else 'Try again' }} →</a>
+</section>{% for q in result.questions %}<section class="card"><strong>{{ q.question }}</strong><p>{{ q.explanation }}</p></section>{% endfor %}
+{% endblock %}

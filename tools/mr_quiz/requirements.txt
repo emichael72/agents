@@ -1,0 +1,9 @@
+# Pinned, tested versions of the mr_quiz tool's dependencies. The repository's install.sh installs
+# these into the shared .venv, next to the agents' requirements.
+fastapi==0.142.2
+starlette==1.7.0
+uvicorn==0.54.0
+Jinja2==3.1.6
+python-multipart==0.0.32
+pydantic==2.13.5
+httpx==0.28.1
