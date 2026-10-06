@@ -14,6 +14,12 @@
     "Paths start with the name of an allowed folder, such as core_dump/src/main.c; the shell",
     "command help lists the folders and their access.",
     "Before editing a file, look at the exact lines with cat -n in the shell. With ed, prefer",
-    "replace with old copied exactly from the file, and keep each edit small."
+    "replace with old copied exactly from the file, and keep each edit small.",
+    "Before opening a merge request with the mr tool, the change must pass every check the",
+    "reviewer's gate runs: make builds with no errors and no compiler warnings (fix every",
+    "warning), make check passes when the Makefile has a check target (add tests for anything",
+    "new), and the doxy tool reports no documentation problems for the changed files. Run",
+    "them yourself, fix what fails and run them again. If a check still fails, say so and do",
+    "not open the merge request; never describe a change as working when a check you ran failed."
   ]
 }
