@@ -20,14 +20,14 @@ added here is available to all of them without code changes:
 | `view_file` | Python | `path`, `start`, `count` (optional) | A text file's lines, numbered, up to 200 per call |
 | `wc` | Bash / `wc` | `file` | The file's line count |
 | `search_text` | Bash / `grep` | `pattern`, `path` (optional) | Matching lines as `file:line:text` (up to 50) |
-| `disk_usage` | Bash / `du` | `path` (optional) | A file or folder's total size and file count |
+| `df` | Bash / `du` | `path` (optional) | A file or folder's total size and file count |
 | `git` | Python / `git` | `path`, `command`, `args` (optional) | A read-only git command's output (log, status, diff, show, blame, ...) |
 | `make` | Python / `make` | `path`, `target` (optional) | Whether the build succeeded, and its output |
 | `gcc` | Python / `gcc` | `sources`, `output`, `flags` (optional) | Warnings and errors (a check), or a built program |
 | `doxy_check` | Bash / `doxygen` | `paths` (files or folders, space-separated) | Doxygen documentation problems as `file:line: message`, or "All documented" |
 | `mr_quiz` | Python (shared `.venv`) | `pr` (optional) | Open PRs in the quiz-gated repository and their quiz state; see [mr_quiz/README.md](mr_quiz/README.md) |
 
-Every path a tool takes (`ls`, `view_file`, `wc`, `search_text`, `disk_usage`, `git`, `make`,
+Every path a tool takes (`ls`, `view_file`, `wc`, `search_text`, `df`, `git`, `make`,
 `gcc`, `doxy_check`) must be inside the folders named in [`allowed_paths.json`](allowed_paths.json);
 see "Allowed paths" below.
 
@@ -73,7 +73,7 @@ this folder is also the working directory when a tool runs.
 
 So `wc` takes `core_dump/README.md` or `tools/greet/README.md`, and nothing outside
 those folders (`..` and symbolic links are resolved before the check). Every tool that takes a
-path (`ls`, `view_file`, `wc`, `search_text`, `disk_usage`, `git`, `make`, `gcc`,
+path (`ls`, `view_file`, `wc`, `search_text`, `df`, `git`, `make`, `gcc`,
 `doxy_check`) checks it with [`allowed_paths.py`](allowed_paths.py): Python tools import it, and
 Bash tools run `python3 allowed_paths.py <path> [--dir|--file]`, which prints the absolute path and
 the path as shown, or an error. To allow another folder, add a name to the JSON; it is read on
@@ -86,24 +86,24 @@ reported to the model as a tool failure, with the script's output as the message
 
 ## Adding a tool
 
-1. Create a folder named after the tool, e.g. `tools/disk_usage/`.
-2. Add the script, e.g. `disk_usage/disk_usage.sh`. Print the result to stdout, and exit nonzero
+1. Create a folder named after the tool, e.g. `tools/df/`.
+2. Add the script, e.g. `df/df.sh`. Print the result to stdout, and exit nonzero
    with an explanation on failure.
-3. Add `disk_usage/tool.json`, with paths relative to `tools/`:
+3. Add `df/tool.json`, with paths relative to `tools/`:
 
    ```json
    {
      "description": "Shows how much disk space a folder uses.",
      "command": "bash",
-     "args": ["disk_usage/disk_usage.sh"],
+     "args": ["df/df.sh"],
      "params": [
        {"name": "path", "type": "string", "description": "Folder to measure, relative to the tools folder", "style": "positional"}
      ],
-     "resource": "disk_usage/README.md"
+     "resource": "df/README.md"
    }
    ```
 
-4. Add `disk_usage/README.md` describing it.
+4. Add `df/README.md` describing it.
 5. Restart the agents (and the MCPAgent server). Each agent lists the tools it loaded; ask one to use
    the new tool.
 

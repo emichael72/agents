@@ -4,7 +4,7 @@ Module: allowed_paths.py
 
 Description:
     The one rule for which files and folders the tools may touch, shared by every tool that takes
-    a path (ls, view_file, wc, search_text, disk_usage, git, make, gcc, doxy_check). It lives in the
+    a path (ls, view_file, wc, search_text, df, git, make, gcc, doxy_check). It lives in the
     tools folder, next to allowed_paths.json, and is not a tool itself (it has no tool.json).
 
     A path the model gives starts with the name of an allowed folder: `core_dump/src/pi.c` means

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Usage: ./disk_usage.sh [<allowed name>/<path>]
+# Usage: ./df.sh [<allowed name>/<path>]
 # Prints the total size of a file or folder (default: tools). The path must be inside
 # tools/allowed_paths.json's folders.
 

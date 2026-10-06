@@ -75,7 +75,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             ('ls', {'path': 'tools/greet'}, 'tool.json'),
             ('ls', {}, 'Allowed folders'),
             ('search_text', {'pattern': 'AGENT_NAME', 'path': 'tools/greet'}, 'tools/greet/greet.sh:'),
-            ('disk_usage', {'path': 'tools/greet'}, 'tools/greet: '),
+            ('df', {'path': 'tools/greet'}, 'tools/greet: '),
             ('git', {'path': 'tools', 'command': 'log', 'args': '-1 --date=short --format="%h %ad %s"'}, ' 20'),
         ]:
             result = (await self.rpc('tools/call', {'name': name, 'arguments': args}))['result']
@@ -112,7 +112,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_path_tools_stay_inside_the_allowed_folders(self):
         for path in ('tools/..', 'tools/greet/../..', 'etc', '/etc'):
             for name, args in [('ls', {'path': path}), ('view_file', {'path': path + '/passwd'}),
-                               ('wc', {'file': path + '/passwd'}), ('disk_usage', {'path': path}),
+                               ('wc', {'file': path + '/passwd'}), ('df', {'path': path}),
                                ('search_text', {'pattern': 'root', 'path': path}),
                                ('git', {'path': path, 'command': 'log'}), ('doxy_check', {'paths': path}),
                                ('make', {'path': path}), ('gcc', {'sources': path + '/x.c'})]:

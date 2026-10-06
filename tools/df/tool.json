@@ -1,9 +1,9 @@
 {
   "description": "Shows how much disk space a file or folder uses, and how many files it contains.",
   "command": "bash",
-  "args": ["disk_usage/disk_usage.sh"],
+  "args": ["df/df.sh"],
   "params": [
     {"name": "path", "type": "string", "description": "File or folder to measure, starting with an allowed folder name, e.g. core_dump; omit it for tools", "style": "positional", "required": false}
   ],
-  "resource": "disk_usage/README.md"
+  "resource": "df/README.md"
 }

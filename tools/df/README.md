@@ -5,5 +5,5 @@ Reports the total size of a file or folder (as `du -sh` does) and how many files
 **Usage Example:**
 
 ```bash
-bash disk_usage/disk_usage.sh ../mcpagent
+bash df/df.sh ../mcpagent
 ```
