@@ -2,13 +2,16 @@
 Module: changes.py
 
 Description:
-    Inspects what a pull request changes, before any quiz is written: whether its C/C++ files are
+    Inspects what a pull request changes, before any quiz is written: whether it builds and its
+    tests pass (make, then make check, in the shell tool's sandbox), whether its C/C++ files are
     correctly documented (the doxy tool), and whether the change is only cosmetic (comments,
     formatting, documentation files) rather than code.
 
     The module provides:
       - `inspect_pr`: downloads the PR's head and merge-base trees from GitHub and returns the
         documentation result and the cosmetic verdict for the changed files.
+      - `check_build`: runs the build and the tests (BUILD_COMMAND, then make TEST_TARGET when the
+        Makefile has that target) on a whole tree, inside the shell tool's sandbox.
       - `check_docs`: runs doxy on a whole tree and keeps the problems in the changed files.
         The whole tree is checked so that a function documented in an unchanged header still
         counts as documented.
@@ -18,7 +21,8 @@ Description:
       - The cosmetic verdict is mechanical, so a model cannot wave a code change through by calling
         it cosmetic. Only C/C++ sources (compared token by token) and documentation files count;
         any other changed file (a Makefile, a script) is treated as a code change.
-      - Downloaded code is only read and parsed by Doxygen, never built or executed.
+      - Downloaded code is built and its tests run only inside the shell tool's sandbox (bubblewrap):
+        the tree is the only folder it sees, with no network and nothing else of the host.
 """
 
 import io
@@ -34,6 +38,8 @@ from typing import Any, Optional
 
 TOOLS_DIR = Path(__file__).resolve().parent.parent
 DOXY = TOOLS_DIR / "doxy" / "doxy.sh"
+SHELL = TOOLS_DIR / "shell" / "shell.py"
+REPORT_LINES = 60
 
 C_EXTENSIONS = {".c", ".h", ".cc", ".cpp", ".hpp", ".cxx", ".hh"}
 DOC_EXTENSIONS = {".md", ".txt", ".rst", ".dox"}
@@ -95,6 +101,40 @@ def is_cosmetic(path: str, before: Optional[str], after: Optional[str]) -> bool:
     if name.suffix.lower() in C_EXTENSIONS:
         return code_tokens(before or "") == code_tokens(after or "")
     return False
+
+
+def check_build(tree: Path, build_command: str = "make", test_target: str = "check") -> tuple[bool, str]:
+    """
+    Build a tree and run its tests in the shell tool's sandbox, which sees only this tree.
+    Args:
+        tree: The checked-out repository.
+        build_command: The build command line (QUIZ_BUILD_COMMAND); "" skips the check.
+        test_target: The make target that runs the tests (QUIZ_TEST_TARGET), run when the Makefile
+            defines it.
+    Returns:
+        tuple[bool, str]: Whether the build (and tests) succeeded, and the report: what ran and the
+            end of its output.
+    """
+    makefile = next((tree / name for name in ("GNUmakefile", "makefile", "Makefile") if (tree / name).is_file()), None)
+    if not build_command or makefile is None:
+        return True, "No Makefile: nothing to build."
+    has_tests = bool(test_target) and re.search(rf"^{re.escape(test_target)}\s*:", makefile.read_text(errors="replace"), re.M)
+    command = build_command + (f" && make {test_target}" if has_tests else "")
+    allowed = Path(tempfile.mkdtemp()) / "paths.json"
+    allowed.write_text(json.dumps({"paths": {"pr": {"path": str(Path(tree).resolve()), "access": "rwx"}}}))
+    try:
+        result = subprocess.run(["python3", str(SHELL), "--cwd", "pr", "--command", command], capture_output=True,
+                                text=True, timeout=120, env={**os.environ, "FS_GATE_PATHS": str(allowed)})
+    except subprocess.TimeoutExpired:
+        return False, f"{command}: timed out."
+    finally:
+        shutil.rmtree(allowed.parent, ignore_errors=True)
+    lines = (result.stdout or result.stderr).rstrip().removeprefix("Error: ").splitlines()
+    if len(lines) > REPORT_LINES:
+        lines = [f"... {len(lines) - REPORT_LINES} earlier lines"] + lines[-REPORT_LINES:]
+    note = "" if has_tests else f" (no '{test_target}' target in the Makefile, so no tests ran)"
+    summary = f"$ {command}{note}: " + ("succeeded" if result.returncode == 0 else "FAILED")
+    return result.returncode == 0, "\n".join([summary, *lines])
 
 
 def check_docs(tree: Path, changed: list[str]) -> tuple[bool, str]:
@@ -165,7 +205,8 @@ def _read(root: Path, path: Optional[str]) -> Optional[str]:
     return (root / path).read_text(encoding="utf-8", errors="replace")
 
 
-def inspect_pr(gh, repo: str, number: int, head: str, base_sha: str) -> dict[str, Any]:
+def inspect_pr(gh, repo: str, number: int, head: str, base_sha: str,
+               build_command: str = "make", test_target: str = "check") -> dict[str, Any]:
     """
     Inspect a PR revision: its documentation and whether it only changes comments and formatting.
     Args:
@@ -174,9 +215,11 @@ def inspect_pr(gh, repo: str, number: int, head: str, base_sha: str) -> dict[str
         number: The PR number.
         head: The head SHA to inspect.
         base_sha: The tip of the branch the PR targets; the change is measured from the merge base.
+        build_command: The build command line; "" skips the build check.
+        test_target: The make target that runs the tests, when the Makefile defines it.
     Returns:
-        dict: docs_ok (bool), docs_report (str), cosmetic (bool) and code_files (the changed files
-            whose code changed, for the model's prompt).
+        dict: build_ok (bool), build_report (str), docs_ok (bool), docs_report (str), cosmetic
+            (bool) and code_files (the changed files whose code changed, for the model's prompt).
     Raises:
         RuntimeError: If a GitHub request fails.
     """
@@ -197,4 +240,6 @@ def inspect_pr(gh, repo: str, number: int, head: str, base_sha: str) -> dict[str
         changed_c = [f["filename"] for f in files
                      if f["status"] != "removed" and Path(f["filename"]).suffix.lower() in C_EXTENSIONS]
         docs_ok, docs_report = check_docs(after_root, changed_c)
-    return {"docs_ok": docs_ok, "docs_report": docs_report, "cosmetic": not code_files, "code_files": code_files}
+        build_ok, build_report = check_build(after_root, build_command, test_target)
+    return {"build_ok": build_ok, "build_report": build_report, "docs_ok": docs_ok, "docs_report": docs_report,
+            "cosmetic": not code_files, "code_files": code_files}

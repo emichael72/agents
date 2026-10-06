@@ -3,8 +3,8 @@
 A merge gate that checks the developer understands the code they are about to merge. When a pull
 request is opened (or a commit is pushed to it), a model reads the diff and writes a short
 multiple-choice quiz about it. The PR cannot merge until its author answers every question
-correctly, and until its changed C/C++ files are correctly documented (checked with the
-[`doxy`](../doxy/README.md) tool). A change that only touches comments, formatting or
+correctly, until it builds and its tests pass (`make`, then `make check`), and until its changed
+C/C++ files are correctly documented (checked with the [`doxy`](../doxy/README.md) tool). A change that only touches comments, formatting or
 documentation needs no quiz, only correct documentation.
 
 It is a tool and a resident service:
@@ -34,6 +34,10 @@ bash mr_gate/mr_gate.sh serve                      # the web service and GitHub 
 2. Every few seconds (`QUIZ_POLL_SECONDS`, 5) the service lists the open PRs that target `main`. For each new revision
    (head and base commit) of a PR opened by the configured developer, it posts "Checking
    documentation and preparing the developer quiz" and inspects the change (`changes.py`):
+   - **Build and tests:** it runs `make` (`QUIZ_BUILD_COMMAND`) on the PR's files, then
+     `make check` (`QUIZ_TEST_TARGET`) if the Makefile has a `check` target, inside the
+     [`shell`](../shell/README.md) tool's sandbox: the downloaded tree is the only folder it sees,
+     with no network. A failure fails the check, with the end of the output on the quiz page.
    - **Documentation:** it downloads the PR's files and runs `doxy` on the whole tree,
      keeping the problems in the files the PR changed. The whole tree is checked so that a
      function documented in an unchanged header still counts as documented.
@@ -47,8 +51,9 @@ bash mr_gate/mr_gate.sh serve                      # the web service and GitHub 
 
    | Situation | `developer-quiz` |
    | --- | --- |
+   | The build or the tests fail | failure, whatever the quiz |
    | Documentation problems in a changed file | failure, whatever the quiz |
-   | Cosmetic change, documentation OK | success, no quiz |
+   | Cosmetic change, builds, documentation OK | success, no quiz |
    | Code change, quiz passed | success |
    | Code change, last attempt failed | failure (retries are unlimited) |
    | Code change, not yet answered | pending, "Complete the developer quiz" |
@@ -102,6 +107,8 @@ set in the environment (for example in `~/.config/mr-gate.env` for the service) 
 | `QUIZ_REPO` | `emichael72/core_dump` | The repository to gate |
 | `QUIZ_DEVELOPER` | `emichael72` | The only PR author assessed |
 | `QUIZ_BASE_URL` | `http://minion:8000` | Where the PR's Details link points |
+| `QUIZ_BUILD_COMMAND` | `make` | How to build a PR's revision; empty skips the build check |
+| `QUIZ_TEST_TARGET` | `check` | The make target that runs the tests, when the Makefile has it |
 | `QUIZ_POLL_SECONDS` | `5` | Seconds between GitHub polls. Each poll that finds nothing new costs one of the 5,000 GitHub API requests per hour your `gh` login allows: 720 an hour at 5 seconds |
 | `QUIZ_MODEL_PROFILE` | empty: the models file's default | Model profile (`local` or `openai`) |
 | `QUIZ_WEB_USER`, `QUIZ_WEB_PASSWORD` | `user`, `pass` | The web sign-in |

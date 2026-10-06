@@ -76,6 +76,8 @@ POLL_SECONDS = float(setting("QUIZ_POLL_SECONDS"))  # Each idle poll costs one G
 PROFILE = setting("QUIZ_MODEL_PROFILE", required=False) or None  # None uses the models file's default
 WEB_USER = setting("QUIZ_WEB_USER")  # Demo sign-in, shown on the sign-in page
 WEB_PASSWORD = setting("QUIZ_WEB_PASSWORD")
+BUILD_COMMAND = setting("QUIZ_BUILD_COMMAND", required=False)  # "" skips the build check
+TEST_TARGET = setting("QUIZ_TEST_TARGET", required=False)
 
 CONTEXT = "developer-quiz"  # The status check name branch protection requires
 MAX_DIFF_CHARS = 60_000
@@ -170,7 +172,8 @@ def init() -> str:
         );
         """)
         # Columns added after the first version; older databases get them with these defaults
-        for column in ("docs_ok INTEGER NOT NULL DEFAULT 1", "docs_report TEXT NOT NULL DEFAULT ''",
+        for column in ("build_ok INTEGER NOT NULL DEFAULT 1", "build_report TEXT NOT NULL DEFAULT ''",
+                       "docs_ok INTEGER NOT NULL DEFAULT 1", "docs_report TEXT NOT NULL DEFAULT ''",
                        "cosmetic INTEGER NOT NULL DEFAULT 0"):
             try:
                 db.execute("ALTER TABLE quizzes ADD COLUMN " + column)
@@ -267,18 +270,20 @@ def publish_status(sha: str, state: str, description: str, target_url: str) -> N
 
 def gate_state(row: dict[str, Any], failed_attempt: bool = False) -> tuple[str, str]:
     """
-    Decide a revision's `developer-quiz` status. Documentation problems fail it whatever the quiz;
-    otherwise a cosmetic change or a passed quiz succeeds.
+    Decide a revision's `developer-quiz` status. A failed build or tests, or documentation
+    problems, fail it whatever the quiz; otherwise a cosmetic change or a passed quiz succeeds.
     Args:
         row: The quiz row.
         failed_attempt: The developer just failed the quiz.
     Returns:
         tuple[str, str]: The state ("pending", "success" or "failure") and its description.
     """
+    if not row["build_ok"]:
+        return "failure", "Build or tests failed; see Details"
     if not row["docs_ok"]:
         return "failure", "Documentation problems in the changed files; see Details"
     if row["cosmetic"]:
-        return "success", "Cosmetic change: no quiz needed; documentation OK"
+        return "success", "Cosmetic change: no quiz needed; builds, documentation OK"
     if row["passed"]:
         return "success", "Developer passed the revision-specific quiz"
     if failed_attempt:
@@ -337,11 +342,11 @@ def list_quizzes() -> list[dict[str, Any]]:
     """
     List every quiz, newest first, without content or answer keys.
     Returns:
-        list[dict]: id, pr, sha, passed, docs_ok, cosmetic, published and created per quiz.
+        list[dict]: id, pr, sha, passed, build_ok, docs_ok, cosmetic, published and created per quiz.
     """
     with connect() as db:
         return [dict(r) for r in db.execute(
-            "SELECT id,pr,sha,passed,docs_ok,cosmetic,published,created FROM quizzes ORDER BY created DESC")]
+            "SELECT id,pr,sha,passed,build_ok,docs_ok,cosmetic,published,created FROM quizzes ORDER BY created DESC")]
 
 
 def load_instructions(path: Path = INSTRUCTIONS_FILE) -> str:
@@ -486,7 +491,7 @@ def create_quiz(number: int, profile: Optional[str] = None, fixed: Optional[str]
     if not diff.strip() or len(diff) > MAX_DIFF_CHARS:
         raise ValueError(f"Diff must be nonempty and at most {MAX_DIFF_CHARS:,} characters.")
     publish_status(head, "pending", "Checking documentation and preparing the developer quiz", BASE_URL + "/")
-    inspection = changes.inspect_pr(gh, REPO, number, head, base)
+    inspection = changes.inspect_pr(gh, REPO, number, head, base, BUILD_COMMAND, TEST_TARGET)
     if fixed:
         quiz, source = Quiz.model_validate_json(Path(fixed).read_text()), "fixed fixture"
         if quiz.cosmetic and inspection["code_files"]:
@@ -508,9 +513,10 @@ def create_quiz(number: int, profile: Optional[str] = None, fixed: Optional[str]
     qid = secrets.token_urlsafe(16)
     with connect() as db:
         db.execute(
-            "INSERT INTO quizzes(id,pr,sha,base_sha,developer,content,source,docs_ok,docs_report,cosmetic) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO quizzes(id,pr,sha,base_sha,developer,content,source,build_ok,build_report,"
+            "docs_ok,docs_report,cosmetic) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             (qid, number, head, base, DEVELOPER, quiz.model_dump_json(), source,
+             int(inspection.get("build_ok", True)), inspection.get("build_report", ""),
              int(inspection["docs_ok"]), inspection["docs_report"], int(quiz.cosmetic)))
     row = get_quiz(qid)
     publish(row)
@@ -533,6 +539,8 @@ def submit(qid: str, answers: list[int]) -> dict[str, Any]:
         RuntimeError: If a GitHub request fails (the attempt is already saved; resubmit).
     """
     row = get_quiz(qid)
+    if not row["build_ok"]:
+        raise ValueError("Fix the build or the tests and push; this revision cannot pass.")
     if not row["docs_ok"]:
         raise ValueError("Fix the documentation problems and push; this revision cannot pass.")
     if row["cosmetic"]:

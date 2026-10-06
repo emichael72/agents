@@ -11,6 +11,20 @@
     <span class="status">GitHub check: {{ description }}</span>
   </div>
 
+  {# Build and tests: make, then make check, in the shell tool's sandbox #}
+  {% if row.build_ok %}
+    <section class="card success">
+      <strong>Build and tests</strong>
+      <pre class="report">{{ row.build_report or 'Not checked.' }}</pre>
+    </section>
+  {% else %}
+    <section class="card failure">
+      <strong>Build or tests failed</strong>
+      <p>This revision does not build or its tests fail, so it cannot merge. Fix it and push; the next revision is checked again.</p>
+      <pre class="report">{{ row.build_report }}</pre>
+    </section>
+  {% endif %}
+
   {# Documentation: checked by doxy on the changed C/C++ files #}
   {% if row.docs_ok %}
     <section class="card success">
@@ -33,8 +47,8 @@
       <strong>No quiz needed</strong>
       <p>This change only touches comments, formatting or documentation; the code is unchanged.</p>
     </section>
-  {% elif not row.docs_ok %}
-    <p class="muted">The quiz opens once the documentation is fixed.</p>
+  {% elif not row.docs_ok or not row.build_ok %}
+    <p class="muted">The quiz opens once the build, the tests and the documentation pass.</p>
   {% else %}
     <p>Review the change, then choose one answer for each question ({{ questions|length }} questions,
       100% to pass). You can retry if needed.</p>

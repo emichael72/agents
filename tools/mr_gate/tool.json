@@ -9,7 +9,9 @@
     "QUIZ_POLL_SECONDS": "5",
     "QUIZ_MODEL_PROFILE": "",
     "QUIZ_WEB_USER": "user",
-    "QUIZ_WEB_PASSWORD": "pass"
+    "QUIZ_WEB_PASSWORD": "pass",
+    "QUIZ_BUILD_COMMAND": "make",
+    "QUIZ_TEST_TARGET": "check"
   },
   "params": [
     {"name": "pr", "type": "integer", "description": "Only this pull request number; omit it for every open PR", "style": "flag", "required": false}

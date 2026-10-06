@@ -32,7 +32,7 @@ FIXTURE = {"title": "C math quiz", "questions": [
     for i in range(3)]}
 INFO = {"number": 1, "state": "open", "base": {"ref": "main", "sha": "b" * 40},
         "head": {"sha": "a" * 40}, "user": {"login": quiz.DEVELOPER}, "title": "Compute pi"}
-CODE_CHANGE = {"docs_ok": True, "docs_report": "All 1 changed C/C++ file(s) are documented.",
+CODE_CHANGE = {"build_ok": True, "build_report": "$ make && make check: succeeded", "docs_ok": True, "docs_report": "All 1 changed C/C++ file(s) are documented.",
                "cosmetic": False, "code_files": ["src/pi.c"]}
 MODELS = {"default": "local", "profiles": {
     "local": {"name": "Local", "base_url": "http://boba:1234/v1", "model": "qwen", "api_key": "lm-studio"},
@@ -223,12 +223,23 @@ class QuizTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "documentation"):
             quiz.submit(row["id"], [q.correct for q in quiz.Quiz.model_validate_json(row["content"]).questions])
 
+    def test_failed_build_or_tests_fail_the_check_and_show_on_the_page(self):
+        report = "$ make && make check: FAILED\ncore_dump: invalid option or unexpected option argument"
+        row = self.new_revision("c", dict(CODE_CHANGE, build_ok=False, build_report=report))
+        payload = self.mock_gh.call_args.kwargs["payload"]
+        self.assertEqual((payload["state"], payload["description"]), ("failure", "Build or tests failed; see Details"))
+        page = self.client.get("/q/" + row["id"]).text
+        self.assertIn("invalid option or unexpected option argument", page)
+        self.assertNotIn('name="q0"', page)
+        with self.assertRaisesRegex(ValueError, "build"):
+            quiz.submit(row["id"], [q.correct for q in quiz.Quiz.model_validate_json(row["content"]).questions])
+
     def test_cosmetic_change_passes_without_a_quiz(self):
         cosmetic = {"title": "Comment updates", "cosmetic": True, "questions": []}
         row = self.new_revision("e", dict(CODE_CHANGE, cosmetic=True, code_files=[]), cosmetic)
         payload = self.mock_gh.call_args.kwargs["payload"]
         self.assertEqual((payload["state"], payload["description"]),
-                         ("success", "Cosmetic change: no quiz needed; documentation OK"))
+                         ("success", "Cosmetic change: no quiz needed; builds, documentation OK"))
         page = self.client.get("/q/" + row["id"]).text
         self.assertIn("No quiz needed", page)
         self.assertNotIn('name="q0"', page)
@@ -363,6 +374,23 @@ class ChangesTests(unittest.TestCase):
         self.assertFalse(changes.is_cosmetic("Makefile", "LDLIBS =", "LDLIBS = -lm"))
         self.assertFalse(changes.is_cosmetic("src/new.c", None, "int x;"))
         self.assertTrue(changes.is_cosmetic("src/new.h", None, "/* Only a comment */"))
+
+    @unittest.skipUnless(shutil.which("bwrap"), "bubblewrap is not installed")
+    def test_build_and_tests_run_in_the_sandbox(self):
+        with tempfile.TemporaryDirectory() as folder:
+            tree = Path(folder)
+            (tree / "Makefile").write_text("all:\n\techo built > out.txt\ncheck: all\n\tgrep -q built out.txt\n")
+            ok, report = changes.check_build(tree)
+            self.assertTrue(ok, report)
+            self.assertIn("$ make && make check: succeeded", report)
+            (tree / "Makefile").write_text("all:\n\ttrue\ncheck:\n\techo test failed; false\n")
+            ok, report = changes.check_build(tree)
+            self.assertFalse(ok)
+            self.assertIn("test failed", report)
+            (tree / "Makefile").write_text("all:\n\tcat /etc/passwd\n")  # The sandbox sees only the tree
+            self.assertFalse(changes.check_build(tree)[0])
+            (tree / "Makefile").unlink()
+            self.assertEqual(changes.check_build(tree), (True, "No Makefile: nothing to build."))
 
     @unittest.skipUnless(shutil.which("doxygen"), "doxygen is not installed")
     def test_documentation_is_checked_on_the_whole_tree_but_reported_for_changed_files(self):
