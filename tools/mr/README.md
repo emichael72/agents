@@ -6,9 +6,14 @@ allowed folder with write access ([`../../context/paths.json`](../../context/pat
 and in `core_dump` the [`pr_gate`](../../gatekeepers/pr/README.md) quiz checks that the reviewer understands
 it before it can merge.
 
+**Before starting work**, `action: sync` brings the repository's default branch up to date with
+GitHub (fast-forward only): the agents' shell has no network, so without it they would work on
+stale code. It refuses when there are uncommitted changes or local commits, so it never loses work.
+
 **Usage Example:**
 
 ```bash
+python3 mr/mr.py core_dump --action sync     # update main from GitHub first
 python3 mr/mr.py core_dump --title "Add an e module" --body "Prints Euler's number; make builds cleanly."
 ```
 

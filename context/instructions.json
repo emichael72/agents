@@ -20,6 +20,9 @@
     "warning), make check passes when the Makefile has a check target (add tests for anything",
     "new), and the doxy tool reports no documentation problems for the changed files. Run",
     "them yourself, fix what fails and run them again. If a check still fails, say so and do",
-    "not open the merge request; never describe a change as working when a check you ran failed."
+    "not open the merge request; never describe a change as working when a check you ran failed.",
+    "Before working on a repository, update it from GitHub with the mr tool's sync action;",
+    "the shell has no network. Never commit, branch, merge or push with git yourself: the",
+    "mr tool does all of that when it opens the merge request."
   ]
 }

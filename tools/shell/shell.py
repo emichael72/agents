@@ -44,6 +44,12 @@ COMMANDS_FILE = Path(__file__).resolve().parent / "commands.json"
 CLANG_FORMAT = fs_gate.CONTEXT_DIR / "clang-format.yaml"  # The default C/C++ style, at /work/.clang-format
 WORK = PurePosixPath("/work")  # Where the allowed folders appear inside the sandbox
 SEPARATORS = {"|", "||", "&&", ";"}
+# git in the shell only looks (and can undo uncommitted edits); committing, branching and syncing
+# with GitHub belong to the mr tool, which keeps the repository in the state it expects
+GIT_READ_ONLY = {"status", "log", "show", "diff", "blame", "grep", "ls-files", "shortlog", "describe",
+                 "rev-parse", "restore"}
+GIT_LIST_ONLY = {"branch": {"-a", "-r", "-v", "-vv", "--all", "--remotes", "--list", "-l", "--show-current"},
+                 "tag": {"-l", "--list", "-n"}}
 # Harmless habits: errors already appear in the output, so these are dropped before the check
 STDERR_HABITS = re.compile(r"(?<!\S)2>(&1|/dev/null)(?!\S)")
 TIMEOUT = 25
@@ -131,6 +137,15 @@ def check(command: str, cwd: Path, commands: dict[str, dict], allowed: dict[str,
             raise ValueError(f"Use the {name} tool instead of '{name}' in the shell.")
         if name not in commands:
             raise ValueError(f"'{name}' is not an allowed command. Run the command help to see the list.")
+        if name == "git":
+            sub = words[1] if len(words) > 1 else ""
+            if sub in GIT_LIST_ONLY:
+                if any(w not in GIT_LIST_ONLY[sub] for w in words[2:]):
+                    raise ValueError(f"git {sub} may only list here. To commit or create a branch, use the mr tool.")
+            elif sub not in GIT_READ_ONLY:
+                raise ValueError(f"git {sub or '(nothing)'} is not allowed in the shell: it only reads ("
+                                 f"{', '.join(sorted(GIT_READ_ONLY))}). The mr tool commits, creates the branch "
+                                 f"and opens the merge request; mr with action sync updates the repository from GitHub.")
         if name == "cd":
             target = to_host(words[1] if len(words) > 1 else ".", current, allowed)
             if not target or not target.is_dir():

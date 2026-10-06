@@ -8,7 +8,9 @@ Description:
     proposed for merging into the repository's default branch.
 
     This is the one tool that reaches GitHub, with the credentials of the user running the agent
-    (git and gh). It does one thing, the same way every time:
+    (git and gh). With action sync, it brings the default branch up to date with GitHub
+    (fast-forward only), which the agents' sandboxed shell cannot do. Otherwise it opens a merge
+    request, the same way every time:
       1. Check the repository: on its default branch, no commits of its own, changes to submit.
       2. Bring the default branch up to date with GitHub (fast-forward only).
       3. Format the changed C/C++ files with clang-format (the repository's .clang-format, else
@@ -35,7 +37,7 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "gatekeepers" / "fs"))
 import fs_gate  # noqa: E402
 
-OPTIONS = ("title", "body", "branch")
+OPTIONS = ("action", "title", "body", "branch")
 CLANG_FORMAT = fs_gate.CONTEXT_DIR / "clang-format.yaml"  # The default style
 FORMATTED = {".c", ".h", ".cc", ".cpp", ".hpp", ".cxx", ".hh"}
 WAIT_CHECK = os.environ.get("MR_WAIT_CHECK", "")  # The status check to wait for; "" waits for none
@@ -153,6 +155,38 @@ def wait_for_check(repo: Path, sha: str) -> str:
     return f"Merge gate ({WAIT_CHECK}): {status['state']}, {status.get('description', '')}: {url}"
 
 
+def sync(path: str) -> str:
+    """
+    Bring a repository's default branch up to date with GitHub (fast-forward only), so work starts
+    from the latest code. The agents' shell has no network, so this is how they update.
+    Args:
+        path: <allowed name>/<folder> in the repository; it needs write access.
+    Returns:
+        str: What changed: the commits that came in, or that it was already up to date.
+    Raises:
+        ValueError: If the repository is not on its default branch, has uncommitted changes or
+            commits of its own, or GitHub cannot be reached.
+    """
+    folder, shown = fs_gate.resolve(path, "dir", "w")
+    repo = Path(git(folder, "rev-parse", "--show-toplevel")).resolve()
+    base = default_branch(repo)
+    if git(repo, "branch", "--show-current") != base:
+        raise ValueError(f"The repository is not on {base}; switch to it before syncing.")
+    if git(repo, "status", "--porcelain"):
+        raise ValueError("The repository has uncommitted changes; open a merge request with them, or undo them "
+                         "(git restore in the shell), before syncing.")
+    git(repo, "fetch", "--quiet", "origin", base)
+    if git(repo, "rev-list", "--count", f"origin/{base}..HEAD") != "0":
+        raise ValueError(f"{base} has commits that are not on GitHub; they need a person to sort out.")
+    before = git(repo, "rev-parse", "--short", "HEAD")
+    incoming = git(repo, "log", "--oneline", f"HEAD..origin/{base}")
+    if not incoming:
+        return f"{shown}: {base} is up to date with GitHub ({before})."
+    git(repo, "merge", "--ff-only", "--quiet", f"origin/{base}")
+    after = git(repo, "rev-parse", "--short", "HEAD")
+    return f"{shown}: updated {base} from {before} to {after}:\n{incoming}"
+
+
 def open_mr(path: str, title: str, body: str = "", branch: Optional[str] = None) -> str:
     """
     Submit a repository's uncommitted changes as a merge request.
@@ -233,8 +267,15 @@ def main(argv: Optional[list[str]] = None) -> str:
             options["path"] = argument
         else:
             raise ValueError(f"Unexpected argument '{argument}'.")
-    if "path" not in options or "title" not in options:
-        raise ValueError("Give the repository folder (e.g. core_dump) and a title.")
+    if "path" not in options:
+        raise ValueError("Give the repository folder, e.g. core_dump.")
+    action = options.get("action", "open")
+    if action == "sync":
+        return sync(options["path"])
+    if action != "open":
+        raise ValueError(f"Unknown action '{action}'; use open (the default) or sync.")
+    if "title" not in options:
+        raise ValueError("Give a title for the merge request.")
     return open_mr(options["path"], options["title"], options.get("body", ""), options.get("branch"))
 
 

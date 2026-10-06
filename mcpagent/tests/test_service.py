@@ -144,9 +144,16 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                     result = (await self.rpc('tools/call', {'name': 'shell', 'arguments': {'cwd': cwd, 'command': command}}))['result']
                 return result['isError'], result['content'][0]['text']
 
-            error, text = await shell('proj', 'git init -q && git add hello.c && git commit -qm first && git log --format=%s')
+            proj = Path(folder) / 'rw'
+            for args in (['init', '-q'], ['add', 'hello.c'], ['-c', 'user.name=T', '-c', 'user.email=t@x', 'commit', '-qm', 'first']):
+                subprocess.run(['git', *args], cwd=proj, check=True, capture_output=True)
+            error, text = await shell('proj', 'git log --format=%s && git status --short')
             self.assertFalse(error, text)
-            self.assertIn('first', text)  # git works, and can commit in a writable folder
+            self.assertIn('first', text)  # git reads
+            for command in ('git commit -qam x', 'git checkout -b x', 'git branch new', 'git push', 'git -C .. log'):
+                error, text = await shell('proj', command)  # but committing and branching belong to mr
+                self.assertTrue(error, command)
+                self.assertIn('mr tool', text)
             self.assertTrue((await shell('proj', 'touch .git/hooks/pre-commit'))[0])  # Hooks stay read-only
             if shutil.which('clang-format'):  # The agents' style template is found at /work/.clang-format
                 error, text = await shell('proj', 'clang-format hello.c')
@@ -223,6 +230,21 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(run('git', 'rev-list', '--count', 'main', cwd=repo).stdout.decode().strip(), '2')
             (repo / 'c.c').write_text('int c;\n')
             self.assertIn('already exists', (await mr({'path': 'proj', 'title': 'Add b.c'}))[1])
+
+            # sync: a commit that reached GitHub elsewhere comes in; uncommitted changes block it
+            self.assertIn('uncommitted changes', (await mr({'path': 'proj', 'action': 'sync'}))[1])
+            (repo / 'c.c').unlink()
+            other = root / 'other'
+            run('git', 'clone', '-q', str(remote), str(other))
+            (other / 'd.c').write_text('int d;\n')
+            run('git', 'add', 'd.c', cwd=other)
+            run('git', '-c', 'user.name=T', '-c', 'user.email=t@x', 'commit', '-q', '-m', 'Add d.c elsewhere', cwd=other)
+            run('git', 'push', '-q', 'origin', 'main', cwd=other)
+            error, text = await mr({'path': 'proj', 'action': 'sync'})
+            self.assertFalse(error, text)
+            self.assertIn('Add d.c elsewhere', text)
+            self.assertTrue((repo / 'd.c').exists())
+            self.assertIn('up to date', (await mr({'path': 'proj', 'action': 'sync'}))[1])
 
     async def test_ed_edits_inside_allowed_folders_and_protects_tools_and_git(self):
         with tempfile.TemporaryDirectory() as folder:

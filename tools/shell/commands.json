@@ -60,6 +60,6 @@
     "strings": "printable strings in a binary",
     "hexdump": "dump a file in hex",
     "od": "dump a file in octal or hex",
-    "git": "git (no network: push, pull and fetch cannot reach a server; hooks are off)"
+    "git": "git, read-only: status, log, show, diff, blame, grep, ls-files, restore (undo edits), listing branches and tags. The mr tool commits and opens merge requests; mr with action sync updates from GitHub"
   }
 }
