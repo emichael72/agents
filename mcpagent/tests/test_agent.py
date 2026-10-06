@@ -211,6 +211,11 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result['isError'])
         self.assertIn('not an allowed folder', result['content'][0]['text'])
 
+    async def test_zero_means_no_tool_call_limit(self):
+        self.agent.max_tool_calls = 0
+        self.outputs = [[call(self.aliases['greet'], {'name': 'Alice'}, f'call-{n}')] for n in range(4)] + [[message('Done')]]
+        self.assertEqual(await self.agent.ask('Keep calling'), 'Done')  # Four calls, past the fixture's limit of 2
+
     async def test_call_limit_stops_repeated_execution(self):
         self.outputs = [[call(self.aliases['greet'], {'name': 'Alice'}, f'call-{n}')] for n in range(3)]
         with patch.object(self.agent.mcp, 'request', wraps=self.agent.mcp.request) as request:

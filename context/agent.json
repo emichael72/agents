@@ -1,4 +1,4 @@
 {
-  "description": "Agent loop settings shared by all three agents. max_tool_calls: the most tool calls the model may make while answering one prompt; a multi-step task (read a project, change it, build, open a merge request) needs 20 or more.",
-  "max_tool_calls": 50
+  "description": "Agent loop settings shared by all three agents. max_tool_calls: the most tool calls the model may make while answering one prompt; 0 means no limit (a model stuck in a loop then runs until stopped with Ctrl+C). A multi-step task (read a project, change it, build, open a merge request) needs 20 or more.",
+  "max_tool_calls": 0
 }

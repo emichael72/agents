@@ -53,8 +53,12 @@ MODELS_FILE = CONTEXT_DIR / "models.json"
 OUTPUT_FILE = CONTEXT_DIR / "output.json"  # Terminal layout
 AGENT_FILE = CONTEXT_DIR / "agent.json"  # Agent loop settings
 
-# Tool calls per prompt, shared with the other agents (context/agent.json)
-LIMITS = UsageLimits(tool_calls_limit=int(json.loads(AGENT_FILE.read_text(encoding="utf-8")).get("max_tool_calls", 8)))
+# Tool calls per prompt, shared with the other agents (context/agent.json); 0 means no limit.
+# pydantic-ai also caps model requests (50 by default): allow one per tool call, plus retries and
+# the final answer, or none at all when tool calls are unlimited.
+MAX_TOOL_CALLS = int(json.loads(AGENT_FILE.read_text(encoding="utf-8")).get("max_tool_calls", 8))
+LIMITS = (UsageLimits(tool_calls_limit=MAX_TOOL_CALLS, request_limit=2 * MAX_TOOL_CALLS + 1) if MAX_TOOL_CALLS
+          else UsageLimits(tool_calls_limit=None, request_limit=None))
 
 console = Console(highlight=False, soft_wrap=True)  # Never re-wrap lines
 

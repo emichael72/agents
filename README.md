@@ -66,8 +66,8 @@ change on its next start. None of this is hard-coded in the agents.
 
 - `context/instructions.json`: the instructions (system prompt) given to the model, as a list of
   lines.
-- `context/agent.json`: the agent loop: `max_tool_calls` (50), the most tool calls the model may
-  make while answering one prompt.
+- `context/agent.json`: the agent loop: `max_tool_calls`, the most tool calls the model may make while
+  answering one prompt; `0` (the setting now) means no limit, so stop a runaway answer with Ctrl+C.
 - `context/output.json`: the terminal layout: `width` (120) and `show_time` (true). See
   "Terminal output" below.
 - `context/clang-format.yaml`: the C/C++ style (4-space indents, function braces on their own

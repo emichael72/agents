@@ -24,7 +24,9 @@ const AGENT_FILE = path.join(CONTEXT_DIR, 'agent.json'); // Agent loop settings
 
 // Tool calls per prompt, shared with the other agents (context/agent.json). Each step is one model
 // call plus the tools it requested, so this allows at least max_tool_calls calls and a final answer.
-const MAX_STEPS = ((JSON.parse(readFileSync(AGENT_FILE, 'utf8')) as { max_tool_calls?: number }).max_tool_calls ?? 8) + 1;
+// 0 means no limit: the loop then ends only when the model answers without calling a tool.
+const MAX_TOOL_CALLS = (JSON.parse(readFileSync(AGENT_FILE, 'utf8')) as { max_tool_calls?: number }).max_tool_calls ?? 8;
+const MAX_STEPS = MAX_TOOL_CALLS ? MAX_TOOL_CALLS + 1 : 0;
 
 const gray = (text: string) => styleText('gray', text); // Everything except the model's answer
 
@@ -117,7 +119,7 @@ export function buildAgent(model: LanguageModel, tools: ToolSet, parallel = fals
     timeout: { stepMs: timeoutSeconds * 1000 }, // one model call plus the tools it requested
     instructions: loadInstructions(),
     tools: parallel ? tools : oneAtATime(tools),
-    stopWhen: isStepCount(MAX_STEPS),
+    stopWhen: MAX_STEPS ? isStepCount(MAX_STEPS) : () => false,
   });
 }
 

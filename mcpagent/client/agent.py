@@ -18,6 +18,7 @@ Description:
       - `run_agent`: the terminal front end, for one prompt or an interactive session.
 """
 import asyncio
+import itertools
 import json
 import os
 import re
@@ -192,7 +193,7 @@ class MCPAgent:
             instructions: The model's instructions (see `load_instructions`).
             trace: Called with a line for each tool call ("→ tool(args)"), result ("← tool: output")
                 and failure ("✗ tool: message").
-            max_tool_calls: Maximum tool calls in one user turn.
+            max_tool_calls: Maximum tool calls in one user turn; 0 means no limit.
             context: Extra instructions appended to `instructions`.
         """
         base_url = base_url.rstrip("/")
@@ -364,7 +365,7 @@ class MCPAgent:
         calls_used = 0
         self.usage = []  # (input tokens, output tokens) per model call of this turn, when reported
         try:
-            for _ in range(self.max_tool_calls + 1):
+            for _ in (itertools.count() if not self.max_tool_calls else range(self.max_tool_calls + 1)):
                 response = await self._request_response({
                     "model": self.model, "instructions": self.instructions,
                     "input": conversation, "tools": self.tools,
@@ -411,7 +412,7 @@ class MCPAgent:
                         raise RuntimeError(f"{self.provider} returned no text or tool calls.")
                     self.history = conversation
                     return text
-                if calls_used + len(calls) > self.max_tool_calls:
+                if self.max_tool_calls and calls_used + len(calls) > self.max_tool_calls:
                     raise RuntimeError("Tool-call limit reached. Ask for fewer actions in one turn.")
                 for call in calls:
                     result = await self._execute(call)
