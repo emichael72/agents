@@ -22,14 +22,14 @@ from pydantic_ai.toolsets import FunctionToolset
 
 TOOLS_DIR = Path(__file__).resolve().parent.parent / "tools"
 SCRIPT_TIMEOUT = 30
-AGENT_NAME = "Pydantic Agent"  # Lets tools such as greet_user say which agent ran them
+AGENT_NAME = "Pydantic Agent"  # Lets tools such as greet say which agent ran them
 
 
 def run_script(*command: str, env: dict[str, str] | None = None) -> str:
     """
     Run a tool command from the tools folder and return its output.
     Args:
-        *command: The program and its arguments, e.g. ("bash", "greet_user/greet_user.sh").
+        *command: The program and its arguments, e.g. ("bash", "greet/greet.sh").
         env: Extra environment variables for the command (AGENT_NAME is always set).
     Returns:
         str: The command's standard output, stripped.

@@ -1,0 +1,10 @@
+{
+  "description": "Runs make (GNU make) in a project folder inside the allowed folders, e.g. core_dump, to build it or run a target such as clean. Reports whether it succeeded and the output, including compiler errors.",
+  "command": "python3",
+  "args": ["make/make.py"],
+  "params": [
+    {"name": "path", "type": "string", "description": "Folder with the Makefile, starting with an allowed folder name, e.g. core_dump", "style": "positional"},
+    {"name": "target", "type": "string", "description": "Target to build, e.g. all or clean; omit it for the Makefile's default", "style": "flag", "required": false}
+  ],
+  "resource": "make/README.md"
+}

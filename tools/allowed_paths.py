@@ -4,13 +4,16 @@ Module: allowed_paths.py
 
 Description:
     The one rule for which files and folders the tools may touch, shared by every tool that takes
-    a path (list_files, git_log, count_lines, search_text, disk_usage, doxy_check). It lives in the
+    a path (ls, view_file, wc, search_text, disk_usage, git, make, gcc, doxy_check). It lives in the
     tools folder, next to allowed_paths.json, and is not a tool itself (it has no tool.json).
 
     A path the model gives starts with the name of an allowed folder: `core_dump/src/pi.c` means
     `src/pi.c` inside the folder that allowed_paths.json names core_dump. Paths are resolved
     (`..` and symbolic links included) before they are checked, so nothing outside the allowed
     folders can be reached.
+
+    Tools that write (make, gcc) use the same rule: what they create stays inside the allowed
+    folders.
 
     Python tools import it; Bash tools run it:
         python3 allowed_paths.py PATH [--dir | --file]
@@ -50,7 +53,8 @@ def resolve(path: str, kind: str = "any", allowed: Optional[dict[str, Path]] = N
     Turn a "<name>/<sub/path>" into an existing file or folder inside the allowed folder of that name.
     Args:
         path: The path the model gave.
-        kind: "dir" or "file" to require one, "any" for either.
+        kind: "dir" or "file" to require one, "any" for either, or "output" for a file that may not
+            exist yet (its folder must exist, inside the allowed folder).
         allowed: The allowed folders; None reads them.
     Returns:
         tuple[Path, str]: The absolute path, and the path as it should be shown ("<name>/<sub/path>").
@@ -67,7 +71,10 @@ def resolve(path: str, kind: str = "any", allowed: Optional[dict[str, Path]] = N
     target = (base / rest).resolve()
     if target != base and base not in target.parents:
         raise ValueError(f"'{path}' is outside the allowed folder '{name}'.")
-    if not target.exists():
+    if kind == "output":
+        if target.is_dir() or not target.parent.is_dir():
+            raise ValueError(f"'{path}' must be a file name in an existing folder.")
+    elif not target.exists():
         raise ValueError(f"'{path}' does not exist.")
     if kind == "dir" and not target.is_dir():
         raise ValueError(f"'{path}' is not a folder.")
@@ -75,6 +82,21 @@ def resolve(path: str, kind: str = "any", allowed: Optional[dict[str, Path]] = N
         raise ValueError(f"'{path}' is not a file.")
     shown = name if target == base else f"{name}/{target.relative_to(base)}"
     return target, shown
+
+
+def display(text: str, allowed: Optional[dict[str, Path]] = None) -> str:
+    """
+    Show the absolute paths in a command's output the way the model gives them (<name>/...).
+    Args:
+        text: The output, e.g. a compiler's messages.
+        allowed: The allowed folders; None reads them.
+    Returns:
+        str: The text, with each allowed folder's absolute path replaced by its name.
+    """
+    allowed = load_allowed() if allowed is None else allowed
+    for name, folder in sorted(allowed.items(), key=lambda item: -len(str(item[1]))):  # Deepest first
+        text = text.replace(str(folder), name)
+    return text
 
 
 def describe(allowed: Optional[dict[str, Path]] = None) -> str:

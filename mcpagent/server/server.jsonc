@@ -44,7 +44,7 @@
 	// Tools live in the shared agents/tools folder; each <tool>/tool.json describes one tool.
 	// Paths in a manifest are relative to that folder, which is also the tools' working directory.
 	"tools_dir": "../../tools",
-	// Lets tools such as greet_user say which agent ran them
+	// Lets tools such as greet say which agent ran them
 	"tools_env": {"AGENT_NAME": "MCP Agent"},
 
 	"templates": {
@@ -59,8 +59,8 @@
 		*/
 
 		"say_hello": {
-			"description": "Template to greet a specific user using greet_user",
-			"command": "greet_user",
+			"description": "Template to greet a specific user using greet",
+			"command": "greet",
 			// Must match one of the tools above
 			"args": {
 				"name": "Alice"
@@ -68,8 +68,8 @@
 			}
 		},
 		"pick_number": {
-			"description": "Template to generate a random number up to 100 using get_rand",
-			"command": "get_rand",
+			"description": "Template to generate a random number up to 100 using rand",
+			"command": "rand",
 			// Must match one of the tools above
 			"args": {
 				"max": 100

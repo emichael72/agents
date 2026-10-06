@@ -107,7 +107,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.aliases = {name: alias for alias, (_, name, _) in self.agent.routes.items()}
 
     async def test_real_shell_tool_and_followup_history(self):
-        self.outputs = [[call(self.aliases['greet_user'], {"name": "Alice Smith"})],
+        self.outputs = [[call(self.aliases['greet'], {"name": "Alice Smith"})],
                         [message('Hello, Alice Smith!')], [message('The name was Alice Smith.')]]
         self.assertEqual(await self.agent.ask('Greet Alice Smith'), 'Hello, Alice Smith!')
         result = self.requests[1]['input'][-1]
@@ -116,8 +116,8 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['call_id'], 'call-1')
         self.assertFalse(self.requests[0]['store'])
         # Tool lines use the real tool name (not the alias) and the readable output
-        self.assertEqual(self.traces[:2], ['→ greet_user({"name":"Alice Smith"})',
-                                           '← greet_user: Hello, Alice Smith! Greetings from the MCP Agent.'])
+        self.assertEqual(self.traces[:2], ['→ greet({"name":"Alice Smith"})',
+                                           '← greet: Hello, Alice Smith! Greetings from the MCP Agent.'])
         await self.agent.ask('What name did I use?')
         self.assertIn('Greet Alice Smith', json.dumps(self.requests[2]['input']))
         self.assertNotIn('test-key-not-real', json.dumps(self.requests) + ''.join(self.traces))
@@ -127,7 +127,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conn.protocol_version, '2025-06-18')
 
     async def test_unknown_tool_and_bad_arguments_do_not_execute(self):
-        for name, arguments in [('not_discovered', {}), (self.aliases['greet_user'], {'name': 123})]:
+        for name, arguments in [('not_discovered', {}), (self.aliases['greet'], {'name': 123})]:
             self.outputs = [[call(name, arguments)], [message('Invalid tool call')]]
             await self.agent.ask('Try a tool')
             result = json.loads(self.requests[-1]['input'][-1]['output'])
@@ -135,13 +135,13 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         # Both calls are shown, then rejected before anything runs (no "←" result line)
         self.assertEqual(self.traces, [
             '→ not_discovered({})', '✗ not_discovered: The requested tool is not in the discovered tool list',
-            '→ greet_user({"name":123})', "✗ greet_user: 123 is not of type 'string'",
+            '→ greet({"name":123})', "✗ greet: 123 is not of type 'string'",
         ])
 
     async def test_streaming_tool_loop_and_incremental_text(self):
         chunks = []
         requests = []
-        alias = self.aliases['greet_user']
+        alias = self.aliases['greet']
 
         class Stream(httpx.AsyncByteStream):
             async def __aiter__(self):
@@ -199,7 +199,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.requests), 1)
 
     async def test_tool_failure_returned_to_model(self):
-        self.outputs = [[call(self.aliases['count_lines'], {'file': 'missing-file'})],
+        self.outputs = [[call(self.aliases['wc'], {'file': 'missing-file'})],
                         [message('File not found')]]
         await self.agent.ask('Count missing-file')
         result = json.loads(self.requests[-1]['input'][-1]['output'])
@@ -207,7 +207,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('not an allowed folder', result['content'][0]['text'])
 
     async def test_call_limit_stops_repeated_execution(self):
-        self.outputs = [[call(self.aliases['greet_user'], {'name': 'Alice'}, f'call-{n}')] for n in range(3)]
+        self.outputs = [[call(self.aliases['greet'], {'name': 'Alice'}, f'call-{n}')] for n in range(3)]
         with patch.object(self.agent.mcp, 'request', wraps=self.agent.mcp.request) as request:
             with self.assertRaisesRegex(RuntimeError, 'limit'):
                 await self.agent.ask('Keep calling')

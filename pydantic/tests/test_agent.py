@@ -27,7 +27,7 @@ from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel 
 import agent  # noqa: E402
 import toolset as tools_module  # noqa: E402
 
-CALLS = [("greet_user", {"name": "Alice"}), ("count_lines", {"file": "missing-file"}),
+CALLS = [("greet", {"name": "Alice"}), ("wc", {"file": "missing-file"}),
          ("calculate", {"expression": "6 * 7"})]
 
 
@@ -148,14 +148,14 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         await agent.ask(bot, "Do everything", [], trace=True)
         lines = [line[:1] + " " + line[2:].split("(")[0].split(":")[0]
                  for line in self.output.getvalue().splitlines() if line[:1] in "→←✗" and line]
-        self.assertEqual(lines, ["→ greet_user", "← greet_user", "→ count_lines", "✗ count_lines",
+        self.assertEqual(lines, ["→ greet", "← greet", "→ wc", "✗ wc",
                                  "→ calculate", "← calculate"])
 
-    def test_greet_user_without_name_greets_the_shell_user(self):
-        greet_user = tool_function(tools_module.toolset, "greet_user")
-        self.assertIn(f"Hello, {os.environ['USER']}!", greet_user())
-        self.assertIn("Hello, Alice! Greetings from the Pydantic Agent.", greet_user(name="Alice"))
-        self.assertIn(f"Hello, {os.environ['USER']}!", greet_user(name=None))  # null means omitted
+    def test_greet_without_name_greets_the_shell_user(self):
+        greet = tool_function(tools_module.toolset, "greet")
+        self.assertIn(f"Hello, {os.environ['USER']}!", greet())
+        self.assertIn("Hello, Alice! Greetings from the Pydantic Agent.", greet(name="Alice"))
+        self.assertIn(f"Hello, {os.environ['USER']}!", greet(name=None))  # null means omitted
 
     async def test_history_carries_across_turns(self):
         async def remember(messages, info):

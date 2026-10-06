@@ -70,7 +70,7 @@ lines. In the chat, `/history` shows the messages exchanged with the model, `/re
 | `--context path/to/instructions.txt` | Add instructions for the assistant |
 
 Try: "Greet me", "Greet Alice", "Pick a random number between 1 and 10", "Count the lines in
-greet_user/README.md", "What OS is this machine running?", "Count the lines in missing-file and
+greet/README.md", "What OS is this machine running?", "Count the lines in missing-file and
 explain what happened". The tools are listed in [../tools/README.md](../tools/README.md).
 
 ## How it maps to the other two
@@ -178,7 +178,7 @@ update `"servers"` in `client/client.jsonc` too.
 - The server binds to localhost. Browser origins are limited to the default Inspector origins;
   other browser clients need `allowed_origins` in the server configuration.
 - Tools run automatically with the server user's permissions and are not sandboxed (for example,
-  `count_lines` accepts any file path). Authentication, output limits and cancellation need
+  `wc` accepts any file path). Authentication, output limits and cancellation need
   work before any remote deployment.
 
 ## Troubleshooting

@@ -1,9 +1,0 @@
-{
-  "description": "Lists the files and folders in a folder, with sizes and dates. Only the allowed folders (such as core_dump, the C sample project, and tools) and their sub-folders can be listed; omit the path to see the allowed folder names.",
-  "command": "python3",
-  "args": ["list_files/list_files.py"],
-  "params": [
-    {"name": "path", "type": "string", "description": "<allowed folder name>/<sub-folder>, e.g. core_dump or core_dump/src/modules; omit it to list the allowed folder names", "style": "positional", "required": false}
-  ],
-  "resource": "list_files/README.md"
-}

@@ -64,19 +64,19 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         shared_tools = Path(__file__).resolve().parents[2] / 'tools'  # agents/tools
         self.assertEqual(len(tools['result']['tools']), len(list(shared_tools.glob('*/tool.json'))))
         for name, args, expected in [
-            ('greet_user', {'name': 'Alice Smith'}, 'Hello, Alice Smith!'),
-            ('greet_user', {}, f"Hello, {os.environ['USER']}!"),  # no name: the shell user
-            ('get_rand', {'max': 1}, '1-1): 1'),
-            ('count_lines', {'file': 'tools/greet_user/README.md'}, 'lines.'),
-            ('view_file', {'path': 'tools/greet_user/tool.json', 'count': 2}, 'lines 1-2 of'),
-            ('get_system_info', {}, 'machine='),
-            ('current_time', {'timezone': 'UTC'}, 'UTC (UTC+00:00)'),
+            ('greet', {'name': 'Alice Smith'}, 'Hello, Alice Smith!'),
+            ('greet', {}, f"Hello, {os.environ['USER']}!"),  # no name: the shell user
+            ('rand', {'max': 1}, '1-1): 1'),
+            ('wc', {'file': 'tools/greet/README.md'}, 'lines.'),
+            ('view_file', {'path': 'tools/greet/tool.json', 'count': 2}, 'lines 1-2 of'),
+            ('sysinfo', {}, 'machine='),
+            ('time', {'timezone': 'UTC'}, 'UTC (UTC+00:00)'),
             ('calculate', {'expression': '(17 * 23) + sqrt(144)'}, '= 403'),
-            ('list_files', {'path': 'tools/greet_user'}, 'tool.json'),
-            ('list_files', {}, 'Allowed folders'),
-            ('search_text', {'pattern': 'AGENT_NAME', 'path': 'tools/greet_user'}, 'tools/greet_user/greet_user.sh:'),
-            ('disk_usage', {'path': 'tools/greet_user'}, 'tools/greet_user: '),
-            ('git_log', {'count': 1}, ' 20'),  # "<hash> <date> <subject>"
+            ('ls', {'path': 'tools/greet'}, 'tool.json'),
+            ('ls', {}, 'Allowed folders'),
+            ('search_text', {'pattern': 'AGENT_NAME', 'path': 'tools/greet'}, 'tools/greet/greet.sh:'),
+            ('disk_usage', {'path': 'tools/greet'}, 'tools/greet: '),
+            ('git', {'path': 'tools', 'command': 'log', 'args': '-1 --date=short --format="%h %ad %s"'}, ' 20'),
         ]:
             result = (await self.rpc('tools/call', {'name': name, 'arguments': args}))['result']
             self.assertFalse(result['isError'], result)
@@ -110,22 +110,61 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue((await check(f'{folder}/good.c'))['isError'])  # Absolute paths are not allowed
 
     async def test_path_tools_stay_inside_the_allowed_folders(self):
-        for path in ('tools/..', 'tools/greet_user/../..', 'etc', '/etc'):
-            for name, args in [('list_files', {'path': path}), ('view_file', {'path': path + '/passwd'}),
-                               ('count_lines', {'file': path + '/passwd'}), ('disk_usage', {'path': path}),
-                               ('search_text', {'pattern': 'root', 'path': path}), ('git_log', {'path': path}),
-                               ('doxy_check', {'paths': path})]:
+        for path in ('tools/..', 'tools/greet/../..', 'etc', '/etc'):
+            for name, args in [('ls', {'path': path}), ('view_file', {'path': path + '/passwd'}),
+                               ('wc', {'file': path + '/passwd'}), ('disk_usage', {'path': path}),
+                               ('search_text', {'pattern': 'root', 'path': path}),
+                               ('git', {'path': path, 'command': 'log'}), ('doxy_check', {'paths': path}),
+                               ('make', {'path': path}), ('gcc', {'sources': path + '/x.c'})]:
                 result = (await self.rpc('tools/call', {'name': name, 'arguments': args}))['result']
                 self.assertTrue(result['isError'], (name, path))
-        link = Path(__file__).resolve().parents[2] / 'tools' / 'greet_user' / 'escape-test-link'
+        link = Path(__file__).resolve().parents[2] / 'tools' / 'greet' / 'escape-test-link'
         link.symlink_to('/etc')
         try:
-            result = (await self.rpc('tools/call', {'name': 'list_files',
-                                                    'arguments': {'path': 'tools/greet_user/escape-test-link'}}))['result']
+            result = (await self.rpc('tools/call', {'name': 'ls',
+                                                    'arguments': {'path': 'tools/greet/escape-test-link'}}))['result']
             self.assertTrue(result['isError'])
             self.assertIn('outside the allowed folder', result['content'][0]['text'])
         finally:
             link.unlink()
+
+    async def test_make_gcc_and_git_work_inside_and_refuse_outside(self):
+        source = '#include <stdio.h>\nint main(void) { int unused; printf("hi\\n"); return 0; }\n'
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / 'hello.c').write_text(source)
+            (Path(folder) / 'Makefile').write_text('hello: hello.c\n\tcc -o hello hello.c\nclean:\n\trm -f hello\n')
+            allowed = Path(folder) / 'allowed_paths.json'
+            allowed.write_text(json.dumps({'paths': {'sample': folder}}))
+
+            async def call(name, args):
+                with patch.dict(os.environ, {'TOOLS_ALLOWED_PATHS': str(allowed)}):
+                    result = (await self.rpc('tools/call', {'name': name, 'arguments': args}))['result']
+                return result['isError'], result['content'][0]['text']
+
+            error, text = await call('make', {'path': 'sample'})
+            self.assertFalse(error, text)
+            self.assertIn('make (default target) in sample: succeeded', text)
+            self.assertTrue((Path(folder) / 'hello').exists())
+            self.assertTrue((await call('make', {'path': 'sample', 'target': 'CC=evil'}))[0])
+            self.assertTrue((await call('make', {'path': 'sample', 'target': '-f/etc/passwd'}))[0])
+
+            error, text = await call('gcc', {'sources': 'sample/hello.c', 'flags': '-Wall'})
+            self.assertFalse(error, text)
+            self.assertIn('1 warning(s)', text)
+            self.assertIn("sample/hello.c:2:", text)  # Paths shown as the model gives them
+            error, text = await call('gcc', {'sources': 'sample/hello.c', 'output': 'sample/built'})
+            self.assertFalse(error, text)
+            self.assertTrue((Path(folder) / 'built').exists())
+            for args in ({'sources': 'sample/hello.c', 'flags': '-fplugin=x.so'},
+                         {'sources': 'sample/hello.c', 'output': '/tmp/built'},
+                         {'sources': 'sample/hello.c', 'flags': '-I/etc'}):
+                self.assertTrue((await call('gcc', args))[0], args)
+
+        for args in ({'path': 'tools', 'command': 'commit', 'args': '-m x'},
+                     {'path': 'tools', 'command': 'diff', 'args': '--no-index /etc/passwd x'},
+                     {'path': 'tools', 'command': 'branch', 'args': 'new-branch'}):
+            result = (await self.rpc('tools/call', {'name': 'git', 'arguments': args}))['result']
+            self.assertTrue(result['isError'], args)
 
     def test_tool_manifests_are_discovered(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -142,9 +181,9 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_errors(self):
         # A missing name is valid (greets the shell user); a wrong type, extra field or non-object is not.
         for arguments in ({'name': 123}, {'name': 'Alice', 'extra': True}, []):
-            result = await self.rpc('tools/call', {'name': 'greet_user', 'arguments': arguments})
+            result = await self.rpc('tools/call', {'name': 'greet', 'arguments': arguments})
             self.assertEqual(result['error']['code'], -32602)
-        for name, args in [('get_rand', {'max': 0}), ('count_lines', {'file': 'missing-file'})]:
+        for name, args in [('rand', {'max': 0}), ('wc', {'file': 'missing-file'})]:
             result = await self.rpc('tools/call', {'name': name, 'arguments': args})
             self.assertTrue(result['result']['isError'])
 

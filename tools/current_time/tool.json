@@ -1,9 +1,0 @@
-{
-  "description": "Returns the current date and time, optionally in a given time zone.",
-  "command": "bash",
-  "args": ["current_time/current_time.sh"],
-  "params": [
-    {"name": "timezone", "type": "string", "description": "IANA time zone such as Europe/London or Asia/Tokyo; omit it for the machine's local time", "style": "flag", "required": false}
-  ],
-  "resource": "current_time/README.md"
-}

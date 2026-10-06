@@ -1,9 +1,0 @@
-{
-  "description": "Counts the number of lines in a given file.",
-  "command": "bash",
-  "args": ["count_lines/count_lines.sh"],
-  "params": [
-    {"name": "file", "type": "string", "description": "File path, starting with an allowed folder name, e.g. core_dump/README.md or tools/greet_user/README.md", "style": "positional"}
-  ],
-  "resource": "count_lines/README.md"
-}

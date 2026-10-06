@@ -1,5 +1,5 @@
 {
-  "description": "Shows a text file with line numbers, up to 200 lines per call. Only files inside the allowed folders (such as core_dump, the C sample project, and tools) can be read; list_files without a path shows the allowed folder names.",
+  "description": "Shows a text file with line numbers, up to 200 lines per call. Only files inside the allowed folders (such as core_dump, the C sample project, and tools) can be read; ls without a path shows the allowed folder names.",
   "command": "python3",
   "args": ["view_file/view_file.py"],
   "params": [
