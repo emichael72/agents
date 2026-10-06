@@ -31,7 +31,7 @@ bash mr_quiz/mr_quiz.sh serve           # what the systemd unit runs
    `main`: merging requires a passing `developer-quiz` status check and an up-to-date branch,
    and the rule also applies to administrators. Until the status says success, GitHub blocks the
    merge button.
-2. Every 30 seconds the service lists the open PRs that target `main`. For each new revision
+2. Every few seconds (`QUIZ_POLL_SECONDS`, 5) the service lists the open PRs that target `main`. For each new revision
    (head and base commit) of a PR opened by the configured developer, it posts "Checking
    documentation and preparing the developer quiz" and inspects the change (`changes.py`):
    - **Documentation:** it downloads the PR's files and runs `doxy_check` on the whole tree,
@@ -102,6 +102,7 @@ set in the environment (for example in `~/.config/mr-quiz.env` for the service) 
 | `QUIZ_REPO` | `emichael72/core_dump` | The repository to gate |
 | `QUIZ_DEVELOPER` | `emichael72` | The only PR author assessed |
 | `QUIZ_BASE_URL` | `http://minion:8000` | Where the PR's Details link points |
+| `QUIZ_POLL_SECONDS` | `5` | Seconds between GitHub polls. Each poll that finds nothing new costs one of the 5,000 GitHub API requests per hour your `gh` login allows: 720 an hour at 5 seconds |
 | `QUIZ_MODEL_PROFILE` | empty: the models file's default | Model profile (`local` or `openai`) |
 | `QUIZ_WEB_USER`, `QUIZ_WEB_PASSWORD` | `user`, `pass` | The web sign-in |
 

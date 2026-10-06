@@ -72,6 +72,7 @@ DATA = Path(os.environ.get("QUIZ_DATA_DIR") or TOOL_DIR / "data")
 REPO = setting("QUIZ_REPO")
 DEVELOPER = setting("QUIZ_DEVELOPER")
 BASE_URL = setting("QUIZ_BASE_URL").rstrip("/")
+POLL_SECONDS = float(setting("QUIZ_POLL_SECONDS"))  # Each idle poll costs one GitHub API request
 PROFILE = setting("QUIZ_MODEL_PROFILE", required=False) or None  # None uses the models file's default
 WEB_USER = setting("QUIZ_WEB_USER")  # Demo sign-in, shown on the sign-in page
 WEB_PASSWORD = setting("QUIZ_WEB_PASSWORD")

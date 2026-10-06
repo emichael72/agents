@@ -6,6 +6,7 @@
     "QUIZ_REPO": "emichael72/core_dump",
     "QUIZ_DEVELOPER": "emichael72",
     "QUIZ_BASE_URL": "http://minion:8000",
+    "QUIZ_POLL_SECONDS": "5",
     "QUIZ_MODEL_PROFILE": "",
     "QUIZ_WEB_USER": "user",
     "QUIZ_WEB_PASSWORD": "pass"

@@ -54,7 +54,7 @@ def status(pr: Optional[int] = None, port: int = 8000) -> str:
         else:
             row = quiz.find_quiz(info["number"], head, info["base"]["sha"])
             if row is None:
-                state = "no quiz yet; the service creates one within a minute or two"
+                state = "no assessment yet; the service makes one within a minute"
             elif not row["docs_ok"]:
                 state = f"documentation problems, merge blocked: {quiz.BASE_URL}/q/{row['id']}"
             elif row["cosmetic"]:
@@ -110,7 +110,8 @@ def main(argv: Optional[list[str]] = None) -> None:
     serve_cmd = sub.add_parser("serve", help="Run the web service and the GitHub poller")
     serve_cmd.add_argument("--host", default="0.0.0.0", help="Bind address (default 0.0.0.0)")
     serve_cmd.add_argument("--port", type=int, default=8000, help="Port (default 8000)")
-    serve_cmd.add_argument("--poll", type=float, default=30, help="Seconds between GitHub polls; 0 disables")
+    serve_cmd.add_argument("--poll", type=float, default=quiz.POLL_SECONDS,
+                           help=f"Seconds between GitHub polls; 0 disables (default {quiz.POLL_SECONDS:g}, QUIZ_POLL_SECONDS)")
     serve_cmd.add_argument("--profile", help="Model profile from context/models.json (local or openai)")
 
     args = parser.parse_args(argv)
