@@ -18,11 +18,11 @@ It is a tool and a resident service:
 **Usage Example:**
 
 ```bash
-bash mr_gate/mr_gate.sh status          # the agents' tool: open PRs and their quiz state
-bash mr_gate/mr_gate.sh status --pr 1
-bash mr_gate/mr_gate.sh create 1 --profile openai  # create (or re-post) a PR's quiz right now
-bash mr_gate/mr_gate.sh list            # every stored quiz, as JSON
-bash mr_gate/mr_gate.sh serve           # what the systemd unit runs
+bash mr_gate/mr_gate.sh status                     # the agents' tool: open PRs and their gate state
+bash mr_gate/mr_gate.sh status --pr 1              # the same, for one PR only
+bash mr_gate/mr_gate.sh create 1 --profile openai  # assess a PR's current revision now (or re-post its status)
+bash mr_gate/mr_gate.sh list                       # every stored assessment, as JSON
+bash mr_gate/mr_gate.sh serve                      # the web service and GitHub poller (what the systemd unit runs)
 ```
 
 ## How the gate works
