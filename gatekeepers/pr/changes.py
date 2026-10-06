@@ -36,7 +36,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
-TOOLS_DIR = Path(__file__).resolve().parent.parent
+TOOLS_DIR = Path(__file__).resolve().parents[2] / "tools"  # doxy and shell
 DOXY = TOOLS_DIR / "doxy" / "doxy.sh"
 SHELL = TOOLS_DIR / "shell" / "shell.py"
 REPORT_LINES = 60

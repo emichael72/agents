@@ -143,7 +143,7 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
         FastAPI: The application.
     """
     secret = quiz.init()
-    templates = Jinja2Templates(directory=quiz.TOOL_DIR / "templates")
+    templates = Jinja2Templates(directory=quiz.GATE_DIR / "templates")
     submission_lock = threading.Lock()
 
     @asynccontextmanager

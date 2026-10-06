@@ -1,5 +1,5 @@
 {
-  "description": "Folders the tools may use, and how, checked by tools/fs_gate/fs_gate.py. Each key is the name the model uses as the first part of a path (core_dump/src means src inside core_dump). Each value is a path string (read-only), or an object: path (absolute, starting with ~, or relative to the agents repository), access (some of r = read, w = write, x = execute: run programs there, or make), and optional subpaths that override the access for sub-folders. Access applies to everything inside a folder; nothing outside these folders can be reached.",
+  "description": "Folders the tools may use, and how, checked by gatekeepers/fs/fs_gate.py. Each key is the name the model uses as the first part of a path (core_dump/src means src inside core_dump). Each value is a path string (read-only), or an object: path (absolute, starting with ~, or relative to the agents repository), access (some of r = read, w = write, x = execute: run programs there, or make), and optional subpaths that override the access for sub-folders. Access applies to everything inside a folder; nothing outside these folders can be reached.",
   "paths": {
     "core_dump": {
       "path": "~/projects/core_dump",

@@ -18,7 +18,7 @@ added here is available to all of them without code changes:
 | `ed` | Python | `path`, `action`, `old`, `new`, `all`, `start`, `end`, `line` (by action) | Edits a file: replace exact text, replace or delete lines, insert, or write a whole file; shows the changed lines |
 | `mr` | Python / `git`, `gh` | `path`, `title`, `body`, `branch` (optional) | Opens a merge request: formats the changed C/C++ files, puts the changes on a new branch, pushes it and opens a pull request into the default branch; returns the gate's quiz link |
 | `doxy` | Bash / `doxygen` | `paths` (files or folders, space-separated) | Doxygen documentation problems as `file:line: message`, or "All documented" |
-| `pr_gate` | Python (shared `.venv`) | `pr` (optional) | Open PRs in the quiz-gated repository and their quiz state; see [pr_gate/README.md](pr_gate/README.md) |
+| `pr_gate` | Python (shared `.venv`) | `pr` (optional) | Open PRs in the gated repository and their gate state; the gate itself is [gatekeepers/pr](../gatekeepers/pr/README.md) |
 
 Every path a tool takes (`shell`, `ed`, `doxy`, `mr`) must be inside the folders named in
 [`context/paths.json`](../context/paths.json), with the access the tool needs; see "Allowed paths"
@@ -75,9 +75,9 @@ access rights, inherited by everything inside it; `subpaths` override them for a
 A path given as a plain string is read-only. Folders are absolute, start with `~`, or are relative
 to the agents repository. So `ed` takes `core_dump/src/main.c` but refuses `tools/...` (read-only),
 and nothing outside those folders is reachable (`..` and symbolic links are resolved before the
-check). The checks live in the file-system gate, [`fs_gate/fs_gate.py`](fs_gate/fs_gate.py):
-Python tools import it, and Bash tools run `python3 fs_gate/fs_gate.py <path> [--dir|--file]
-[--need r|w|x]`, which prints the absolute path and the path as shown, or an error. `fs_gate/` has
+check). The checks live in the file-system gate, [`gatekeepers/fs/fs_gate.py`](../gatekeepers/fs/fs_gate.py):
+Python tools import it, and Bash tools run `python3 ../gatekeepers/fs/fs_gate.py <path> [--dir|--file]
+[--need r|w|x]`, which prints the absolute path and the path as shown, or an error. `gatekeepers/fs/` has
 no `tool.json`, so it is not offered as a tool. `paths.json` is read on every call.
 
 Each agent validates the model's arguments against the schema built from `params` before running
@@ -108,7 +108,7 @@ reported to the model as a tool failure, with the script's output as the message
 5. Restart the agents (and the MCPAgent server). Each agent lists the tools it loaded; ask one to use
    the new tool.
 
-A tool that takes a path must check it with the file-system gate (`fs_gate/fs_gate.py`, see
+A tool that takes a path must check it with the file-system gate (`gatekeepers/fs/fs_gate.py`, see
 "Allowed paths"), with the access it needs. A tool named like a command in
 [`shell/commands.json`](shell/commands.json) takes that command over: the shell then refuses it
 and points the model to the tool.

@@ -39,7 +39,7 @@ def status(pr: Optional[int] = None, port: int = 8000) -> str:
         httpx.get(f"http://127.0.0.1:{port}/health", timeout=3).raise_for_status()
         lines = [f"pr_gate service: running at {quiz.BASE_URL}"]
     except httpx.HTTPError:
-        lines = ["pr_gate service: not running, so new commits are not assessed (systemctl --user start pr-gate)"]
+        lines = ["pr_gate service: not running, so new commits are not assessed (./install.sh --gate start)"]
 
     prs = [quiz.pr_info(pr)] if pr else quiz.open_prs()
     if not prs:

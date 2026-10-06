@@ -1,7 +1,7 @@
 """
 Offline tests for the pr_gate tool: temporary storage, and mocked GitHub and model calls, so no
 real PR is ever marked. Run from the repository root:
-    .venv/bin/python -m unittest discover -s tools/pr_gate/tests
+    .venv/bin/python -m unittest discover -s gatekeepers/pr/tests
 """
 
 import copy
@@ -322,7 +322,7 @@ class ModelTests(unittest.TestCase):
         self.models.write_text(json.dumps(MODELS))
 
     def test_settings_come_from_the_manifest_and_the_environment_overrides_them(self):
-        manifest = json.loads(quiz.MANIFEST_FILE.read_text())["env"]
+        manifest = json.loads(quiz.SETTINGS_FILE.read_text())["settings"]
         self.assertEqual(quiz.setting("QUIZ_DEVELOPER"), os.environ.get("QUIZ_DEVELOPER") or manifest["QUIZ_DEVELOPER"])
         with patch.dict(os.environ, {"QUIZ_REPO": "someone/else"}):
             self.assertEqual(quiz.setting("QUIZ_REPO"), "someone/else")

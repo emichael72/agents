@@ -31,8 +31,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
-# The shared path gate (context/paths.json) lives in tools/fs_gate
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "fs_gate"))
+# The file-system gate (context/paths.json) lives in agents/gatekeepers/fs
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "gatekeepers" / "fs"))
 import fs_gate  # noqa: E402
 
 OPTIONS = ("title", "body", "branch")

@@ -39,7 +39,7 @@ ABSOLUTE=()  # Each path as resolved, and as shown in the report
 SHOWN=()
 for path in "${PATHS[@]}"; do
   # Check the path against context/paths.json (prints "<absolute path><TAB><path as shown>")
-  resolved="$(python3 "$TOOLS_DIR/fs_gate/fs_gate.py" "$path")" || { echo "$resolved"; exit 1; }
+  resolved="$(python3 "$TOOLS_DIR/../gatekeepers/fs/fs_gate.py" "$path")" || { echo "$resolved"; exit 1; }
   IFS=$'\t' read -r target shown <<< "$resolved"
   if [ -d "$target" ]; then
     mapfile -t -O "${#FILE_LIST[@]}" FILE_LIST < <(find "$target" -type f -regextype posix-extended -regex ".*\.($EXTENSIONS)$")

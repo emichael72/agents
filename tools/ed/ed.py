@@ -4,7 +4,7 @@ Module: ed.py
 
 Description:
     Edits text files for the agents, inside the allowed folders with write access
-    (context/paths.json, checked by tools/fs_gate/fs_gate.py). Four actions:
+    (context/paths.json, checked by gatekeepers/fs/fs_gate.py). Four actions:
       - replace: replace exact text (`old` with `new`); `old` must match once, unless `all` is set.
       - lines:   replace lines `start`..`end` (as `cat -n` in the shell numbers them) with `new`; an empty
                  `new` deletes them.
@@ -13,8 +13,9 @@ Description:
     After an edit it shows the changed lines, numbered, with CONTEXT lines around them.
 
     Key design points:
-      - Never edits the tools folder (the tools' code, including the gate) or the context folder
-        (paths.json, models and instructions), so the model cannot widen its own access, nor a
+      - Never edits the tools folder, the gatekeepers (the file-system and pull request gates) or
+        the context folder (paths.json, models and instructions), so the model cannot widen its own
+        access or weaken a gate, nor a
         .git folder (git's configuration can run programs).
       - Writes are atomic (a temporary file renamed over the original) and keep the file's
         permissions and line endings (LF or CRLF).
@@ -27,8 +28,8 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-# The shared path gate (context/paths.json) lives in tools/fs_gate
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "fs_gate"))
+# The file-system gate (context/paths.json) lives in agents/gatekeepers/fs
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "gatekeepers" / "fs"))
 import fs_gate  # noqa: E402
 
 ACTIONS = ("replace", "lines", "insert", "write")
@@ -49,7 +50,8 @@ def target_file(path: str, action: str) -> tuple[Path, str]:
         ValueError: If the path is not allowed, protected, missing, binary or too large.
     """
     target, shown = fs_gate.resolve(path, "output" if action == "write" else "file", "w")
-    for protected, name in ((fs_gate.TOOLS_DIR, "tools"), (fs_gate.CONTEXT_DIR, "context")):
+    for protected, name in ((fs_gate.TOOLS_DIR, "tools"), (fs_gate.CONTEXT_DIR, "context"),
+                            (fs_gate.GATEKEEPERS_DIR, "gatekeepers")):
         if target == protected or protected in target.parents:
             raise ValueError(f"'{shown}' is in the {name} folder, which ed does not change.")
     if ".git" in target.parts:

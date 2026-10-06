@@ -43,18 +43,17 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 # Local imports
 import changes
 
-TOOL_DIR = Path(__file__).resolve().parent
-MODELS_FILE = TOOL_DIR.parent.parent / "context" / "models.json"
-INSTRUCTIONS_FILE = TOOL_DIR / "context" / "instructions.json"
+GATE_DIR = Path(__file__).resolve().parent
+MODELS_FILE = GATE_DIR.parent.parent / "context" / "models.json"
+INSTRUCTIONS_FILE = GATE_DIR / "context" / "instructions.json"
 
-MANIFEST_FILE = TOOL_DIR / "tool.json"
+SETTINGS_FILE = GATE_DIR / "settings.json"
 
 
 def setting(name: str, required: bool = True) -> str:
     """
-    Read one setting: the environment first, then the "env" block of the tool's manifest
-    (tool.json), which the agents also pass to the tool. The service and the tool therefore share
-    one configuration, and the manifest is the place to change it.
+    Read one setting: the environment first, then settings.json, which the service and the agents'
+    status tool share: it is the place to change them.
     Args:
         name: The setting, e.g. "QUIZ_REPO".
         required: Fail if neither place sets it.
@@ -63,14 +62,14 @@ def setting(name: str, required: bool = True) -> str:
     Raises:
         ValueError: If a required setting is missing.
     """
-    defaults = json.loads(MANIFEST_FILE.read_text(encoding="utf-8")).get("env", {})
+    defaults = json.loads(SETTINGS_FILE.read_text(encoding="utf-8")).get("settings", {})
     value = os.environ.get(name) or defaults.get(name, "")
     if required and not value:
-        raise ValueError(f"Set {name} in the \"env\" block of {MANIFEST_FILE} (or in the environment).")
+        raise ValueError(f"Set {name} in {SETTINGS_FILE} (or in the environment).")
     return value
 
 
-DATA = Path(os.environ.get("QUIZ_DATA_DIR") or TOOL_DIR / "data")
+DATA = Path(os.environ.get("QUIZ_DATA_DIR") or GATE_DIR / "data")
 REPO = setting("QUIZ_REPO")
 DEVELOPER = setting("QUIZ_DEVELOPER")
 BASE_URL = setting("QUIZ_BASE_URL").rstrip("/")

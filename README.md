@@ -40,13 +40,24 @@ without code changes. [tools/README.md](tools/README.md) describes the manifest 
 a tool. Current tools: `shell` (ls, cat, grep, find, sed, make, gcc, git and more, in a sandbox),
 `ed` (edit files), `mr` (open a merge request), `doxy`
 (checks Doxygen documentation of C/C++ sources) and `pr_gate` (Pull Request Gate: a merge gate
-that quizzes a developer on their pull request; see [tools/pr_gate/README.md](tools/pr_gate/README.md)).
+that quizzes a developer on their pull request; see [gatekeepers/pr/README.md](gatekeepers/pr/README.md)).
 Tools that take a path only reach the folders named in
 [`context/paths.json`](context/paths.json).
 
 ```bash
 bash tools/greet/greet.sh --name Alice  # run a tool's script by hand
 ```
+
+## Gatekeepers
+
+[`gatekeepers/`](gatekeepers/README.md) holds what keeps the agents and their work in bounds:
+
+- **`fs`**, the file-system gate: every tool that takes a path checks it against the folders and
+  access rights in `context/paths.json`.
+- **`pr`**, the pull request gate: a service that builds, tests and checks the documentation of
+  each pull request to `core_dump`, then quizzes its author before GitHub allows the merge. Install
+  and run it with `./install.sh --gate install` (also `status`, `logs`, `restart`, `stop`,
+  `uninstall`).
 
 ## Context
 
@@ -64,7 +75,7 @@ change on its next start. None of this is hard-coded in the agents.
   files before opening a merge request. A project's own `.clang-format` wins.
 - `context/paths.json`: the folders the tools may use and their access (`r` read, `w` write,
   `x` execute): `core_dump` is `rwx`, `tools` is `r`. Every tool that takes a path checks it with
-  the file-system gate, `tools/fs_gate/fs_gate.py`, and `shell` mounts exactly these folders in its
+  the file-system gate, `gatekeepers/fs/fs_gate.py`, and `shell` mounts exactly these folders in its
   sandbox; see
   [tools/README.md](tools/README.md). Unlike the rest of `context/`, it is read on every tool call,
   so a change applies at once.

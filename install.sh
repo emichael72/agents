@@ -10,6 +10,9 @@
 #       records (npm ci).
 #   Each step is checked, and the installer stops at the first failure.
 #
+#   With --gate ACTION it manages the pull request gate's service instead (gatekeepers/pr, the
+#   pr-gate systemd user unit): install, uninstall, start, stop, restart, status or logs.
+#
 # Exit Codes:
 #   0 - Success.
 #   1 - Failure (missing requirements, unsupported versions, or install error).
@@ -18,7 +21,7 @@
 
 PYTHON_VENV_PATH=".venv"
 PYTHON_REQUIRED_MIN_VER="3.10"
-PYTHON_REQUIREMENTS_FILES="mcpagent/requirements.txt pydantic/requirements.txt tools/pr_gate/requirements.txt"
+PYTHON_REQUIREMENTS_FILES="mcpagent/requirements.txt pydantic/requirements.txt gatekeepers/pr/requirements.txt"
 PYTHON_MODULES_TO_RUN="mcpagent.server mcpagent.client"  # Checked with python -m <module> --version
 PYTHON_VERIFY_MODULES="mcpagent pydantic_ai jsonschema httpx httpx2 aiohttp json5 prompt_toolkit rich"
 
@@ -28,8 +31,74 @@ NODE_REQUIRED_MIN_VER="22.18"
 NPM_REQUIRED_MIN_VER="10.0"
 NODE_VERIFY_PACKAGES="ai @ai-sdk/openai-compatible @ai-sdk/mcp zod"
 
+# The pull request gate's service (gatekeepers/pr), a systemd user unit
+GATE_PATH="gatekeepers/pr"
+GATE_UNIT="pr-gate"
+GATE_PORT=8000
+GATE_NEEDS="gh bwrap doxygen clang-format"  # Commands the gate's checks use
+
 # Globally control installer verbosity
 QUIET_MODE=0
+
+#
+# @brief Manage the pull request gate's systemd user service.
+# @param $1  The action: install, uninstall, start, stop, restart, status or logs.
+# @return 0 on success, nonzero on failure.
+#
+
+gate_service() {
+
+	local action="$1"
+	local unit_dir="$HOME/.config/systemd/user"
+	local unit_file="$unit_dir/$GATE_UNIT.service"
+	local command
+
+	case "$action" in
+		install)
+			if [[ ! -x "$PYTHON_VENV_PATH/bin/python" ]]; then
+				printf "The shared .venv is missing; run %s without --gate first.\n" "$0" >&2
+				return 1
+			fi
+			for command in $GATE_NEEDS; do
+				command -v "$command" >/dev/null 2>&1 || printf "Warning: %s is not installed; the gate needs it.\n" "$command" >&2
+			done
+			gh auth status >/dev/null 2>&1 || printf "Warning: gh is not logged in (gh auth login); the gate cannot reach GitHub.\n" >&2
+			print_status_label "Installing the $GATE_UNIT service"
+			mkdir -p "$unit_dir" || return 1
+			# The unit names ~/projects/agents; write it with this repository's real location
+			sed "s#%h/projects/agents#$(pwd)#g" "$GATE_PATH/$GATE_UNIT.service" >"$unit_file" || return 1
+			run_logged "systemctl enable" systemctl --user daemon-reload || return 1
+			run_logged "systemctl enable" systemctl --user enable --now "$GATE_UNIT" || return 1
+			print_status_label_results "OK"
+			# Keep it running after logout and start it at boot
+			loginctl enable-linger "$USER" >/dev/null 2>&1 || printf "Warning: could not enable lingering for %s.\n" "$USER" >&2
+			printf "The gate serves http://%s:%s (open the port in the firewall to reach it from other machines).\n" "$(hostname)" "$GATE_PORT"
+			;;
+		uninstall)
+			print_status_label "Removing the $GATE_UNIT service"
+			systemctl --user disable --now "$GATE_UNIT" >/dev/null 2>&1
+			rm -f "$unit_file"
+			systemctl --user daemon-reload
+			print_status_label_results "OK"
+			;;
+		start | stop | restart)
+			print_status_label "${action^} the $GATE_UNIT service"
+			run_logged "systemctl $action" systemctl --user "$action" "$GATE_UNIT" || return 1
+			print_status_label_results "OK"
+			;;
+		status)
+			systemctl --user --no-pager status "$GATE_UNIT" | head -5
+			bash "$GATE_PATH/pr_gate.sh" status
+			;;
+		logs)
+			journalctl --user -u "$GATE_UNIT" -n 50 --no-pager -o cat
+			;;
+		*)
+			printf "Unknown gate action: %s (install, uninstall, start, stop, restart, status, logs)\n" "$action" >&2
+			return 1
+			;;
+	esac
+}
 
 #
 # @brief Append the final result (OK/ERROR) to the line printed by print_status_label.
@@ -296,6 +365,7 @@ main() {
 
 	local force=0
 	local skip_vercel=0
+	local gate_action=""
 	local full_venv_path
 
 	_show_help() {
@@ -308,6 +378,8 @@ Options:
   -f, --force         Recreate the shared .venv and vercel/node_modules from scratch.
       --skip-vercel   Skip the Vercel Agent (no Node.js needed).
   -q, --quiet         Suppress status reporting; only show errors.
+      --gate ACTION   Manage the pull request gate's service (gatekeepers/pr) instead of installing:
+                      install, uninstall, start, stop, restart, status or logs.
   -h, --help          Show this help message and exit.
 
 EOF
@@ -323,6 +395,11 @@ EOF
 			--skip-vercel)
 				skip_vercel=1
 				shift
+				;;
+			--gate)
+				gate_action="${2:-}"
+				[[ -z "$gate_action" ]] && { _show_help >&2; exit 1; }
+				shift 2
 				;;
 			-q | --quiet)
 				QUIET_MODE=1
@@ -352,6 +429,11 @@ EOF
 	# Paths are relative to this script, so it can be run from any directory
 	cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" || return 1
 	full_venv_path="$(pwd)/$PYTHON_VENV_PATH"
+
+	if [[ -n "$gate_action" ]]; then
+		gate_service "$gate_action"
+		return
+	fi
 
 	((!QUIET_MODE)) && printf "\nStarting the agents installer...\n\n"
 
@@ -387,6 +469,7 @@ Usage (from the repository root):
   .venv/bin/python -m mcpagent.client          # MCPAgent: the agent
   .venv/bin/python pydantic/agent.py           # the Pydantic Agent
   node vercel/agent.ts                         # the Vercel Agent
+  ./install.sh --gate install                  # the pull request gate's service (gatekeepers/pr)
 
 EOF
 }

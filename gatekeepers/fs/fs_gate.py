@@ -18,8 +18,8 @@ Description:
         which runs the folder's Makefile).
       - An entry given as a plain string is read-only.
 
-    Python tools import it; Bash tools run it:
-        python3 fs_gate/fs_gate.py PATH [--dir | --file] [--need r|w|x]
+    It lives in agents/gatekeepers/fs. Python tools import it; Bash tools run it:
+        python3 ../gatekeepers/fs/fs_gate.py PATH [--dir | --file] [--need r|w|x]
     which prints "<absolute path><TAB><path as shown>" or "Error: ..." with exit status 1.
 
     FS_GATE_PATHS may name another JSON file of the same shape, for a program that runs a tool on
@@ -35,8 +35,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-TOOLS_DIR = Path(__file__).resolve().parent.parent
-REPO_DIR = TOOLS_DIR.parent  # Relative allowed folders start here
+REPO_DIR = Path(__file__).resolve().parents[2]  # agents; relative allowed folders start here
+TOOLS_DIR = REPO_DIR / "tools"
+GATEKEEPERS_DIR = REPO_DIR / "gatekeepers"
 CONTEXT_DIR = REPO_DIR / "context"
 PATHS_FILE = CONTEXT_DIR / "paths.json"
 RIGHTS = {"r": "read", "w": "write", "x": "execute"}
