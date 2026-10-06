@@ -59,6 +59,9 @@ change on its next start. None of this is hard-coded in the agents.
   make while answering one prompt.
 - `context/output.json`: the terminal layout: `width` (120) and `show_time` (true). See
   "Terminal output" below.
+- `context/clang-format.yaml`: the C/C++ style (4-space indents, function braces on their own
+  line, 120 columns), used by `clang-format` in the shell and by `mr`, which formats the changed
+  files before opening a merge request. A project's own `.clang-format` wins.
 - `context/paths.json`: the folders the tools may use and their access (`r` read, `w` write,
   `x` execute): `core_dump` is `rwx`, `tools` is `r`. Every tool that takes a path checks it with
   the file-system gate, `tools/fs_gate/fs_gate.py`, and `shell` mounts exactly these folders in its

@@ -17,11 +17,15 @@ What it does, every time:
 1. Checks the repository: it is on its default branch (usually `main`), has no commits of its own,
    and has changes to submit.
 2. Brings the default branch up to date with GitHub (fast-forward only).
-3. Creates a new branch (`agent/<title>`, or the `branch` given), commits all changes (respecting
+3. Formats the changed and new C/C++ files with `clang-format`, using the repository's own
+   `.clang-format` if it has one, else the agents' template,
+   [`context/clang-format.yaml`](../../context/clang-format.yaml). Only those files are touched,
+   and the result lists the ones that changed.
+4. Creates a new branch (`agent/<title>`, or the `branch` given), commits all changes (respecting
    `.gitignore`), and pushes the branch.
-4. Opens the pull request into the default branch, noting which agent opened it, and switches back
+5. Opens the pull request into the default branch, noting which agent opened it, and switches back
    to the default branch; the changes now live on the branch.
-5. Waits for the merge gate's check on the new commit (`MR_WAIT_CHECK` in `tool.json`, set to
+6. Waits for the merge gate's check on the new commit (`MR_WAIT_CHECK` in `tool.json`, set to
    `developer-quiz`, for up to `MR_WAIT_SECONDS`, 100) and reports it. With
    [`pr_gate`](../pr_gate/README.md) that is the quiz link the reviewer must pass, or the
    documentation problems that fail the check. `tool.json`'s `timeout` (150 s) lets the agents wait

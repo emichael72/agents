@@ -11,9 +11,11 @@ Description:
     (git and gh). It does one thing, the same way every time:
       1. Check the repository: on its default branch, no commits of its own, changes to submit.
       2. Bring the default branch up to date with GitHub (fast-forward only).
-      3. Create the branch (new, never the default branch), commit everything, push it.
-      4. Open the pull request, then switch back to the default branch.
-      5. Wait for the merge gate's check (MR_WAIT_CHECK, e.g. pr_gate's developer-quiz) on the new
+      3. Format the changed C/C++ files with clang-format (the repository's .clang-format, else
+         the agents' template, context/clang-format.yaml), so every request follows the style.
+      4. Create the branch (new, never the default branch), commit everything, push it.
+      5. Open the pull request, then switch back to the default branch.
+      6. Wait for the merge gate's check (MR_WAIT_CHECK, e.g. pr_gate's developer-quiz) on the new
          commit, up to MR_WAIT_SECONDS, and report it: for pr_gate, the quiz the reviewer must pass.
     It never pushes to the default branch, never force-pushes and never merges: merging stays with
     the people (and gates) of the repository.
@@ -22,6 +24,7 @@ Description:
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -33,6 +36,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "fs_gate"))
 import fs_gate  # noqa: E402
 
 OPTIONS = ("title", "body", "branch")
+CLANG_FORMAT = fs_gate.CONTEXT_DIR / "clang-format.yaml"  # The default style
+FORMATTED = {".c", ".h", ".cc", ".cpp", ".hpp", ".cxx", ".hh"}
 WAIT_CHECK = os.environ.get("MR_WAIT_CHECK", "")  # The status check to wait for; "" waits for none
 WAIT_SECONDS = float(os.environ.get("MR_WAIT_SECONDS") or 0)
 POLL_SECONDS = 3
@@ -64,6 +69,33 @@ def default_branch(repo: Path) -> str:
     """The branch the remote's HEAD points to (usually main)."""
     head = git(repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD", check=False)
     return head.removeprefix("origin/") or "main"
+
+
+def format_changes(repo: Path) -> list[str]:
+    """
+    Format the changed and new C/C++ files with clang-format, in place.
+    The style is the repository's own .clang-format when it has one, else the agents' template.
+    Args:
+        repo: The repository.
+    Returns:
+        list[str]: The files clang-format changed (empty when clang-format is not installed).
+    """
+    if not shutil.which("clang-format"):
+        return []
+    paths = []
+    for line in git(repo, "status", "--porcelain", "--untracked-files=all").splitlines():
+        status, path = line[:2], line[3:].split(" -> ")[-1].strip('"')
+        if "D" not in status and Path(path).suffix.lower() in FORMATTED and (repo / path).is_file():
+            paths.append(path)
+    own_style = any((repo / name).is_file() for name in (".clang-format", "_clang-format"))
+    style = "file" if own_style else f"file:{CLANG_FORMAT}"
+    changed = []
+    for path in paths:
+        before = (repo / path).read_bytes()
+        subprocess.run(["clang-format", "-i", f"--style={style}", path], cwd=repo, capture_output=True, timeout=TIMEOUT)
+        if (repo / path).read_bytes() != before:
+            changed.append(path)
+    return changed
 
 
 def branch_name(title: str, branch: Optional[str]) -> str:
@@ -160,6 +192,7 @@ def open_mr(path: str, title: str, body: str = "", branch: Optional[str] = None)
 
     agent = os.environ.get("AGENT_NAME")
     description = body.strip() + (f"\n\nOpened by the {agent}." if agent else "")
+    formatted = format_changes(repo)
     git(repo, "switch", "--quiet", "-c", name)
     try:
         git(repo, "add", "--all")
@@ -177,7 +210,8 @@ def open_mr(path: str, title: str, body: str = "", branch: Optional[str] = None)
     finally:
         git(repo, "switch", "--quiet", base, check=False)  # The changes now live on the branch
     gate = wait_for_check(repo, sha)
-    return f"Opened {url}\nbranch {name} (commit {commit}) into {base}:\n{changed}" + (f"\n\n{gate}" if gate else "")
+    note = f"\nFormatted with clang-format: {', '.join(formatted)}" if formatted else ""
+    return f"Opened {url}\nbranch {name} (commit {commit}) into {base}:\n{changed}{note}" + (f"\n\n{gate}" if gate else "")
 
 
 def main(argv: Optional[list[str]] = None) -> str:

@@ -148,6 +148,10 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(error, text)
             self.assertIn('first', text)  # git works, and can commit in a writable folder
             self.assertTrue((await shell('proj', 'touch .git/hooks/pre-commit'))[0])  # Hooks stay read-only
+            if shutil.which('clang-format'):  # The agents' style template is found at /work/.clang-format
+                error, text = await shell('proj', 'clang-format hello.c')
+                self.assertFalse(error, text)
+                self.assertEqual(json.loads(text)['logs'][1:3], ['int main(void)', '{'])
             error, text = await shell('proj', 'make && ./hello && grep -c include hello.c')
             self.assertFalse(error, text)
             self.assertIn('hi', text)
@@ -200,13 +204,17 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                 return result['isError'], result['content'][0]['text']
 
             self.assertIn('no changes', (await mr({'path': 'proj', 'title': 'Nothing yet'}))[1])
-            (repo / 'b.c').write_text('int b;\n')
+            (repo / 'b.c').write_text('int  b( void ){return 1;}\n')  # Not in the template's style
             self.assertTrue((await mr({'path': 'look', 'title': 'Read-only folder'}))[0])
             error, text = await mr({'path': 'proj', 'title': 'Add b.c', 'body': 'A second file.'})
             self.assertFalse(error, text)
             self.assertIn('Opened https://github.com/example/repo/pull/7', text)
             self.assertIn('branch agent/add-b-c', text)
             self.assertIn('Quiz for the reviewer: http://gate:8000/q/abc', text)
+            if shutil.which('clang-format'):  # The change was formatted before it was committed
+                self.assertIn('Formatted with clang-format: b.c', text)
+                committed = run('git', 'show', 'agent/add-b-c:b.c', cwd=repo).stdout.decode()
+                self.assertEqual(committed, 'int b(void)\n{\n    return 1;\n}\n')
             self.assertIn('--base main --head agent/add-b-c --title Add b.c', (bin_dir / 'gh-args').read_text())
             heads = run('git', 'ls-remote', '--heads', str(remote)).stdout.decode()
             self.assertIn('refs/heads/agent/add-b-c', heads)

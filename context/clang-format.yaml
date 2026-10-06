@@ -1,0 +1,26 @@
+# Default C/C++ style for the agents' code, used by clang-format in the shell tool and by the mr tool
+# before it opens a merge request. A project's own .clang-format takes precedence.
+# Matches core_dump: 4-space indents, function braces on their own line, "char *argv", tables of
+# structs (such as getopt options) one entry per line with aligned columns.
+BasedOnStyle: LLVM
+IndentWidth: 4
+ContinuationIndentWidth: 4
+UseTab: Never
+ColumnLimit: 120
+BreakBeforeBraces: Linux
+PointerAlignment: Right
+IndentCaseLabels: false
+SortIncludes: Never
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AlignAfterOpenBracket: Align
+SpaceBeforeParens: ControlStatements
+ReflowComments: false
+MaxEmptyLinesToKeep: 1
+AlignArrayOfStructures: Left
+BinPackArguments: false
+BinPackParameters: false
+Cpp11BracedListStyle: true
+AlignTrailingComments: false

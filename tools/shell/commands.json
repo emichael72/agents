@@ -55,6 +55,7 @@
     "nm": "list an object file's symbols",
     "size": "section sizes of an object file",
     "objdump": "disassemble or inspect object files",
+    "clang-format": "format C/C++ source (clang-format -i src/x.c edits in place); the style is the project's .clang-format, else the agents' template",
     "readelf": "inspect ELF files",
     "strings": "printable strings in a binary",
     "hexdump": "dump a file in hex",

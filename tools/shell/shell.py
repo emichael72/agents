@@ -41,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "fs_gate"))
 import fs_gate  # noqa: E402
 
 COMMANDS_FILE = Path(__file__).resolve().parent / "commands.json"
+CLANG_FORMAT = fs_gate.CONTEXT_DIR / "clang-format.yaml"  # The default C/C++ style, at /work/.clang-format
 WORK = PurePosixPath("/work")  # Where the allowed folders appear inside the sandbox
 SEPARATORS = {"|", "||", "&&", ";"}
 # Harmless habits: errors already appear in the output, so these are dropped before the check
@@ -177,6 +178,8 @@ def sandbox(allowed: dict[str, fs_gate.Folder], cwd: Path) -> list[str]:
                     if (git / protected).exists():
                         inner = str(WORK / name / (git / protected).relative_to(folder.path))
                         args += ["--ro-bind", str(git / protected), inner]
+    if CLANG_FORMAT.is_file():  # clang-format looks for .clang-format in each file's parent folders
+        args += ["--ro-bind", str(CLANG_FORMAT), str(WORK / ".clang-format")]
     located = fs_gate.locate(cwd, allowed)
     args += ["--chdir", str(WORK / located[1])]
     environment = {

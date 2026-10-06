@@ -13,7 +13,10 @@ python3 shell/shell.py --cwd core_dump --command "git log --oneline -5"
 python3 shell/shell.py --cwd core_dump --command help        # the folders, their access and the commands
 ```
 
-Inside, the allowed folders appear as `/work/<name>`, and the command starts in `cwd`. Output shows
+Inside, the allowed folders appear as `/work/<name>`, and the command starts in `cwd`. The agents'
+C/C++ style, [`context/clang-format.yaml`](../../context/clang-format.yaml), is mounted at
+`/work/.clang-format`, so `clang-format` uses it for every project that has no `.clang-format` of
+its own. Output shows
 `/work/<name>` as `<name>`; it stops after 25 seconds and 300 lines.
 
 ## The sandbox
