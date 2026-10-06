@@ -88,17 +88,25 @@ journalctl --user -u mr-quiz -f       # watch the poller
 ```
 
 Open `http://minion:8000` (port 8000 is open in minion's firewall) and sign in with user `user`,
-password `pass`; the sign-in page shows them. Change them with `QUIZ_WEB_USER` and
-`QUIZ_WEB_PASSWORD`.
+password `pass`; the sign-in page shows them.
 
-| Variable | Default | Meaning |
+## Settings
+
+The settings live in the `"env"` block of [`tool.json`](tool.json), the tool's manifest. The agents
+pass that block to the tool, and `quiz.py` reads it too, so the tool and the service share one
+configuration. Edit it, then restart the service (`systemctl --user restart mr-quiz`). A variable
+set in the environment (for example in `~/.config/mr-quiz.env` for the service) overrides the file.
+
+| Variable | In `tool.json` | Meaning |
 | --- | --- | --- |
 | `QUIZ_REPO` | `emichael72/core_dump` | The repository to gate |
 | `QUIZ_DEVELOPER` | `emichael72` | The only PR author assessed |
+| `QUIZ_BASE_URL` | `http://minion:8000` | Where the PR's Details link points |
+| `QUIZ_MODEL_PROFILE` | empty: the models file's default | Model profile (`local` or `openai`) |
 | `QUIZ_WEB_USER`, `QUIZ_WEB_PASSWORD` | `user`, `pass` | The web sign-in |
-| `QUIZ_BASE_URL` | `http://<hostname>:8000` | Where the PR's Details link points |
-| `QUIZ_MODEL_PROFILE` | the models file's default | Model profile |
-| `QUIZ_DATA_DIR` | `mr_quiz/data` | Database and the key that signs sign-in cookies (gitignored) |
+
+One setting stays outside the manifest: `QUIZ_DATA_DIR` (default `mr_quiz/data`, gitignored), the
+database and the key that signs sign-in cookies.
 
 GitHub access goes through the `gh` CLI and its login; the service needs only outbound access.
 

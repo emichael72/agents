@@ -2,6 +2,14 @@
   "description": "Shows the developer quiz gate for pull requests in the core_dump GitHub repository: whether the quiz service is running, and for each open PR whether its author still has to pass the quiz (with the quiz link) or may merge.",
   "command": "bash",
   "args": ["mr_quiz/mr_quiz.sh", "status"],
+  "env": {
+    "QUIZ_REPO": "emichael72/core_dump",
+    "QUIZ_DEVELOPER": "emichael72",
+    "QUIZ_BASE_URL": "http://minion:8000",
+    "QUIZ_MODEL_PROFILE": "",
+    "QUIZ_WEB_USER": "user",
+    "QUIZ_WEB_PASSWORD": "pass"
+  },
   "params": [
     {"name": "pr", "type": "integer", "description": "Only this pull request number; omit it for every open PR", "style": "flag", "required": false}
   ],

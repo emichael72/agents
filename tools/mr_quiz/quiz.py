@@ -28,7 +28,6 @@ import json
 import os
 import re
 import secrets
-import socket
 import sqlite3
 import subprocess
 from contextlib import contextmanager
@@ -46,14 +45,36 @@ TOOL_DIR = Path(__file__).resolve().parent
 MODELS_FILE = TOOL_DIR.parent.parent / "context" / "models.json"
 INSTRUCTIONS_FILE = TOOL_DIR / "context" / "instructions.json"
 
-# Overridable from the environment, so the service and the tool share one configuration
-DATA = Path(os.environ.get("QUIZ_DATA_DIR", TOOL_DIR / "data"))
-REPO = os.environ.get("QUIZ_REPO", "emichael72/core_dump")
-DEVELOPER = os.environ.get("QUIZ_DEVELOPER", "emichael72")
-BASE_URL = os.environ.get("QUIZ_BASE_URL", f"http://{socket.gethostname()}:8000").rstrip("/")
-PROFILE = os.environ.get("QUIZ_MODEL_PROFILE") or None  # None uses the models file's default
-WEB_USER = os.environ.get("QUIZ_WEB_USER", "user")  # Demo sign-in, shown on the sign-in page
-WEB_PASSWORD = os.environ.get("QUIZ_WEB_PASSWORD", "pass")
+MANIFEST_FILE = TOOL_DIR / "tool.json"
+
+
+def setting(name: str, required: bool = True) -> str:
+    """
+    Read one setting: the environment first, then the "env" block of the tool's manifest
+    (tool.json), which the agents also pass to the tool. The service and the tool therefore share
+    one configuration, and the manifest is the place to change it.
+    Args:
+        name: The setting, e.g. "QUIZ_REPO".
+        required: Fail if neither place sets it.
+    Returns:
+        str: The value; "" for an optional setting that is not set.
+    Raises:
+        ValueError: If a required setting is missing.
+    """
+    defaults = json.loads(MANIFEST_FILE.read_text(encoding="utf-8")).get("env", {})
+    value = os.environ.get(name) or defaults.get(name, "")
+    if required and not value:
+        raise ValueError(f"Set {name} in the \"env\" block of {MANIFEST_FILE} (or in the environment).")
+    return value
+
+
+DATA = Path(os.environ.get("QUIZ_DATA_DIR") or TOOL_DIR / "data")
+REPO = setting("QUIZ_REPO")
+DEVELOPER = setting("QUIZ_DEVELOPER")
+BASE_URL = setting("QUIZ_BASE_URL").rstrip("/")
+PROFILE = setting("QUIZ_MODEL_PROFILE", required=False) or None  # None uses the models file's default
+WEB_USER = setting("QUIZ_WEB_USER")  # Demo sign-in, shown on the sign-in page
+WEB_PASSWORD = setting("QUIZ_WEB_PASSWORD")
 
 CONTEXT = "developer-quiz"  # The status check name branch protection requires
 MAX_DIFF_CHARS = 60_000

@@ -260,6 +260,15 @@ class ModelTests(unittest.TestCase):
         self.models = Path(tempfile.mkdtemp()) / "models.json"
         self.models.write_text(json.dumps(MODELS))
 
+    def test_settings_come_from_the_manifest_and_the_environment_overrides_them(self):
+        manifest = json.loads(quiz.MANIFEST_FILE.read_text())["env"]
+        self.assertEqual(quiz.setting("QUIZ_DEVELOPER"), os.environ.get("QUIZ_DEVELOPER") or manifest["QUIZ_DEVELOPER"])
+        with patch.dict(os.environ, {"QUIZ_REPO": "someone/else"}):
+            self.assertEqual(quiz.setting("QUIZ_REPO"), "someone/else")
+        with self.assertRaisesRegex(ValueError, "QUIZ_NOT_SET"):
+            quiz.setting("QUIZ_NOT_SET")
+        self.assertEqual(quiz.setting("QUIZ_NOT_SET", required=False), "")
+
     def test_profiles_come_from_the_shared_models_file(self):
         self.assertEqual(quiz.resolve_model(None, self.models)["base_url"], "http://boba:1234/v1")
         with patch.dict(os.environ, {"TEST_OPENAI_KEY": "sk-test"}):
