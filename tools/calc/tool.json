@@ -1,9 +1,9 @@
 {
   "description": "Evaluates an arithmetic expression exactly (use it instead of doing math yourself). Supports + - * / // % **, parentheses, pi, e, and sqrt, log, log2, log10, exp, sin, cos, tan, floor, ceil, factorial, abs, round, min, max.",
   "command": "python3",
-  "args": ["calculate/calculate.py"],
+  "args": ["calc/calc.py"],
   "params": [
     {"name": "expression", "type": "string", "description": "The expression, e.g. (17 * 23) + sqrt(144)", "style": "positional"}
   ],
-  "resource": "calculate/README.md"
+  "resource": "calc/README.md"
 }

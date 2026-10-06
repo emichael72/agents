@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Usage: python3 calculate.py "<expression>"
+Usage: python3 calc.py "<expression>"
 
 Evaluates an arithmetic expression safely: the expression is parsed, and only numbers,
 arithmetic operators and a few math functions and constants are allowed (no eval).

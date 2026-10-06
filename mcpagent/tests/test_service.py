@@ -71,7 +71,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             ('view_file', {'path': 'tools/greet/tool.json', 'count': 2}, 'lines 1-2 of'),
             ('sysinfo', {}, 'machine='),
             ('time', {'timezone': 'UTC'}, 'UTC (UTC+00:00)'),
-            ('calculate', {'expression': '(17 * 23) + sqrt(144)'}, '= 403'),
+            ('calc', {'expression': '(17 * 23) + sqrt(144)'}, '= 403'),
             ('ls', {'path': 'tools/greet'}, 'tool.json'),
             ('ls', {}, 'Allowed folders'),
             ('search_text', {'pattern': 'AGENT_NAME', 'path': 'tools/greet'}, 'tools/greet/greet.sh:'),

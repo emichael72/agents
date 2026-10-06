@@ -28,7 +28,7 @@ import agent  # noqa: E402
 import toolset as tools_module  # noqa: E402
 
 CALLS = [("greet", {"name": "Alice"}), ("wc", {"file": "missing-file"}),
-         ("calculate", {"expression": "6 * 7"})]
+         ("calc", {"expression": "6 * 7"})]
 
 
 async def scripted_model(messages, info: AgentInfo):
@@ -149,7 +149,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         lines = [line[:1] + " " + line[2:].split("(")[0].split(":")[0]
                  for line in self.output.getvalue().splitlines() if line[:1] in "→←✗" and line]
         self.assertEqual(lines, ["→ greet", "← greet", "→ wc", "✗ wc",
-                                 "→ calculate", "← calculate"])
+                                 "→ calc", "← calc"])
 
     def test_greet_without_name_greets_the_shell_user(self):
         greet = tool_function(tools_module.toolset, "greet")

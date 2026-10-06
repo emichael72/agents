@@ -15,7 +15,7 @@ added here is available to all of them without code changes:
 | `rand` | Bash | `max` (optional, default 100) | A random number from 1 to `max` |
 | `time` | Bash / `date` | `timezone` (optional, IANA name) | The current date and time |
 | `sysinfo` | Bash / `uname` | none | Hostname, OS, kernel release and CPU architecture |
-| `calculate` | Python | `expression` | The value of an arithmetic expression (parsed safely, no `eval`) |
+| `calc` | Python | `expression` | The value of an arithmetic expression (parsed safely, no `eval`) |
 | `ls` | Python | `path` (optional) | A folder's entries with sizes and dates (up to 200); no path lists the allowed folders |
 | `view_file` | Python | `path`, `start`, `count` (optional) | A text file's lines, numbered, up to 200 per call |
 | `wc` | Bash / `wc` | `file` | The file's line count |

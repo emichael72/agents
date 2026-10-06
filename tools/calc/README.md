@@ -8,5 +8,5 @@ from hanging.
 **Usage Example:**
 
 ```bash
-python3 calculate/calculate.py "(17 * 23) + sqrt(144)"
+python3 calc/calc.py "(17 * 23) + sqrt(144)"
 ```
