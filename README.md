@@ -110,7 +110,7 @@ Local model server model: qwen/qwen3-coder-30b @ http://boba:1234/v1, 12 tools (
 
 The quiz service is running. Pull request #1 is still waiting for its quiz, so its merge is blocked.
 
-Response time: 6.3s
+Response time: 6.3s · tokens: 4,313 in, 53 out (2 model calls)
 ```
 
 1. **Only the model's answer is in the terminal's normal color.** Everything else (the banner, the
@@ -121,8 +121,12 @@ Response time: 6.3s
    it arrives. A word longer than the width, such as a URL, is never broken.
 3. **The answer has exactly one blank line before and after it.** A tool call prints together with
    its result, in the order they ran. `--quiet` hides the tool lines.
-4. **Each response ends with `Response time: N.Ns`**: from sending the prompt to the end of the
-   answer, tools included. `"show_time": false` turns it off.
+4. **Each response ends with its time and tokens**: `Response time: N.Ns` from sending the prompt
+   to the end of the answer, tools included; then the tokens the model calls used, as the server
+   reports them: *in* (sent to the model: instructions, tool list, history, tool results, added
+   up over every call) and *out* (generated), and how many model calls the answer took.
+   `"show_time": false` and `"show_tokens": false` turn them off; `tokens: not reported` means
+   the server sent no counts.
 
 Each agent implements this in an `Output` class (`mcpagent/client/agent.py`, `pydantic/agent.py`,
 `vercel/agent.ts`), with tests that check the wrapping and the timing line.

@@ -333,6 +333,13 @@ class OutputTests(unittest.TestCase):
         settings = load_output_settings(json5.loads(CLIENT_CONFIG.read_text()), CLIENT_CONFIG)
         self.assertEqual((settings['width'], settings['show_time']), (120, True))
 
+    def test_token_counts_follow_the_response_time(self):
+        printed = io.StringIO()
+        output = Output(Console(file=printed), {'width': 120, 'show_time': True, 'show_tokens': True})
+        output.add_usage(1200, 34)
+        output.finish()
+        self.assertRegex(printed.getvalue(), r'Response time: \d+\.\ds · tokens: 1,200 in, 34 out \(1 model call\)\n$')
+
     def test_lines_and_streamed_answer_wrap_and_the_response_is_timed(self):
         printed = io.StringIO()
         output = Output(Console(file=printed), {'width': 30, 'show_time': True})

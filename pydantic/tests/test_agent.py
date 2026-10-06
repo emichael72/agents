@@ -193,6 +193,18 @@ class OutputTests(unittest.TestCase):
         self.assertEqual(lines[0], "")  # Blank line before the answer
         self.assertRegex(self.printed.getvalue(), r"\n\nResponse time: \d+\.\ds\n$")
 
+    def test_token_counts_follow_the_response_time(self):
+        printed = io.StringIO()
+        output = agent.Output(Console(file=printed), {"width": 120, "show_time": True, "show_tokens": True})
+        output.add_usage(1200, 34)
+        output.add_usage(1300, 56, requests=2)
+        output.finish()
+        self.assertRegex(printed.getvalue(), r"Response time: \d+\.\ds · tokens: 2,500 in, 90 out \(3 model calls\)\n$")
+        printed.truncate(0), printed.seek(0)
+        output.start()
+        output.finish()
+        self.assertIn("tokens: not reported", printed.getvalue())
+
     def test_layout_settings_come_from_the_shared_context_file(self):
         settings = agent.load_output_settings()
         self.assertEqual(settings["width"], 120)

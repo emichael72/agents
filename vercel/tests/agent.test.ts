@@ -183,3 +183,12 @@ test('lines and the streamed answer wrap to the width, and the response is timed
 test('layout settings come from the shared context file', () => {
   assert.deepEqual(loadOutputSettings(), { ...loadOutputSettings(), width: 120, show_time: true });
 });
+
+test('token counts follow the response time', () => {
+  let printed = '';
+  const output = new Output((text) => { printed += text; }, { width: 120, show_time: true, show_tokens: true });
+  output.addUsage(1200, 34);
+  output.addUsage(1300, 56, 2);
+  output.finish();
+  assert.match(printed.replace(/\x1b\[[0-9;]*m/g, ''), /Response time: \d+\.\ds · tokens: 2,500 in, 90 out \(3 model calls\)\n$/);
+});

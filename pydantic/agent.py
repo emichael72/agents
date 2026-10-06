@@ -221,6 +221,8 @@ class Output:
         if out.is_terminal:
             self.width = min(self.width, out.width)
         self.show_time = bool(settings.get("show_time", True))
+        self.show_tokens = bool(settings.get("show_tokens", False))
+        self.usage: dict | None = None  # Tokens and model calls of this response, when the server reports them
         self.in_text = False  # A text block is open
         self.pending = ""  # Trailing newlines held back until more text follows
         self.column = 0  # Where the streamed answer's current line ends
@@ -231,6 +233,20 @@ class Output:
     def start(self) -> None:
         """Start timing a response."""
         self.started = time.monotonic()
+        self.usage = None
+
+    def add_usage(self, input_tokens: int, output_tokens: int, requests: int = 1) -> None:
+        """
+        Count the tokens of model calls made for this response.
+        Args:
+            input_tokens: Tokens sent to the model (prompt, history, tool results).
+            output_tokens: Tokens the model generated.
+            requests: How many model calls these tokens cover.
+        """
+        self.usage = self.usage or {"input": 0, "output": 0, "requests": 0}
+        self.usage["input"] += input_tokens
+        self.usage["output"] += output_tokens
+        self.usage["requests"] += requests
 
     def text(self, chunk: str) -> None:
         """
@@ -273,10 +289,18 @@ class Output:
         self.word = self.spaces = ""
 
     def finish(self) -> None:
-        """Close the response, and print how long it took since `start`."""
+        """Close the response, and print how long it took since `start` and the tokens it used."""
         self.end()
-        if self.show_time:
-            self.line(f"Response time: {time.monotonic() - self.started:.1f}s")
+        parts = [f"Response time: {time.monotonic() - self.started:.1f}s"] if self.show_time else []
+        if self.show_tokens:
+            if self.usage:
+                calls = self.usage["requests"]
+                parts.append(f"tokens: {self.usage['input']:,} in, {self.usage['output']:,} out "
+                             f"({calls} model call{'s' if calls != 1 else ''})")
+            else:
+                parts.append("tokens: not reported")
+        if parts:
+            self.line(" · ".join(parts))
 
     def _wrap_stream(self, text: str) -> str:
         """
@@ -358,6 +382,9 @@ async def ask(agent: Agent, prompt: str, history: list, trace: bool = True, para
                             message = part.model_response_str() if isinstance(part, ToolReturnPart) else part.content
                             output.line(f"✗ {part.tool_name}: {readable(str(message))}")
                     elif isinstance(event, AgentRunResultEvent):
+                        usage = event.result.usage
+                        if usage.input_tokens or usage.output_tokens:
+                            output.add_usage(usage.input_tokens, usage.output_tokens, usage.requests)
                         return event.result.all_messages()
     finally:
         for line in pending_calls.values():  # Calls that never got a result (e.g. the run failed)

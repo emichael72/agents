@@ -76,7 +76,9 @@ export function resolveModel(models: Models, profile?: string,
 
 /** Create a model on an OpenAI-compatible server (LM Studio, OpenAI, ...) from resolved settings. */
 export function buildModel(settings: ModelSettings): LanguageModel {
-  return createOpenAICompatible({ name: settings.profile, baseURL: settings.baseURL, apiKey: settings.apiKey })(settings.model);
+  // includeUsage: streamed replies report their token counts (shown after each response)
+  return createOpenAICompatible({ name: settings.profile, baseURL: settings.baseURL, apiKey: settings.apiKey,
+                                  includeUsage: true })(settings.model);
 }
 
 /** Read the shared instructions file and join its "instructions" lines with newlines. */
@@ -97,7 +99,7 @@ export function buildAgent(model: LanguageModel, tools: ToolSet, parallel = fals
 type Agent = ReturnType<typeof buildAgent>;
 type Write = (text: string) => void;
 
-export type OutputSettings = { width?: number; show_time?: boolean };
+export type OutputSettings = { width?: number; show_time?: boolean; show_tokens?: boolean };
 
 /** Read the shared terminal layout settings: "width" (wrap column) and "show_time". */
 export function loadOutputSettings(file = OUTPUT_FILE): OutputSettings {
@@ -149,6 +151,8 @@ export class Output {
   private started = performance.now();
   private readonly width: number;
   private readonly showTime: boolean;
+  private readonly showTokens: boolean;
+  private usage?: { input: number; output: number; requests: number }; // When the server reports it
   private readonly write: Write;
 
   /**
@@ -159,11 +163,21 @@ export class Output {
     this.write = write;
     this.width = Math.min(settings.width ?? 120, process.stdout.isTTY ? process.stdout.columns : Infinity);
     this.showTime = settings.show_time ?? true;
+    this.showTokens = settings.show_tokens ?? false;
   }
 
   /** Start timing a response. */
   start(): void {
     this.started = performance.now();
+    this.usage = undefined;
+  }
+
+  /** Count the tokens of model calls made for this response (in: sent to the model, out: generated). */
+  addUsage(inputTokens: number, outputTokens: number, requests = 1): void {
+    this.usage ??= { input: 0, output: 0, requests: 0 };
+    this.usage.input += inputTokens;
+    this.usage.output += outputTokens;
+    this.usage.requests += requests;
   }
 
   /** Print a chunk of streamed model text. */
@@ -198,10 +212,18 @@ export class Output {
     this.word = this.spaces = '';
   }
 
-  /** Close the response, and print how long it took since `start`. */
+  /** Close the response, and print how long it took since `start` and the tokens it used. */
   finish(): void {
     this.end();
-    if (this.showTime) this.line(`Response time: ${((performance.now() - this.started) / 1000).toFixed(1)}s`);
+    const parts = this.showTime ? [`Response time: ${((performance.now() - this.started) / 1000).toFixed(1)}s`] : [];
+    if (this.showTokens) {
+      const usage = this.usage;
+      parts.push(usage
+        ? `tokens: ${usage.input.toLocaleString('en-US')} in, ${usage.output.toLocaleString('en-US')} out ` +
+          `(${usage.requests} model call${usage.requests === 1 ? '' : 's'})`
+        : 'tokens: not reported');
+    }
+    if (parts.length) this.line(parts.join(' · '));
   }
 
   /** Word-wrap streamed text: words are held until they end, so they can move to the next line. */
@@ -285,6 +307,10 @@ export async function ask(agent: Agent, prompt: string, history: ModelMessage[],
         case 'error':
           throw part.error;
       }
+    }
+    const usage = await result.totalUsage;
+    if (usage.inputTokens || usage.outputTokens) {
+      output.addUsage(usage.inputTokens ?? 0, usage.outputTokens ?? 0, (await result.steps).length);
     }
     return [...messages, ...(await result.response).messages];
   } finally {

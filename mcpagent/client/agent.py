@@ -150,6 +150,7 @@ class MCPAgent:
         self.history = []
         self.tools = []
         self.routes = {}
+        self.usage: list[tuple[int, int]] = []  # Tokens per model call of the last turn
         self.timeouts = {}  # Seconds to wait per tool alias, from the server's tools/list _meta
         # A dedicated client keeps the API key separate from MCP HTTP headers.
         self.api = httpx.AsyncClient(
@@ -288,6 +289,7 @@ class MCPAgent:
         """
         conversation = self.history + [{"role": "user", "content": prompt}]
         calls_used = 0
+        self.usage = []  # (input tokens, output tokens) per model call of this turn, when reported
         try:
             for _ in range(self.max_tool_calls + 1):
                 response = await self._request_response({
@@ -317,6 +319,9 @@ class MCPAgent:
                         raise RuntimeError("OpenAI HTTP 429 (rate_limit_exceeded). Wait before retrying or check the project's rate limits.")
                     raise RuntimeError(f"OpenAI HTTP {response.status_code}. " + hints.get(response.status_code, "Request failed; check the model and configuration."))
                 data = response.json()
+                usage = data.get("usage") or {}
+                if usage:
+                    self.usage.append((int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0))))
                 if data.get("status") != "completed":
                     raise RuntimeError(f"{self.provider} response did not complete ({data.get('status', 'unknown')}).")
                 output = data.get("output", [])
@@ -460,6 +465,8 @@ class Output:
         if out.is_terminal:
             self.width = min(self.width, out.width)
         self.show_time = bool(settings.get("show_time", True))
+        self.show_tokens = bool(settings.get("show_tokens", False))
+        self.usage: Optional[dict] = None  # Tokens and model calls of this response, when the server reports them
         self.in_text = False  # A text block is open
         self.pending = ""  # Trailing newlines held back until more text follows
         self.column = 0  # Where the streamed answer's current line ends
@@ -470,6 +477,20 @@ class Output:
     def start(self) -> None:
         """Start timing a response."""
         self.started = time.monotonic()
+        self.usage = None
+
+    def add_usage(self, input_tokens: int, output_tokens: int, requests: int = 1) -> None:
+        """
+        Count the tokens of model calls made for this response.
+        Args:
+            input_tokens: Tokens sent to the model (prompt, history, tool results).
+            output_tokens: Tokens the model generated.
+            requests: How many model calls these tokens cover.
+        """
+        self.usage = self.usage or {"input": 0, "output": 0, "requests": 0}
+        self.usage["input"] += input_tokens
+        self.usage["output"] += output_tokens
+        self.usage["requests"] += requests
 
     def text(self, chunk: str) -> None:
         """
@@ -512,10 +533,18 @@ class Output:
         self.word = self.spaces = ""
 
     def finish(self) -> None:
-        """Close the response, and print how long it took since `start`."""
+        """Close the response, and print how long it took since `start` and the tokens it used."""
         self.end()
-        if self.show_time:
-            self.line(f"Response time: {time.monotonic() - self.started:.1f}s")
+        parts = [f"Response time: {time.monotonic() - self.started:.1f}s"] if self.show_time else []
+        if self.show_tokens:
+            if self.usage:
+                calls = self.usage["requests"]
+                parts.append(f"tokens: {self.usage['input']:,} in, {self.usage['output']:,} out "
+                             f"({calls} model call{'s' if calls != 1 else ''})")
+            else:
+                parts.append("tokens: not reported")
+        if parts:
+            self.line(" · ".join(parts))
 
     def _wrap_stream(self, text: str) -> str:
         """
@@ -589,6 +618,8 @@ async def run_agent(config_file, profile=None, model=None, base_url=None, prompt
             if not output.in_text:
                 output.text(answer)  # Nothing was streamed (e.g. a non-streaming reply)
         finally:
+            for input_tokens, output_tokens in getattr(agent, "usage", []):
+                output.add_usage(input_tokens, output_tokens)
             output.finish()
 
     try:
