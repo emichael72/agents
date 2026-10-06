@@ -1,7 +1,9 @@
 {
-  "description": "Opens a merge request (GitHub pull request) with the uncommitted changes of a repository in an allowed folder with write access, e.g. core_dump: creates a new branch, commits all changes, pushes it and opens the pull request into the default branch. Use it once the change is complete and builds. Do not commit with git yourself first. It never merges; a person reviews the request.",
+  "description": "Opens a merge request (GitHub pull request) with the uncommitted changes of a repository in an allowed folder with write access, e.g. core_dump: creates a new branch, commits all changes, pushes it and opens the pull request into the default branch. Use it once the change is complete and builds. Do not commit with git yourself first. It then waits for the merge gate and returns the quiz link the reviewer must pass. It never merges; a person reviews the request.",
   "command": "python3",
   "args": ["mr/mr.py"],
+  "timeout": 150,
+  "env": {"MR_WAIT_CHECK": "developer-quiz", "MR_WAIT_SECONDS": "100"},
   "params": [
     {"name": "path", "type": "string", "description": "The repository folder, starting with an allowed folder name, e.g. core_dump", "style": "positional"},
     {"name": "title", "type": "string", "description": "Title: what the change does, e.g. Add an e module that prints Euler's number", "style": "flag"},

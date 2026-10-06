@@ -145,7 +145,7 @@ test('model profiles come from the shared models file', () => {
 test('instructions come from the shared context file', () => {
   const instructions = loadInstructions();
   assert.match(instructions, /^You are an agent/);
-  assert.match(instructions, /shared tools folder/);
+  assert.match(instructions, /allowed folder/);
 });
 
 test('history carries across turns', async () => {

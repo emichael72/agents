@@ -55,7 +55,7 @@ change on its next start. None of this is hard-coded in the agents.
 
 - `context/instructions.json`: the instructions (system prompt) given to the model, as a list of
   lines.
-- `context/agent.json`: the agent loop: `max_tool_calls` (30), the most tool calls the model may
+- `context/agent.json`: the agent loop: `max_tool_calls` (50), the most tool calls the model may
   make while answering one prompt.
 - `context/output.json`: the terminal layout: `width` (120) and `show_time` (true). See
   "Terminal output" below.

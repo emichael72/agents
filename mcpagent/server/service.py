@@ -698,6 +698,7 @@ class MCPService:
             params = entry.get("params", [])
             env = entry.get("env", {})
             resource = entry.get("resource")
+            timeout = entry.get("timeout")  # Seconds; advertised to clients in tools/list
 
             # MCP-compatible JSON schema from declared params
             input_schema = {
@@ -721,6 +722,7 @@ class MCPService:
                 params=params,
                 env=env,
                 resource=resource,
+                timeout=timeout,
             ))
 
             # Legacy REST fallback
@@ -820,11 +822,13 @@ class MCPService:
                 - "name" (str): Tool name.
                 - "description" (str): Tool description.
                 - "inputSchema" (dict): JSON Schema for the tool's input.
+                - "_meta" (dict, optional): {"timeout": seconds}, when the tool's manifest sets one.
         """
         tools = [{
             "name": t.name,
             "description": t.description,
-            "inputSchema": t.input_schema
+            "inputSchema": t.input_schema,
+            **({"_meta": {"timeout": t.timeout}} if t.timeout else {}),
         } for t in self._tools_registry.values()]
 
         return {"tools": tools}

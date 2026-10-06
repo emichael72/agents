@@ -36,6 +36,7 @@ class MCPServiceToolType:
             to runtime arguments (name, type, description).
         env (dict[str, str]): Optional environment variables to set when running.
         resource (Optional[str]): Path to a documentation resource for this tool.
+        timeout (Optional[float]): Seconds a client should wait for the tool (from the manifest); None for the client's default.
     """
 
     def __init__(
@@ -49,6 +50,7 @@ class MCPServiceToolType:
             params: Optional[list[dict[str, Any]]] = None,
             env: Optional[dict[str, str]] = None,
             resource: Optional[str] = None,
+            timeout: Optional[float] = None,
     ):
         """Store the tool definition; the arguments are described in the class docstring."""
         self.name = name
@@ -60,3 +62,4 @@ class MCPServiceToolType:
         self.params = params or []
         self.env = env or {}
         self.resource = resource
+        self.timeout = timeout

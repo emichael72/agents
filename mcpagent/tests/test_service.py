@@ -171,8 +171,13 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             root = Path(folder)
             remote, repo, bin_dir = root / 'remote.git', root / 'repo', root / 'bin'
             bin_dir.mkdir()
-            (bin_dir / 'gh').write_text('#!/bin/bash\necho "$@" > "$(dirname "$0")/gh-args"\n'
-                                        'echo https://github.com/example/repo/pull/7\n')
+            (bin_dir / 'gh').write_text(  # Stands in for GitHub: the PR, the repository and the gate's check
+                '#!/bin/bash\ncase "$1 $2" in\n'
+                '  "pr create") echo "$@" > "$(dirname "$0")/gh-args"; echo https://github.com/example/repo/pull/7 ;;\n'
+                '  "repo view") echo example/repo ;;\n'
+                '  api*) echo \'{"statuses": [{"context": "developer-quiz", "state": "pending", '
+                '"description": "Complete the developer quiz", "target_url": "http://gate:8000/q/abc"}]}\' ;;\n'
+                'esac\n')
             (bin_dir / 'gh').chmod(0o755)
             run = lambda *args, cwd=root: subprocess.run(args, cwd=cwd, check=True, capture_output=True)
             run('git', 'init', '-q', '--bare', '-b', 'main', str(remote))
@@ -201,6 +206,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(error, text)
             self.assertIn('Opened https://github.com/example/repo/pull/7', text)
             self.assertIn('branch agent/add-b-c', text)
+            self.assertIn('Quiz for the reviewer: http://gate:8000/q/abc', text)
             self.assertIn('--base main --head agent/add-b-c --title Add b.c', (bin_dir / 'gh-args').read_text())
             heads = run('git', 'ls-remote', '--heads', str(remote)).stdout.decode()
             self.assertIn('refs/heads/agent/add-b-c', heads)

@@ -141,7 +141,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
     def test_instructions_come_from_the_shared_context_file(self):
         instructions = agent.load_instructions()
         self.assertTrue(instructions.startswith("You are an agent"))
-        self.assertIn("shared tools folder", instructions)
+        self.assertIn("allowed folder", instructions)
 
     async def test_each_tool_call_prints_next_to_its_result(self):
         bot = agent.build_agent(FunctionModel(stream_function=scripted_model))

@@ -49,6 +49,7 @@ below. Most file and build work goes through `shell`; see [shell/README.md](shel
 | `style` | `flag` passes `--<name> <value>`; `positional` passes the bare value, in `params` order. Default `flag`. |
 | `required` | Defaults to `true`. An optional parameter the model omits is not passed at all, so the script's own default applies. |
 | `env` | Optional environment variables for the command. |
+| `timeout` | Optional seconds the agents wait for the tool (default 30), for tools that wait on something, such as `mr`. |
 | `resource` | Optional documentation file, served by MCPAgent as an MCP resource. |
 
 **Paths:** every path in a manifest (`args`, `resource`) is relative to this `tools/` folder, and

@@ -21,6 +21,11 @@ What it does, every time:
    `.gitignore`), and pushes the branch.
 4. Opens the pull request into the default branch, noting which agent opened it, and switches back
    to the default branch; the changes now live on the branch.
+5. Waits for the merge gate's check on the new commit (`MR_WAIT_CHECK` in `tool.json`, set to
+   `developer-quiz`, for up to `MR_WAIT_SECONDS`, 100) and reports it. With
+   [`mr_gate`](../mr_gate/README.md) that is the quiz link the reviewer must pass, or the
+   documentation problems that fail the check. `tool.json`'s `timeout` (150 s) lets the agents wait
+   that long. Set `MR_WAIT_CHECK` to `""` to return right after opening the request.
 
 It never pushes to the default branch, never force-pushes, never reuses an existing branch and
 never merges. Git hooks are off while it commits.

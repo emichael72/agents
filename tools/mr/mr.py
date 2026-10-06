@@ -13,14 +13,18 @@ Description:
       2. Bring the default branch up to date with GitHub (fast-forward only).
       3. Create the branch (new, never the default branch), commit everything, push it.
       4. Open the pull request, then switch back to the default branch.
+      5. Wait for the merge gate's check (MR_WAIT_CHECK, e.g. mr_gate's developer-quiz) on the new
+         commit, up to MR_WAIT_SECONDS, and report it: for mr_gate, the quiz the reviewer must pass.
     It never pushes to the default branch, never force-pushes and never merges: merging stays with
     the people (and gates) of the repository.
 """
 
+import json
 import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -29,6 +33,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "fs_gate"))
 import fs_gate  # noqa: E402
 
 OPTIONS = ("title", "body", "branch")
+WAIT_CHECK = os.environ.get("MR_WAIT_CHECK", "")  # The status check to wait for; "" waits for none
+WAIT_SECONDS = float(os.environ.get("MR_WAIT_SECONDS") or 0)
+POLL_SECONDS = 3
 BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,80}$")
 TIMEOUT = 60
 # Hooks off: nothing in the repository runs while committing
@@ -78,6 +85,42 @@ def branch_name(title: str, branch: Optional[str]) -> str:
     return f"agent/{slug or 'change'}"
 
 
+def wait_for_check(repo: Path, sha: str) -> str:
+    """
+    Wait for the merge gate's status check on a commit to be ready, and describe it. With mr_gate,
+    the check is pending with "Checking documentation..." while it works, then links to the quiz
+    (a /q/ page) or settles to success or failure.
+    Args:
+        repo: The repository.
+        sha: The pushed commit.
+    Returns:
+        str: The check's state, description and link, or why it is not known yet.
+    """
+    if not WAIT_CHECK or WAIT_SECONDS <= 0:
+        return ""
+    name = subprocess.run(["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
+                          cwd=repo, capture_output=True, text=True, timeout=TIMEOUT).stdout.strip()
+    deadline, status = time.monotonic() + WAIT_SECONDS, None
+    while name and time.monotonic() < deadline:
+        result = subprocess.run(["gh", "api", f"repos/{name}/commits/{sha}/status"], cwd=repo,
+                                capture_output=True, text=True, timeout=TIMEOUT)
+        if result.returncode == 0:
+            statuses = [s for s in json.loads(result.stdout).get("statuses", []) if s.get("context") == WAIT_CHECK]
+            status = statuses[0] if statuses else None  # Newest first
+            if status and (status["state"] != "pending" or "/q/" in (status.get("target_url") or "")):
+                break
+        time.sleep(POLL_SECONDS)
+    else:
+        if status:
+            return (f"Merge gate ({WAIT_CHECK}): still {status['state']} after {WAIT_SECONDS:g}s, "
+                    f"{status.get('description', '')}: {status.get('target_url', '')}")
+        return f"Merge gate ({WAIT_CHECK}): no result after {WAIT_SECONDS:g}s; see the pull request's checks."
+    url = status.get("target_url") or ""
+    if status["state"] == "pending":
+        return f"Merge gate ({WAIT_CHECK}): pending, {status.get('description', '')}.\nQuiz for the reviewer: {url}"
+    return f"Merge gate ({WAIT_CHECK}): {status['state']}, {status.get('description', '')}: {url}"
+
+
 def open_mr(path: str, title: str, body: str = "", branch: Optional[str] = None) -> str:
     """
     Submit a repository's uncommitted changes as a merge request.
@@ -122,6 +165,7 @@ def open_mr(path: str, title: str, body: str = "", branch: Optional[str] = None)
         git(repo, "add", "--all")
         git(repo, "commit", "--quiet", "-m", title, *(["-m", body.strip()] if body.strip() else []))
         commit = git(repo, "rev-parse", "--short", "HEAD")
+        sha = git(repo, "rev-parse", "HEAD")
         changed = git(repo, "show", "--stat", "--format=", "HEAD")
         git(repo, "push", "--quiet", "-u", "origin", name)
         result = subprocess.run(["gh", "pr", "create", "--base", base, "--head", name, "--title", title,
@@ -132,7 +176,8 @@ def open_mr(path: str, title: str, body: str = "", branch: Optional[str] = None)
         url = result.stdout.strip().splitlines()[-1]
     finally:
         git(repo, "switch", "--quiet", base, check=False)  # The changes now live on the branch
-    return f"Opened {url}\nbranch {name} (commit {commit}) into {base}:\n{changed}"
+    gate = wait_for_check(repo, sha)
+    return f"Opened {url}\nbranch {name} (commit {commit}) into {base}:\n{changed}" + (f"\n\n{gate}" if gate else "")
 
 
 def main(argv: Optional[list[str]] = None) -> str:

@@ -19,22 +19,23 @@ const execFileAsync = promisify(execFile);
 
 type Param = { name: string; type?: string; description?: string; style?: 'flag' | 'positional'; required?: boolean };
 type JSONSchemaInput = Parameters<typeof z.fromJSONSchema>[0];
-type Manifest = { description?: string; command: string; args?: string[]; env?: Record<string, string>; params?: Param[] };
+type Manifest = { description?: string; command: string; args?: string[]; env?: Record<string, string>; params?: Param[]; timeout?: number };
 
 /** Run a tool command from the tools folder and return its output. */
-export async function runScript(command: string[], env: Record<string, string> = {}): Promise<string> {
+export async function runScript(command: string[], env: Record<string, string> = {},
+                                timeoutMs = SCRIPT_TIMEOUT_MS): Promise<string> {
   const [file, ...args] = command;
   try {
     // Async: the event loop stays free while the child process runs.
     const { stdout } = await execFileAsync(file, args, {
       cwd: TOOLS_DIR,
       env: { ...process.env, AGENT_NAME, ...env },
-      timeout: SCRIPT_TIMEOUT_MS,
+      timeout: timeoutMs,
     });
     return stdout.trim();
   } catch (error) {
     const { stdout, stderr, killed } = error as { stdout?: string; stderr?: string; killed?: boolean };
-    if (killed) throw new Error(`${args[0]} timed out after ${SCRIPT_TIMEOUT_MS / 1000}s`);
+    if (killed) throw new Error(`${args[0]} timed out after ${timeoutMs / 1000}s`);
     // A thrown error becomes a tool-error the model sees, like MCPAgent's isError results.
     throw new Error(stdout?.trim() || stderr?.trim() || String(error));
   }
@@ -72,7 +73,7 @@ export function loadTools(toolsDir = TOOLS_DIR): ToolSet {
     tools[name] = tool({
       description: manifest.description,
       inputSchema: z.fromJSONSchema(inputSchema(manifest) as JSONSchemaInput) as z.ZodType<Record<string, unknown>>,
-      execute: (input) => runScript(buildArgv(manifest, input), manifest.env),
+      execute: (input) => runScript(buildArgv(manifest, input), manifest.env, (manifest.timeout ?? SCRIPT_TIMEOUT_MS / 1000) * 1000),
     });
   }
   return tools;

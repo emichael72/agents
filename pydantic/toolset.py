@@ -25,12 +25,13 @@ SCRIPT_TIMEOUT = 30
 AGENT_NAME = "Pydantic Agent"  # Lets tools such as greet say which agent ran them
 
 
-def run_script(*command: str, env: dict[str, str] | None = None) -> str:
+def run_script(*command: str, env: dict[str, str] | None = None, timeout: float = SCRIPT_TIMEOUT) -> str:
     """
     Run a tool command from the tools folder and return its output.
     Args:
         *command: The program and its arguments, e.g. ("bash", "greet/greet.sh").
         env: Extra environment variables for the command (AGENT_NAME is always set).
+        timeout: Seconds to wait (a manifest's "timeout", default SCRIPT_TIMEOUT).
     Returns:
         str: The command's standard output, stripped.
     Raises:
@@ -39,10 +40,10 @@ def run_script(*command: str, env: dict[str, str] | None = None) -> str:
     try:
         completed = subprocess.run(
             command, cwd=TOOLS_DIR, env={**os.environ, "AGENT_NAME": AGENT_NAME, **(env or {})},
-            capture_output=True, text=True, timeout=SCRIPT_TIMEOUT,
+            capture_output=True, text=True, timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        raise ToolFailed(f"{command[1]} timed out after {SCRIPT_TIMEOUT}s") from None
+        raise ToolFailed(f"{command[1]} timed out after {timeout:g}s") from None
     output = completed.stdout.strip()
     if completed.returncode != 0:
         # The model sees the failure and can explain it, like MCPAgent's isError results.
@@ -117,7 +118,8 @@ def manifest_tool(name: str, manifest: dict) -> Tool:
             validate(arguments, schema)  # Tool.from_schema leaves validation to us
         except ValidationError as error:
             raise ModelRetry(f"Invalid arguments: {error.message}") from None
-        return run_script(*build_argv(manifest, arguments), env=manifest.get("env"))
+        return run_script(*build_argv(manifest, arguments), env=manifest.get("env"),
+                          timeout=float(manifest.get("timeout", SCRIPT_TIMEOUT)))
 
     return Tool.from_schema(call, name=name, description=manifest.get("description"), json_schema=schema)
 

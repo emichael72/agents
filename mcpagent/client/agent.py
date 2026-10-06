@@ -150,6 +150,7 @@ class MCPAgent:
         self.history = []
         self.tools = []
         self.routes = {}
+        self.timeouts = {}  # Seconds to wait per tool alias, from the server's tools/list _meta
         # A dedicated client keeps the API key separate from MCP HTTP headers.
         self.api = httpx.AsyncClient(
             base_url=base_url + "/",
@@ -180,6 +181,7 @@ class MCPAgent:
                     # An index prevents collisions between servers and invalid API names.
                     alias = f"mcp_tool_{len(self.routes)}"
                     self.routes[alias] = (server_id, tool["name"], tool["inputSchema"])
+                    self.timeouts[alias] = float((tool.get("_meta") or {}).get("timeout", 30)) + 5
                     self.tools.append({
                         "type": "function", "name": alias,
                         "description": f'{server_id}/{tool["name"]}: {tool.get("description", "")}',
@@ -226,7 +228,7 @@ class MCPAgent:
         try:
             response = await self.mcp.call(
                 "tools/call", {"name": name, "arguments": arguments},
-                server_id=server, timeout=30.0,
+                server_id=server, timeout=self.timeouts.get(call["name"], 35.0),
             )
         except Exception:
             # Retrying automatically could execute the same action twice.

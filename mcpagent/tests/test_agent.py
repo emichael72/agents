@@ -294,7 +294,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         config_file = CLIENT_CONFIG
         instructions = load_instructions(self.shipped_config(), config_file)
         self.assertTrue(instructions.startswith('You are an agent'))
-        self.assertIn('shared tools folder', instructions)
+        self.assertIn('allowed folder', instructions)
         self.assertEqual(load_instructions({}, config_file), '')  # no instructions_file configured
 
     async def test_missing_key_and_unknown_profile(self):
