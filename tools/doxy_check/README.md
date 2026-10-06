@@ -6,7 +6,7 @@ block, and every function, parameter and return value is described. Read-only.
 **Usage Example:**
 
 ```bash
-bash doxy_check/doxy_check.sh ~/projects/mr_quiz/src
+bash doxy_check/doxy_check.sh ~/projects/core_dump/src
 bash doxy_check/doxy_check.sh "src/pi.c include/pi.h"   # several paths in one argument, as the agents pass them
 ```
 

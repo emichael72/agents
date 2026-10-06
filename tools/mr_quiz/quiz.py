@@ -48,7 +48,7 @@ INSTRUCTIONS_FILE = TOOL_DIR / "context" / "instructions.json"
 
 # Overridable from the environment, so the service and the tool share one configuration
 DATA = Path(os.environ.get("QUIZ_DATA_DIR", TOOL_DIR / "data"))
-REPO = os.environ.get("QUIZ_REPO", "emichael72/mr_quiz")
+REPO = os.environ.get("QUIZ_REPO", "emichael72/core_dump")
 DEVELOPER = os.environ.get("QUIZ_DEVELOPER", "emichael72")
 BASE_URL = os.environ.get("QUIZ_BASE_URL", f"http://{socket.gethostname()}:8000").rstrip("/")
 PROFILE = os.environ.get("QUIZ_MODEL_PROFILE") or None  # None uses the models file's default

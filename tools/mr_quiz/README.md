@@ -27,7 +27,7 @@ bash mr_quiz/mr_quiz.sh serve           # what the systemd unit runs
 
 ## How the gate works
 
-1. The target repository ([emichael72/mr_quiz](https://github.com/emichael72/mr_quiz)) protects
+1. The target repository, [emichael72/core_dump](https://github.com/emichael72/core_dump) (a small C sample project), protects
    `main`: merging requires a passing `developer-quiz` status check and an up-to-date branch,
    and the rule also applies to administrators. Until the status says success, GitHub blocks the
    merge button.
@@ -93,7 +93,7 @@ password `pass`; the sign-in page shows them. Change them with `QUIZ_WEB_USER` a
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `QUIZ_REPO` | `emichael72/mr_quiz` | The repository to gate |
+| `QUIZ_REPO` | `emichael72/core_dump` | The repository to gate |
 | `QUIZ_DEVELOPER` | `emichael72` | The only PR author assessed |
 | `QUIZ_WEB_USER`, `QUIZ_WEB_PASSWORD` | `user`, `pass` | The web sign-in |
 | `QUIZ_BASE_URL` | `http://<hostname>:8000` | Where the PR's Details link points |
