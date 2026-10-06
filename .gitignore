@@ -31,5 +31,5 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# mr_gate tool: quiz database, answer keys and access password
-tools/mr_gate/data/
+# pr_gate tool: quiz database, answer keys and access password
+tools/pr_gate/data/

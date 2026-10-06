@@ -39,8 +39,8 @@ Every agent scans this folder at startup, so a tool added there is available to 
 without code changes. [tools/README.md](tools/README.md) describes the manifest and how to add
 a tool. Current tools: `shell` (ls, cat, grep, find, sed, make, gcc, git and more, in a sandbox),
 `ed` (edit files), `mr` (open a merge request), `doxy`
-(checks Doxygen documentation of C/C++ sources) and `mr_gate` (Merge Request Gate: a merge gate
-that quizzes a developer on their pull request; see [tools/mr_gate/README.md](tools/mr_gate/README.md)).
+(checks Doxygen documentation of C/C++ sources) and `pr_gate` (Pull Request Gate: a merge gate
+that quizzes a developer on their pull request; see [tools/pr_gate/README.md](tools/pr_gate/README.md)).
 Tools that take a path only reach the folders named in
 [`context/paths.json`](context/paths.json).
 
@@ -104,8 +104,8 @@ All three agents print a turn the same way, so their output can be compared line
 
 ```text
 Local model server model: qwen/qwen3-coder-30b @ http://boba:1234/v1, 12 tools (sequential)
-→ mr_gate({})
-← mr_gate: Quiz service: running at http://minion:8000
+→ pr_gate({})
+← pr_gate: Quiz service: running at http://minion:8000
   PR #1 'Compute pi using the C math library' by emichael72 at 135c35a: quiz waiting, merge blocked: …
 
 The quiz service is running. Pull request #1 is still waiting for its quiz, so its merge is blocked.

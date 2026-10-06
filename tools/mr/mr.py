@@ -13,8 +13,8 @@ Description:
       2. Bring the default branch up to date with GitHub (fast-forward only).
       3. Create the branch (new, never the default branch), commit everything, push it.
       4. Open the pull request, then switch back to the default branch.
-      5. Wait for the merge gate's check (MR_WAIT_CHECK, e.g. mr_gate's developer-quiz) on the new
-         commit, up to MR_WAIT_SECONDS, and report it: for mr_gate, the quiz the reviewer must pass.
+      5. Wait for the merge gate's check (MR_WAIT_CHECK, e.g. pr_gate's developer-quiz) on the new
+         commit, up to MR_WAIT_SECONDS, and report it: for pr_gate, the quiz the reviewer must pass.
     It never pushes to the default branch, never force-pushes and never merges: merging stays with
     the people (and gates) of the repository.
 """
@@ -87,7 +87,7 @@ def branch_name(title: str, branch: Optional[str]) -> str:
 
 def wait_for_check(repo: Path, sha: str) -> str:
     """
-    Wait for the merge gate's status check on a commit to be ready, and describe it. With mr_gate,
+    Wait for the merge gate's status check on a commit to be ready, and describe it. With pr_gate,
     the check is pending with "Checking documentation..." while it works, then links to the quiz
     (a /q/ page) or settles to success or failure.
     Args:

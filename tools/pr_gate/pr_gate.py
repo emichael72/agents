@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Module: mr_gate.py
+Module: pr_gate.py
 
 Description:
-    Command line for the developer quiz, and the entry point the agents run as the `mr_gate` tool.
+    Command line for the developer quiz, and the entry point the agents run as the `pr_gate` tool.
 
     Commands:
       - status [--pr N]: The open PRs and their quiz state, with links (the agents' tool).
@@ -37,9 +37,9 @@ def status(pr: Optional[int] = None, port: int = 8000) -> str:
     quiz.init()
     try:
         httpx.get(f"http://127.0.0.1:{port}/health", timeout=3).raise_for_status()
-        lines = [f"mr_gate service: running at {quiz.BASE_URL}"]
+        lines = [f"pr_gate service: running at {quiz.BASE_URL}"]
     except httpx.HTTPError:
-        lines = ["mr_gate service: not running, so new commits are not assessed (systemctl --user start mr-gate)"]
+        lines = ["pr_gate service: not running, so new commits are not assessed (systemctl --user start pr-gate)"]
 
     prs = [quiz.pr_info(pr)] if pr else quiz.open_prs()
     if not prs:
@@ -83,7 +83,7 @@ def serve(host: str, port: int, poll: float, profile: Optional[str]) -> None:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)-8s] %(message)s")
     model = quiz.resolve_model(profile or quiz.PROFILE)  # Fail now, not at the first push
-    logging.getLogger("mr_gate").info("Quizzes for %s by %s, model %s / %s, links at %s",
+    logging.getLogger("pr_gate").info("Quizzes for %s by %s, model %s / %s, links at %s",
                                       quiz.REPO, quiz.DEVELOPER, model["name"], model["model"], quiz.BASE_URL)
     app = create_app(Poller(poll, profile) if poll > 0 else None)
     uvicorn.run(app, host=host, port=port, access_log=False)

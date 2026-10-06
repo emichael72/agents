@@ -41,9 +41,9 @@ from starlette.concurrency import run_in_threadpool
 import quiz
 
 MAX_FAILURES = 3  # Generation attempts per revision before the poller gives up on it
-SESSION_COOKIE = "mr_gate_session"
+SESSION_COOKIE = "pr_gate_session"
 
-logger = logging.getLogger("mr_gate")
+logger = logging.getLogger("pr_gate")
 
 
 class Poller:
@@ -70,7 +70,7 @@ class Poller:
 
     def start(self) -> None:
         """Start polling in a background thread."""
-        self._thread = threading.Thread(target=self._run, name="mr-gate-poller", daemon=True)
+        self._thread = threading.Thread(target=self._run, name="pr-gate-poller", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:

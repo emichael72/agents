@@ -3,7 +3,7 @@
 Opens a merge request (a GitHub pull request) with the uncommitted changes of a repository in an
 allowed folder with write access ([`../../context/paths.json`](../../context/paths.json)), such as
 `core_dump`. It is how an agent hands its work to a person: the change waits on GitHub for review,
-and in `core_dump` the [`mr_gate`](../mr_gate/README.md) quiz checks that the reviewer understands
+and in `core_dump` the [`pr_gate`](../pr_gate/README.md) quiz checks that the reviewer understands
 it before it can merge.
 
 **Usage Example:**
@@ -23,7 +23,7 @@ What it does, every time:
    to the default branch; the changes now live on the branch.
 5. Waits for the merge gate's check on the new commit (`MR_WAIT_CHECK` in `tool.json`, set to
    `developer-quiz`, for up to `MR_WAIT_SECONDS`, 100) and reports it. With
-   [`mr_gate`](../mr_gate/README.md) that is the quiz link the reviewer must pass, or the
+   [`pr_gate`](../pr_gate/README.md) that is the quiz link the reviewer must pass, or the
    documentation problems that fail the check. `tool.json`'s `timeout` (150 s) lets the agents wait
    that long. Set `MR_WAIT_CHECK` to `""` to return right after opening the request.
 

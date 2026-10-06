@@ -353,7 +353,7 @@ def load_instructions(path: Path = INSTRUCTIONS_FILE) -> str:
     """
     Read the quiz writer's instructions file.
     Args:
-        path: The JSON file (default: mr_gate/context/instructions.json).
+        path: The JSON file (default: pr_gate/context/instructions.json).
     Returns:
         str: Its "instructions" lines, joined with newlines.
     """

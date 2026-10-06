@@ -175,7 +175,7 @@ class OutputTests(unittest.TestCase):
 
     def test_lines_wrap_with_an_indent_and_keep_long_words_whole(self):
         url = "http://minion:8000/q/" + "x" * 40
-        lines = agent.wrap("← mr_gate: the quiz is waiting and the merge is blocked " + url, 30)
+        lines = agent.wrap("← pr_gate: the quiz is waiting and the merge is blocked " + url, 30)
         self.assertTrue(all(len(line) <= 30 for line in lines if line.strip() != url))
         self.assertTrue(all(line.startswith("  ") for line in lines[1:]))
         self.assertEqual(lines[-1], "  " + url)

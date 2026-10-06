@@ -1,0 +1,20 @@
+# User unit for the developer quiz service. Install with:
+#   ln -sf ~/projects/agents/tools/pr_gate/pr-gate.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now pr-gate
+# For the openai profile, put OPENAI_API_KEY=... in ~/.config/pr-gate.env and add --profile openai.
+[Unit]
+Description=Developer quiz service (agents/tools/pr_gate)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/agents/tools/pr_gate
+EnvironmentFile=-%h/.config/pr-gate.env
+ExecStart=%h/projects/agents/tools/pr_gate/pr_gate.sh serve --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

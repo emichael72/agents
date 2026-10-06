@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Usage: ./mr_gate.sh <command> [options]   (see: ./mr_gate.sh --help)
-# Runs mr_gate.py with the repository's shared Python environment (.venv)
+# Usage: ./pr_gate.sh <command> [options]   (see: ./pr_gate.sh --help)
+# Runs pr_gate.py with the repository's shared Python environment (.venv)
 
 TOOL_DIR="$(cd "$(dirname "$0")" && pwd)"
 PYTHON="$(cd "$TOOL_DIR/../.." && pwd)/.venv/bin/python"
@@ -11,4 +11,4 @@ if [ ! -x "$PYTHON" ]; then
   exit 1
 fi
 
-exec "$PYTHON" "$TOOL_DIR/mr_gate.py" "$@"
+exec "$PYTHON" "$TOOL_DIR/pr_gate.py" "$@"

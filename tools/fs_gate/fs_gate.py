@@ -23,7 +23,7 @@ Description:
     which prints "<absolute path><TAB><path as shown>" or "Error: ..." with exit status 1.
 
     FS_GATE_PATHS may name another JSON file of the same shape, for a program that runs a tool on
-    its own files (mr_gate runs doxy on a downloaded pull request). The agents only pass the fixed
+    its own files (pr_gate runs doxy on a downloaded pull request). The agents only pass the fixed
     "env" of a tool's manifest, so the model cannot set it.
 """
 

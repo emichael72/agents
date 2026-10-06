@@ -1,4 +1,4 @@
-# Merge Request Gate
+# Pull Request Gate
 
 A merge gate that checks the developer understands the code they are about to merge. When a pull
 request is opened (or a commit is pushed to it), a model reads the diff and writes a short
@@ -9,20 +9,20 @@ documentation needs no quiz, only correct documentation.
 
 It is a tool and a resident service:
 
-- **The tool** (`mr_gate`, what the agents call) reports the gate: whether the service is running,
+- **The tool** (`pr_gate`, what the agents call) reports the gate: whether the service is running,
   and for each open PR whether it has documentation problems, its quiz is waiting (with the
   link), or it may merge.
-- **The service** (`mr-gate`, a systemd user unit on minion) polls GitHub, generates the quizzes,
+- **The service** (`pr-gate`, a systemd user unit on minion) polls GitHub, generates the quizzes,
   serves them at `http://minion:8000` and posts the result to the PR.
 
 **Usage Example:**
 
 ```bash
-bash mr_gate/mr_gate.sh status                     # the agents' tool: open PRs and their gate state
-bash mr_gate/mr_gate.sh status --pr 1              # the same, for one PR only
-bash mr_gate/mr_gate.sh create 1 --profile openai  # assess a PR's current revision now (or re-post its status)
-bash mr_gate/mr_gate.sh list                       # every stored assessment, as JSON
-bash mr_gate/mr_gate.sh serve                      # the web service and GitHub poller (what the systemd unit runs)
+bash pr_gate/pr_gate.sh status                     # the agents' tool: open PRs and their gate state
+bash pr_gate/pr_gate.sh status --pr 1              # the same, for one PR only
+bash pr_gate/pr_gate.sh create 1 --profile openai  # assess a PR's current revision now (or re-post its status)
+bash pr_gate/pr_gate.sh list                       # every stored assessment, as JSON
+bash pr_gate/pr_gate.sh serve                      # the web service and GitHub poller (what the systemd unit runs)
 ```
 
 ## How the gate works
@@ -76,7 +76,7 @@ The quiz is written by one of the agents' model profiles in
 [`context/models.json`](../../context/models.json): `local` (LM Studio on boba, the default) or
 `openai`. The service uses the file's default unless started with `--profile openai` or
 `QUIZ_MODEL_PROFILE=openai`. The systemd unit does not see your shell's environment, so for
-OpenAI put `OPENAI_API_KEY=...` in `~/.config/mr-gate.env` (read by the unit).
+OpenAI put `OPENAI_API_KEY=...` in `~/.config/pr-gate.env` (read by the unit).
 
 The model's instructions (system prompt) live in
 [`context/instructions.json`](context/instructions.json), as a list of lines like the agents'
@@ -87,9 +87,9 @@ without restarting the service. The reply must still match the JSON shape it des
 ## The service
 
 ```bash
-ln -sf ~/projects/agents/tools/mr_gate/mr-gate.service ~/.config/systemd/user/
-systemctl --user daemon-reload && systemctl --user enable --now mr-gate
-journalctl --user -u mr-gate -f       # watch the poller
+ln -sf ~/projects/agents/tools/pr_gate/pr-gate.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now pr-gate
+journalctl --user -u pr-gate -f       # watch the poller
 ```
 
 Open `http://minion:8000` (port 8000 is open in minion's firewall) and sign in with user `user`,
@@ -99,8 +99,8 @@ password `pass`; the sign-in page shows them.
 
 The settings live in the `"env"` block of [`tool.json`](tool.json), the tool's manifest. The agents
 pass that block to the tool, and `quiz.py` reads it too, so the tool and the service share one
-configuration. Edit it, then restart the service (`systemctl --user restart mr-gate`). A variable
-set in the environment (for example in `~/.config/mr-gate.env` for the service) overrides the file.
+configuration. Edit it, then restart the service (`systemctl --user restart pr-gate`). A variable
+set in the environment (for example in `~/.config/pr-gate.env` for the service) overrides the file.
 
 | Variable | In `tool.json` | Meaning |
 | --- | --- | --- |
@@ -113,7 +113,7 @@ set in the environment (for example in `~/.config/mr-gate.env` for the service) 
 | `QUIZ_MODEL_PROFILE` | empty: the models file's default | Model profile (`local` or `openai`) |
 | `QUIZ_WEB_USER`, `QUIZ_WEB_PASSWORD` | `user`, `pass` | The web sign-in |
 
-One setting stays outside the manifest: `QUIZ_DATA_DIR` (default `mr_gate/data`, gitignored), the
+One setting stays outside the manifest: `QUIZ_DATA_DIR` (default `pr_gate/data`, gitignored), the
 database and the key that signs sign-in cookies.
 
 GitHub access goes through the `gh` CLI and its login; the service needs only outbound access.
@@ -135,7 +135,7 @@ This is a single-user demo, not tamper-proof enforcement:
 ## Tests
 
 ```bash
-.venv/bin/python -m unittest discover -s tools/mr_gate/tests
+.venv/bin/python -m unittest discover -s tools/pr_gate/tests
 ```
 
 The tests use temporary storage with mocked GitHub and model calls; they never mark a real PR.

@@ -1,7 +1,7 @@
 """
-Offline tests for the mr_gate tool: temporary storage, and mocked GitHub and model calls, so no
+Offline tests for the pr_gate tool: temporary storage, and mocked GitHub and model calls, so no
 real PR is ever marked. Run from the repository root:
-    .venv/bin/python -m unittest discover -s tools/mr_gate/tests
+    .venv/bin/python -m unittest discover -s tools/pr_gate/tests
 """
 
 import copy

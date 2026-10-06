@@ -1,4 +1,4 @@
-# Pinned, tested versions of the mr_gate tool's dependencies. The repository's install.sh installs
+# Pinned, tested versions of the pr_gate tool's dependencies. The repository's install.sh installs
 # these into the shared .venv, next to the agents' requirements.
 fastapi==0.142.2
 starlette==1.7.0
