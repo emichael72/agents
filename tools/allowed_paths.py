@@ -4,7 +4,7 @@ Module: allowed_paths.py
 
 Description:
     The one rule for which files and folders the tools may touch, shared by every tool that takes
-    a path (ls, view_file, wc, search_text, df, git, make, gcc, doxy_check). It lives in the
+    a path (ls, view_file, wc, search_text, df, git, make, gcc, doxy). It lives in the
     tools folder, next to allowed_paths.json, and is not a tool itself (it has no tool.json).
 
     A path the model gives starts with the name of an allowed folder: `core_dump/src/pi.c` means
@@ -20,7 +20,7 @@ Description:
     which prints "<absolute path><TAB><path as shown>" or "Error: ..." with exit status 1.
 
     TOOLS_ALLOWED_PATHS may name another JSON file of the same shape, for a program that runs a
-    tool on its own files (mr_quiz runs doxy_check on a downloaded pull request). The agents only
+    tool on its own files (mr_quiz runs doxy on a downloaded pull request). The agents only
     pass the fixed "env" of a tool's manifest, so the model cannot set it.
 """
 

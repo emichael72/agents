@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Usage: ./doxy_check.sh <allowed name>/<path> [...]
+# Usage: ./doxy.sh <allowed name>/<path> [...]
 # Checks that C/C++ sources and headers are documented with Doxygen, using the settings in
 # Doxyfile.check (next to this script). Each path is a file or a folder (searched recursively)
 # inside tools/allowed_paths.json's folders; one argument may also hold several paths separated by

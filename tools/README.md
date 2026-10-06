@@ -24,11 +24,11 @@ added here is available to all of them without code changes:
 | `git` | Python / `git` | `path`, `command`, `args` (optional) | A read-only git command's output (log, status, diff, show, blame, ...) |
 | `make` | Python / `make` | `path`, `target` (optional) | Whether the build succeeded, and its output |
 | `gcc` | Python / `gcc` | `sources`, `output`, `flags` (optional) | Warnings and errors (a check), or a built program |
-| `doxy_check` | Bash / `doxygen` | `paths` (files or folders, space-separated) | Doxygen documentation problems as `file:line: message`, or "All documented" |
+| `doxy` | Bash / `doxygen` | `paths` (files or folders, space-separated) | Doxygen documentation problems as `file:line: message`, or "All documented" |
 | `mr_quiz` | Python (shared `.venv`) | `pr` (optional) | Open PRs in the quiz-gated repository and their quiz state; see [mr_quiz/README.md](mr_quiz/README.md) |
 
 Every path a tool takes (`ls`, `view_file`, `wc`, `search_text`, `df`, `git`, `make`,
-`gcc`, `doxy_check`) must be inside the folders named in [`allowed_paths.json`](allowed_paths.json);
+`gcc`, `doxy`) must be inside the folders named in [`allowed_paths.json`](allowed_paths.json);
 see "Allowed paths" below.
 
 ## The manifest
@@ -74,7 +74,7 @@ this folder is also the working directory when a tool runs.
 So `wc` takes `core_dump/README.md` or `tools/greet/README.md`, and nothing outside
 those folders (`..` and symbolic links are resolved before the check). Every tool that takes a
 path (`ls`, `view_file`, `wc`, `search_text`, `df`, `git`, `make`, `gcc`,
-`doxy_check`) checks it with [`allowed_paths.py`](allowed_paths.py): Python tools import it, and
+`doxy`) checks it with [`allowed_paths.py`](allowed_paths.py): Python tools import it, and
 Bash tools run `python3 allowed_paths.py <path> [--dir|--file]`, which prints the absolute path and
 the path as shown, or an error. To allow another folder, add a name to the JSON; it is read on
 every call.

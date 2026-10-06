@@ -4,7 +4,7 @@ Module: quiz.py
 Description:
     The developer quiz: a model reads a pull request's diff and writes a short multiple-choice
     quiz about it; the PR may merge only after its author passes that quiz. The changed C/C++ files
-    must also be correctly documented (the doxy_check tool), and a change that only touches
+    must also be correctly documented (the doxy tool), and a change that only touches
     comments, formatting or documentation needs no quiz.
 
     The module provides:

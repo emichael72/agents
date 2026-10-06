@@ -4,7 +4,7 @@ A merge gate that checks the developer understands the code they are about to me
 request is opened (or a commit is pushed to it), a model reads the diff and writes a short
 multiple-choice quiz about it. The PR cannot merge until its author answers every question
 correctly, and until its changed C/C++ files are correctly documented (checked with the
-[`doxy_check`](../doxy_check/README.md) tool). A change that only touches comments, formatting or
+[`doxy`](../doxy/README.md) tool). A change that only touches comments, formatting or
 documentation needs no quiz, only correct documentation.
 
 It is a tool and a resident service:
@@ -34,7 +34,7 @@ bash mr_quiz/mr_quiz.sh serve           # what the systemd unit runs
 2. Every few seconds (`QUIZ_POLL_SECONDS`, 5) the service lists the open PRs that target `main`. For each new revision
    (head and base commit) of a PR opened by the configured developer, it posts "Checking
    documentation and preparing the developer quiz" and inspects the change (`changes.py`):
-   - **Documentation:** it downloads the PR's files and runs `doxy_check` on the whole tree,
+   - **Documentation:** it downloads the PR's files and runs `doxy` on the whole tree,
      keeping the problems in the files the PR changed. The whole tree is checked so that a
      function documented in an unchanged header still counts as documented.
    - **Code or cosmetic:** it compares each changed C/C++ file before and after with comments and

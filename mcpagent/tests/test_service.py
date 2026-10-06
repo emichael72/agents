@@ -83,7 +83,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(expected, result['content'][0]['text'])
 
     @unittest.skipUnless(shutil.which('doxygen'), 'doxygen is not installed')
-    async def test_doxy_check_reports_documentation_problems(self):
+    async def test_doxy_reports_documentation_problems(self):
         good = '/** @file good.c\n * @brief Good. */\n\n/** @brief Add.\n * @param a A.\n * @param b B.\n' \
                ' * @return The sum. */\nint add(int a, int b) { return a + b; }\n'
         bad = '/** @file bad.c\n * @brief Bad. */\n\nint subtract(int a, int b) { return a - b; }\n'
@@ -97,7 +97,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
 
             async def check(paths):
                 with patch.dict(os.environ, {'TOOLS_ALLOWED_PATHS': str(allowed)}):
-                    return (await self.rpc('tools/call', {'name': 'doxy_check', 'arguments': {'paths': paths}}))['result']
+                    return (await self.rpc('tools/call', {'name': 'doxy', 'arguments': {'paths': paths}}))['result']
 
             result = await check('sample/good.c')
             self.assertFalse(result['isError'], result)
@@ -114,7 +114,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             for name, args in [('ls', {'path': path}), ('view_file', {'path': path + '/passwd'}),
                                ('wc', {'file': path + '/passwd'}), ('df', {'path': path}),
                                ('search_text', {'pattern': 'root', 'path': path}),
-                               ('git', {'path': path, 'command': 'log'}), ('doxy_check', {'paths': path}),
+                               ('git', {'path': path, 'command': 'log'}), ('doxy', {'paths': path}),
                                ('make', {'path': path}), ('gcc', {'sources': path + '/x.c'})]:
                 result = (await self.rpc('tools/call', {'name': name, 'arguments': args}))['result']
                 self.assertTrue(result['isError'], (name, path))

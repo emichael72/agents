@@ -1,4 +1,4 @@
-# Doxygen settings for doxy_check. doxy_check.sh replaces INPUT with the files and folders it is
+# Doxygen settings for doxy. doxy.sh replaces INPUT with the files and folders it is
 # given, and writes warnings and output (as XML, since Doxygen needs one output format) to a temporary
 # folder; everything else applies as set here.
 PROJECT_NAME           = "Documentation checks"

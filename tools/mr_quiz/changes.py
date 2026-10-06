@@ -3,13 +3,13 @@ Module: changes.py
 
 Description:
     Inspects what a pull request changes, before any quiz is written: whether its C/C++ files are
-    correctly documented (the doxy_check tool), and whether the change is only cosmetic (comments,
+    correctly documented (the doxy tool), and whether the change is only cosmetic (comments,
     formatting, documentation files) rather than code.
 
     The module provides:
       - `inspect_pr`: downloads the PR's head and merge-base trees from GitHub and returns the
         documentation result and the cosmetic verdict for the changed files.
-      - `check_docs`: runs doxy_check on a whole tree and keeps the problems in the changed files.
+      - `check_docs`: runs doxy on a whole tree and keeps the problems in the changed files.
         The whole tree is checked so that a function documented in an unchanged header still
         counts as documented.
       - `code_tokens` / `is_cosmetic`: compares C/C++ sources with comments and formatting removed.
@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 TOOLS_DIR = Path(__file__).resolve().parent.parent
-DOXY_CHECK = TOOLS_DIR / "doxy_check" / "doxy_check.sh"
+DOXY = TOOLS_DIR / "doxy" / "doxy.sh"
 
 C_EXTENSIONS = {".c", ".h", ".cc", ".cpp", ".hpp", ".cxx", ".hh"}
 DOC_EXTENSIONS = {".md", ".txt", ".rst", ".dox"}
@@ -99,7 +99,7 @@ def is_cosmetic(path: str, before: Optional[str], after: Optional[str]) -> bool:
 
 def check_docs(tree: Path, changed: list[str]) -> tuple[bool, str]:
     """
-    Run doxy_check on a whole tree and keep the problems reported for the changed files.
+    Run doxy on a whole tree and keep the problems reported for the changed files.
     Args:
         tree: The checked-out repository.
         changed: The changed C/C++ files, relative to the tree.
@@ -109,11 +109,11 @@ def check_docs(tree: Path, changed: list[str]) -> tuple[bool, str]:
     """
     if not changed:
         return True, "No C/C++ files changed."
-    # doxy_check only reads folders that allowed-paths file names: allow just this tree, as "pr"
+    # doxy only reads folders that allowed-paths file names: allow just this tree, as "pr"
     allowed = Path(tempfile.mkdtemp()) / "allowed_paths.json"
     allowed.write_text(json.dumps({"paths": {"pr": str(Path(tree).resolve())}}))
     try:
-        result = subprocess.run(["bash", str(DOXY_CHECK), "pr"], cwd=tree, capture_output=True, text=True,
+        result = subprocess.run(["bash", str(DOXY), "pr"], cwd=tree, capture_output=True, text=True,
                                 timeout=120, env={**os.environ, "TOOLS_ALLOWED_PATHS": str(allowed)})
     except subprocess.TimeoutExpired:
         return False, "The documentation check timed out."
