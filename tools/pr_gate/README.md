@@ -56,6 +56,7 @@ bash pr_gate/pr_gate.sh serve                      # the web service and GitHub 
    | Documentation problems in a changed file | failure, whatever the quiz |
    | Cosmetic change, builds, documentation OK | success, no quiz |
    | Code change, quiz passed | success |
+   | Code change, quiz skipped (`QUIZ_ALLOW_SKIP`) | success, "Quiz skipped (proof-of-concept mode)" |
    | Code change, last attempt failed | failure (retries are unlimited) |
    | Code change, not yet answered | pending, "Complete the developer quiz" |
 
@@ -115,6 +116,7 @@ set in the environment (for example in `~/.config/pr-gate.env` for the service) 
 | `QUIZ_BUILD_COMMAND` | `make` | How to build a PR's revision; empty skips the build check |
 | `QUIZ_TEST_TARGET` | `check` | The make target that runs the tests, when the Makefile has it |
 | `QUIZ_FAIL_ON_WARNINGS` | `true` | A compiler warning (`file:line: warning:`) fails the build check, like an error |
+| `QUIZ_ALLOW_SKIP` | `true` | Proof-of-concept mode: a **Skip quiz** button next to the answers unlocks the merge without answering. It appears only once the build, tests and documentation pass, and the check, the PR comment and the database record it as skipped. Set `false` to require the quiz |
 | `QUIZ_PR_COMMENT` | `true` | Post and keep up to date one comment on the pull request with the results and the quiz link |
 | `QUIZ_POLL_SECONDS` | `5` | Seconds between GitHub polls. Each poll that finds nothing new costs one of the 5,000 GitHub API requests per hour your `gh` login allows: 720 an hour at 5 seconds |
 | `QUIZ_MODEL_PROFILE` | empty: the models file's default | Model profile (`local` or `openai`) |

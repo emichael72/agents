@@ -61,6 +61,8 @@ def status(pr: Optional[int] = None, port: int = 8000) -> str:
                 state = f"documentation problems, merge blocked: {quiz.BASE_URL}/q/{row['id']}"
             elif row["cosmetic"]:
                 state = "cosmetic change (comments/formatting only), documentation OK, may merge"
+            elif row["passed"] and row.get("skipped"):
+                state = "quiz skipped (proof-of-concept mode), may merge"
             elif row["passed"]:
                 state = "quiz passed, may merge"
             else:

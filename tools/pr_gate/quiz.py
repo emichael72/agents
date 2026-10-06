@@ -81,6 +81,7 @@ BUILD_COMMAND = setting("QUIZ_BUILD_COMMAND", required=False)  # "" skips the bu
 TEST_TARGET = setting("QUIZ_TEST_TARGET", required=False)
 FAIL_ON_WARNINGS = setting("QUIZ_FAIL_ON_WARNINGS", required=False).lower() in ("true", "1", "yes")
 PR_COMMENT = setting("QUIZ_PR_COMMENT", required=False).lower() in ("true", "1", "yes")
+ALLOW_SKIP = setting("QUIZ_ALLOW_SKIP", required=False).lower() in ("true", "1", "yes")  # Proof-of-concept mode
 COMMENT_MARKER = "<!-- pr_gate -->"  # Finds the gate's own comment on a pull request
 
 CONTEXT = "developer-quiz"  # The status check name branch protection requires
@@ -176,7 +177,8 @@ def init() -> str:
         );
         """)
         # Columns added after the first version; older databases get them with these defaults
-        for column in ("build_ok INTEGER NOT NULL DEFAULT 1", "build_report TEXT NOT NULL DEFAULT ''",
+        for column in ("skipped INTEGER NOT NULL DEFAULT 0",
+                       "build_ok INTEGER NOT NULL DEFAULT 1", "build_report TEXT NOT NULL DEFAULT ''",
                        "docs_ok INTEGER NOT NULL DEFAULT 1", "docs_report TEXT NOT NULL DEFAULT ''",
                        "cosmetic INTEGER NOT NULL DEFAULT 0"):
             try:
@@ -288,6 +290,8 @@ def gate_state(row: dict[str, Any], failed_attempt: bool = False) -> tuple[str, 
         return "failure", "Documentation problems in the changed files; see Details"
     if row["cosmetic"]:
         return "success", "Cosmetic change: no quiz needed; builds, documentation OK"
+    if row["passed"] and row.get("skipped"):
+        return "success", "Quiz skipped (proof-of-concept mode)"
     if row["passed"]:
         return "success", "Developer passed the revision-specific quiz"
     if failed_attempt:
@@ -316,6 +320,8 @@ def comment_body(row: dict[str, Any], failed_attempt: bool = False) -> str:
         quiz = f"🔒 Opens once the build, tests and documentation pass ([details]({url}))"
     elif row["cosmetic"]:
         quiz = "✅ Not needed: comments, formatting or documentation only"
+    elif row["passed"] and row.get("skipped"):
+        quiz = f"⏭ [Skipped]({url}) (proof-of-concept mode)"
     elif row["passed"]:
         quiz = f"✅ [Passed]({url})"
     elif failed_attempt:
@@ -410,7 +416,8 @@ def list_quizzes() -> list[dict[str, Any]]:
     """
     with connect() as db:
         return [dict(r) for r in db.execute(
-            "SELECT id,pr,sha,passed,build_ok,docs_ok,cosmetic,published,created FROM quizzes ORDER BY created DESC")]
+            "SELECT id,pr,sha,passed,skipped,build_ok,docs_ok,cosmetic,published,created FROM quizzes "
+            "ORDER BY created DESC")]
 
 
 def load_instructions(path: Path = INSTRUCTIONS_FILE) -> str:
@@ -587,6 +594,49 @@ def create_quiz(number: int, profile: Optional[str] = None, fixed: Optional[str]
     return row
 
 
+def takes_quiz(row: dict[str, Any]) -> None:
+    """
+    Check that a revision is ready for its quiz.
+    Args:
+        row: The quiz row.
+    Raises:
+        ValueError: If the build, tests or documentation failed, or the change is cosmetic.
+    """
+    if not row["build_ok"]:
+        raise ValueError("Fix the build or the tests and push; this revision cannot pass.")
+    if not row["docs_ok"]:
+        raise ValueError("Fix the documentation problems and push; this revision cannot pass.")
+    if row["cosmetic"]:
+        raise ValueError("This is a cosmetic change; it needs no quiz.")
+
+
+def skip(qid: str) -> dict[str, Any]:
+    """
+    Skip a revision's quiz (proof-of-concept mode, QUIZ_ALLOW_SKIP): the check succeeds as
+    "skipped", recorded as such. The build, tests and documentation must still pass.
+    Args:
+        qid: The quiz id.
+    Returns:
+        dict: skipped and passed (True), and the questions with explanations.
+    Raises:
+        KeyError: If there is no such quiz.
+        ValueError: If skipping is off, the revision is not ready for its quiz, or the PR moved.
+        RuntimeError: If a GitHub request fails (the skip is already saved; retry).
+    """
+    if not ALLOW_SKIP:
+        raise ValueError("Skipping the quiz is turned off (QUIZ_ALLOW_SKIP).")
+    row = get_quiz(qid)
+    takes_quiz(row)
+    check_pr(pr_info(row["pr"]), row["sha"], row["base_sha"])
+    with connect() as db:  # A revision already passed by quiz stays passed, not skipped
+        db.execute("UPDATE quizzes SET skipped=1, passed=1 WHERE id=? AND passed=0", (qid,))
+    row = get_quiz(qid)
+    publish(row)
+    quiz = Quiz.model_validate_json(row["content"])
+    return {"skipped": bool(row["skipped"]), "passed": True, "score": 0, "total": len(quiz.questions),
+            "questions": quiz.questions}
+
+
 def submit(qid: str, answers: list[int]) -> dict[str, Any]:
     """
     Grade an attempt and post the result. Only a perfect score passes; a revision that passed
@@ -603,12 +653,7 @@ def submit(qid: str, answers: list[int]) -> dict[str, Any]:
         RuntimeError: If a GitHub request fails (the attempt is already saved; resubmit).
     """
     row = get_quiz(qid)
-    if not row["build_ok"]:
-        raise ValueError("Fix the build or the tests and push; this revision cannot pass.")
-    if not row["docs_ok"]:
-        raise ValueError("Fix the documentation problems and push; this revision cannot pass.")
-    if row["cosmetic"]:
-        raise ValueError("This is a cosmetic change; it needs no quiz.")
+    takes_quiz(row)
     check_pr(pr_info(row["pr"]), row["sha"], row["base_sha"])
     quiz = Quiz.model_validate_json(row["content"])
     if len(answers) != len(quiz.questions) or any(type(a) is not int or a not in range(4) for a in answers):

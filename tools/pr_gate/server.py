@@ -172,6 +172,10 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
         with submission_lock:
             return quiz.submit(qid, answers)
 
+    def locked_skip(qid: str) -> dict[str, Any]:
+        with submission_lock:
+            return quiz.skip(qid)
+
     @app.middleware("http")
     async def headers(request: Request, call_next):
         response = await call_next(request)
@@ -224,7 +228,7 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
         state, description = quiz.gate_state(row)
         return templates.TemplateResponse(request=request, name="quiz.html", context={
             "row": row, "title": content.title, "questions": questions, "csrf": csrf(qid),
-            "repo": quiz.REPO, "state": state, "description": description})
+            "repo": quiz.REPO, "state": state, "description": description, "allow_skip": quiz.ALLOW_SKIP})
 
     @app.post("/q/{qid}", response_class=HTMLResponse)
     async def grade(qid: str, request: Request, _user: str = Depends(authenticate)):
@@ -245,6 +249,23 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
             raise HTTPException(409, str(exc))
         except (RuntimeError, TimeoutError):
             raise HTTPException(502, "GitHub could not confirm the result. Retry this submission.")
+        return templates.TemplateResponse(request=request, name="result.html",
+                                          context={"result": result, "row": row, "repo": quiz.REPO})
+
+    @app.post("/q/{qid}/skip", response_class=HTMLResponse)
+    async def skip(qid: str, request: Request, _user: str = Depends(authenticate)):
+        form = await request.form(max_fields=10)
+        if not secrets.compare_digest(str(form.get("csrf", "")), csrf(qid)):
+            raise HTTPException(403, "Invalid form token. Reload the quiz.")
+        try:
+            row = quiz.get_quiz(qid)
+            result = await run_in_threadpool(locked_skip, qid)
+        except KeyError:
+            raise HTTPException(404, "Quiz not found")
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+        except (RuntimeError, TimeoutError):
+            raise HTTPException(502, "GitHub could not confirm the result. Retry.")
         return templates.TemplateResponse(request=request, name="result.html",
                                           context={"result": result, "row": row, "repo": quiz.REPO})
 

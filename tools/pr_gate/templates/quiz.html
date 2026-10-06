@@ -53,7 +53,7 @@
     <p>Review the change, then choose one answer for each question ({{ questions|length }} questions,
       100% to pass). You can retry if needed.</p>
     {% if row.passed %}
-      <p class="card success">This revision has already passed.</p>
+      <p class="card success">{{ 'The quiz was skipped for this revision.' if row.skipped else 'This revision has already passed.' }}</p>
     {% endif %}
 
     {# Only questions and choices reach the page; the answer key stays on the server #}
@@ -72,7 +72,13 @@
           {% endfor %}
         </fieldset>
       {% endfor %}
-      <button type="submit">Check my understanding →</button>
+      <div class="actions">
+        <button type="submit">Check my understanding →</button>
+        {% if allow_skip %}
+          {# Proof-of-concept mode: unlocks the merge without answering; recorded as skipped #}
+          <button type="submit" class="secondary" formaction="/q/{{ row.id }}/skip" formnovalidate>Skip quiz</button>
+        {% endif %}
+      </div>
     </form>
   {% endif %}
 

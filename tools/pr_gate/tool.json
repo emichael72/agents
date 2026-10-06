@@ -13,7 +13,8 @@
     "QUIZ_BUILD_COMMAND": "make",
     "QUIZ_TEST_TARGET": "check",
     "QUIZ_FAIL_ON_WARNINGS": "true",
-    "QUIZ_PR_COMMENT": "true"
+    "QUIZ_PR_COMMENT": "true",
+    "QUIZ_ALLOW_SKIP": "true"
   },
   "params": [
     {"name": "pr", "type": "integer", "description": "Only this pull request number; omit it for every open PR", "style": "flag", "required": false}

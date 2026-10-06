@@ -249,6 +249,30 @@ class QuizTests(unittest.TestCase):
             self.assertIn("✅ [Passed]", comments[0]["body"])
             self.assertTrue(comments[0]["body"].startswith(quiz.COMMENT_MARKER))
 
+    def test_skip_button_unlocks_the_merge_and_is_recorded_as_skipped(self):
+        url = "/q/" + self.qid
+        with patch.object(quiz, "ALLOW_SKIP", True):
+            page = self.client.get(url).text
+            self.assertIn('formaction="/q/%s/skip"' % self.qid, page)
+            token = re.search(r'name="csrf" value="([0-9a-f]+)"', page).group(1)
+            self.assertEqual(self.client.post(url + "/skip", data={}).status_code, 403)  # Needs the form token
+            response = self.client.post(url + "/skip", data={"csrf": token})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Quiz skipped", response.text)
+        payload = self.mock_gh.call_args.kwargs["payload"]
+        self.assertEqual((payload["state"], payload["description"]), ("success", "Quiz skipped (proof-of-concept mode)"))
+        row = quiz.get_quiz(self.qid)
+        self.assertEqual((row["passed"], row["skipped"]), (1, 1))
+
+    def test_skip_is_refused_when_turned_off_or_before_the_build_passes(self):
+        with patch.object(quiz, "ALLOW_SKIP", False):
+            self.assertNotIn("/skip", self.client.get("/q/" + self.qid).text)
+            with self.assertRaisesRegex(ValueError, "turned off"):
+                quiz.skip(self.qid)
+        row = self.new_revision("b", dict(CODE_CHANGE, build_ok=False, build_report="$ make: FAILED"))
+        with patch.object(quiz, "ALLOW_SKIP", True), self.assertRaisesRegex(ValueError, "build"):
+            quiz.skip(row["id"])
+
     def test_failed_build_or_tests_fail_the_check_and_show_on_the_page(self):
         report = "$ make && make check: FAILED\ncore_dump: invalid option or unexpected option argument"
         row = self.new_revision("c", dict(CODE_CHANGE, build_ok=False, build_report=report))

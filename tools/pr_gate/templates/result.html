@@ -5,7 +5,11 @@
   <h1>{{ 'Ready to merge.' if result.passed else 'Take another look.' }}</h1>
 
   <section class="card {{ 'success' if result.passed else 'failure' }}">
-    <p><strong>{{ result.score }} / {{ result.total }} correct on this attempt</strong></p>
+    {% if result.skipped %}
+      <p><strong>Quiz skipped</strong> (proof-of-concept mode). The answers are below, for reference.</p>
+    {% else %}
+      <p><strong>{{ result.score }} / {{ result.total }} correct on this attempt</strong></p>
+    {% endif %}
     {% if result.passed %}
       <p>The quiz check is successful for this revision. Merge the PR in GitHub when ready.</p>
       <a class="button" href="https://github.com/{{ repo }}/pull/{{ row.pr }}">View pull request →</a>

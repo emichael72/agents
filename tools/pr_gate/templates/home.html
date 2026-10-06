@@ -32,6 +32,7 @@
           {% if not row.build_ok %}Build or tests failed
           {% elif not row.docs_ok %}Documentation problems
           {% elif row.cosmetic %}Cosmetic, no quiz needed
+          {% elif row.passed and row.skipped %}Quiz skipped
           {% elif row.passed %}Passed
           {% else %}Awaiting pass{% endif %}
         </span>
