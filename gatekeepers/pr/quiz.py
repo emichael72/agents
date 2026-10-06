@@ -177,7 +177,7 @@ def init() -> str:
         );
         """)
         # Columns added after the first version; older databases get them with these defaults
-        for column in ("skipped INTEGER NOT NULL DEFAULT 0",
+        for column in ("pr_title TEXT NOT NULL DEFAULT ''", "skipped INTEGER NOT NULL DEFAULT 0",
                        "build_ok INTEGER NOT NULL DEFAULT 1", "build_report TEXT NOT NULL DEFAULT ''",
                        "docs_ok INTEGER NOT NULL DEFAULT 1", "docs_report TEXT NOT NULL DEFAULT ''",
                        "cosmetic INTEGER NOT NULL DEFAULT 0"):
@@ -420,6 +420,43 @@ def list_quizzes() -> list[dict[str, Any]]:
             "ORDER BY created DESC")]
 
 
+NOT_FOUND = "(not found in this repository)"  # The title of an assessment whose pull request is gone
+
+
+def history(pr: Optional[int] = None) -> list[dict[str, Any]]:
+    """
+    Every assessment, newest first, with its attempts and outcome, for the history page. Titles
+    missing from assessments made before they were stored are fetched from GitHub once and saved,
+    but only when the pull request contains the assessed commit: a pull request number can belong
+    to a different request (a repository that was recreated), which is marked NOT_FOUND instead.
+    Args:
+        pr: Only this pull request; None for all.
+    Returns:
+        list[dict]: Each assessment's row (without content or answer keys), plus attempts (count),
+            best and total (best score), last_attempt (time) and state / outcome (see gate_state).
+    """
+    with connect() as db:
+        rows = [dict(r) for r in db.execute(
+            "SELECT q.id, q.pr, q.pr_title, q.sha, q.source, q.passed, q.skipped, q.build_ok, q.docs_ok, "
+            "q.cosmetic, q.created, q.rowid AS position, COUNT(a.id) AS attempts, MAX(a.score) AS best, MAX(a.total) AS total, "
+            "MAX(a.created) AS last_attempt FROM quizzes q LEFT JOIN attempts a ON a.quiz_id = q.id "
+            "WHERE ? IS NULL OR q.pr = ? GROUP BY q.id ORDER BY q.created DESC, position DESC", (pr, pr))]
+    for number in sorted({row["pr"] for row in rows if not row["pr_title"]}):
+        try:
+            title = pr_info(number).get("title", "")
+            commits = {c["sha"] for c in json.loads(gh("api", f"repos/{REPO}/pulls/{number}/commits?per_page=100"))}
+        except (RuntimeError, ValueError, KeyError, TypeError):
+            continue  # GitHub unreachable: show the number only, and try again next time
+        with connect() as db:
+            for row in rows:
+                if row["pr"] == number and not row["pr_title"]:
+                    row["pr_title"] = title if row["sha"] in commits else NOT_FOUND
+                    db.execute("UPDATE quizzes SET pr_title=? WHERE id=?", (row["pr_title"], row["id"]))
+    for row in rows:
+        row["state"], row["outcome"] = gate_state(row)
+    return rows
+
+
 def load_instructions(path: Path = INSTRUCTIONS_FILE) -> str:
     """
     Read the quiz writer's instructions file.
@@ -609,10 +646,10 @@ def create_quiz(number: int, profile: Optional[str] = None, fixed: Optional[str]
     with connect() as db:
         db.execute(
             "INSERT INTO quizzes(id,pr,sha,base_sha,developer,content,source,build_ok,build_report,"
-            "docs_ok,docs_report,cosmetic) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            "docs_ok,docs_report,cosmetic,pr_title) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (qid, number, head, base, DEVELOPER, quiz.model_dump_json(), source,
              int(inspection.get("build_ok", True)), inspection.get("build_report", ""),
-             int(inspection["docs_ok"]), inspection["docs_report"], int(quiz.cosmetic)))
+             int(inspection["docs_ok"]), inspection["docs_report"], int(quiz.cosmetic), after.get("title", "")))
     row = get_quiz(qid)
     publish(row)
     return row

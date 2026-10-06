@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}History · Pull Request Gate{% endblock %}
+
+{% block content %}
+  <p class="eyebrow">{{ repo }}</p>
+  <h1>History{% if pr %} of pull request #{{ pr }}{% endif %}</h1>
+  <p class="muted">
+    Every revision the gate assessed, newest first.
+    {% if pr %}<a href="/history">Show all pull requests</a>{% else %}Select a pull request to see only its revisions.{% endif %}
+  </p>
+
+  {% if rows %}
+    <div class="scroll">
+      <table class="history">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Pull request</th>
+            <th>Revision</th>
+            <th>Outcome</th>
+            <th>Attempts</th>
+            <th>Model</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr>
+              <td>{{ local_time(row.created) }}</td>
+              <td>
+                <a href="/history?pr={{ row.pr }}">#{{ row.pr }}</a>
+                {% if row.pr_title == not_found %}
+                  <span class="muted">{{ row.pr_title }}</span>
+                {% else %}
+                  {{ row.pr_title }}
+                  <a href="https://github.com/{{ repo }}/pull/{{ row.pr }}" rel="noreferrer" title="Open on GitHub">↗</a>
+                {% endif %}
+              </td>
+              <td><code>{{ row.sha[:7] }}</code></td>
+              <td><span class="outcome {{ row.state }}">{{ row.outcome }}</span></td>
+              <td>
+                {% if row.attempts %}
+                  {{ row.attempts }} (best {{ row.best }}/{{ row.total }})<br>
+                  <span class="muted">last {{ local_time(row.last_attempt) }}</span>
+                {% else %}
+                  <span class="muted">none</span>
+                {% endif %}
+              </td>
+              <td class="muted">{{ row.source }}</td>
+              <td><a href="/q/{{ row.id }}">Open</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <section class="card">No assessments yet.</section>
+  {% endif %}
+{% endblock %}

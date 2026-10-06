@@ -26,6 +26,7 @@ import logging
 import secrets
 import threading
 import time
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 from urllib.parse import quote
@@ -134,6 +135,20 @@ class Poller:
                 logger.warning("PR #%s: could not post the error status: %s", key[0], status_exc)
 
 
+def local_time(stamp: Optional[str]) -> str:
+    """
+    Show a database time (UTC, "YYYY-MM-DD HH:MM:SS") in the server's local time zone.
+    Args:
+        stamp: The stored time, or None.
+    Returns:
+        str: e.g. "2026-10-07 00:14 IDT", or "" for None.
+    """
+    if not stamp:
+        return ""
+    moment = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).astimezone()
+    return moment.strftime("%Y-%m-%d %H:%M %Z")
+
+
 def create_app(poller: Optional[Poller] = None) -> FastAPI:
     """
     Build the web application.
@@ -215,6 +230,12 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
     def home(request: Request, user: str = Depends(authenticate)):
         return templates.TemplateResponse(request=request, name="home.html", context={
             "rows": quiz.list_quizzes(), "repo": quiz.REPO, "user": user, "poller": poller})
+
+    @app.get("/history", response_class=HTMLResponse)
+    def history_page(request: Request, pr: Optional[int] = None, _user: str = Depends(authenticate)):
+        return templates.TemplateResponse(request=request, name="history.html", context={
+            "rows": quiz.history(pr), "repo": quiz.REPO, "pr": pr, "local_time": local_time,
+            "not_found": quiz.NOT_FOUND})
 
     @app.get("/q/{qid}", response_class=HTMLResponse)
     def quiz_page(qid: str, request: Request, _user: str = Depends(authenticate)):

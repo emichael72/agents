@@ -69,7 +69,11 @@ bash gatekeepers/pr/pr_gate.sh serve                      # the web service and 
    documentation, and the quiz link (or why there is none yet). Each new revision and each quiz
    result edits the same comment, found by a hidden `<!-- pr_gate -->` marker, rather than adding
    another. `QUIZ_PR_COMMENT` turns it off; a comment that cannot be posted never blocks the check.
-6. A new commit, or a change on `main`, needs a new assessment: the old one can no longer be
+6. **The History page** (`/history`, linked in the header) lists every assessment, newest first:
+   when, the pull request (number and title), the revision, the outcome (passed, skipped,
+   cosmetic, waiting, build or documentation failure), the attempts with the best score, and the
+   model that wrote the quiz. `?pr=N` (click a number) shows one pull request's revisions.
+7. A new commit, or a change on `main`, needs a new assessment: the old one can no longer be
    submitted, and the poller makes the next one. Fixing documentation problems therefore means
    pushing the fix.
 

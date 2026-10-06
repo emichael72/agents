@@ -32,12 +32,30 @@
       border-bottom: 4px solid var(--energy-blue);
       padding: 20px max(24px, calc((100% - 860px) / 2));
     }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
     header a {
       color: white;
       text-decoration: none;
       font-size: 20px;
       font-weight: 600;
     }
+    header nav a { font-size: 15px; font-weight: 400; margin-left: 22px; }
+    header nav a:hover { text-decoration: underline; }
+
+    table.history { width: 100%; border-collapse: collapse; background: var(--surface); font-size: 14px; }
+    table.history th, table.history td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    table.history th { color: var(--classic-blue-dark); font-weight: 700; background: var(--option); }
+    .outcome { font-weight: 600; }
+    .outcome.success { color: var(--success); border: 0; }
+    .outcome.failure { color: var(--failure); border: 0; }
+    .outcome.pending { color: var(--classic-blue); }
+    .scroll { overflow-x: auto; }
 
     main { max-width: 860px; margin: 40px auto; padding: 0 24px 60px; }
     h1 { font-size: 34px; font-weight: 400; color: var(--classic-blue-dark); }
@@ -120,6 +138,7 @@
 <body>
   <header>
     <a href="/">Pull Request Gate</a>
+    <nav><a href="/">Assessments</a><a href="/history">History</a></nav>
   </header>
   <main>
     {% block content %}{% endblock %}

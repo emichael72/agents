@@ -275,6 +275,30 @@ class QuizTests(unittest.TestCase):
         with patch.object(quiz, "ALLOW_SKIP", True), self.assertRaisesRegex(ValueError, "build"):
             quiz.skip(row["id"])
 
+    def test_history_lists_every_assessment_with_its_attempts_and_outcome(self):
+        quiz.submit(self.qid, self.wrong())
+        quiz.submit(self.qid, self.answers)
+        self.new_revision("d", dict(CODE_CHANGE, docs_ok=False, docs_report="x.c:1: error: undocumented"))
+        with quiz.connect() as db:  # An assessment from before titles were stored
+            db.execute("UPDATE quizzes SET pr_title=''")
+        commits = json.dumps([{"sha": "a" * 40}])  # PR #1's commits: only the first revision's
+        with patch.object(quiz, "gh", return_value=commits):
+            rows = quiz.history()
+        self.assertEqual([row["outcome"] for row in rows],
+                         ["Documentation problems in the changed files; see Details",
+                          "Developer passed the revision-specific quiz"])
+        self.assertEqual((rows[1]["attempts"], rows[1]["best"], rows[1]["total"]), (2, 3, 3))
+        # Fetched once and saved, only where the pull request contains the assessed commit
+        self.assertEqual([row["pr_title"] for row in rows], [quiz.NOT_FOUND, INFO["title"]])
+        page = self.client.get("/history").text
+        self.assertIn("Compute pi", page)
+        self.assertIn("2 (best 3/3)", page)
+        self.assertIn(f'href="/q/{self.qid}"', page)
+        self.assertEqual(len(quiz.history(pr=999)), 0)
+        self.assertIn("Show all pull requests", self.client.get("/history?pr=1").text)
+        self.assertEqual(self.client.get("/history", follow_redirects=False).status_code, 200)
+        self.assertEqual(TestClient(self.app).get("/history", follow_redirects=False).status_code, 303)  # Sign-in
+
     def test_failed_build_or_tests_fail_the_check_and_show_on_the_page(self):
         report = "$ make && make check: FAILED\ncore_dump: invalid option or unexpected option argument"
         row = self.new_revision("c", dict(CODE_CHANGE, build_ok=False, build_report=report))
