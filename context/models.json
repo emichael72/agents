@@ -6,7 +6,7 @@
       "name": "Local model server",
       "base_url": "http://boba:1234/v1",
       "base_url_env": "LOCAL_LLM_BASE_URL",
-      "model": "qwen/qwen3-coder-30b",
+      "model": "qwen/qwen3-coder-next:2",
       "model_env": "LOCAL_LLM_MODEL",
       "model_auto": true,
       "api_key_env": "LOCAL_LLM_API_KEY",
