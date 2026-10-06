@@ -205,6 +205,20 @@ class OutputTests(unittest.TestCase):
         output.finish()
         self.assertIn("tokens: not reported", printed.getvalue())
 
+    def test_links_become_clickable_and_stay_whole_while_streaming(self):
+        self.assertEqual(agent.link_segments("see [PR #5](https://x/y) and http://a.b/c."),
+                         [("see ", None), ("PR #5", "https://x/y"), (" and ", None),
+                          ("http://a.b/c", "http://a.b/c"), (".", None)])
+        printed = io.StringIO()
+        output = agent.Output(Console(file=printed, force_terminal=True, width=120), {"width": 40, "links": True})
+        answer = "Open [the pending quiz](http://minion:8000/q/abc) now."
+        for i in range(0, len(answer), 4):
+            output.text(answer[i:i + 4])
+        output.end()
+        self.assertEqual(printed.getvalue().count("\x1b]8;"), 2)  # One link: opened and closed
+        self.assertIn("the pending quiz", printed.getvalue())
+        self.assertNotIn("](", printed.getvalue())
+
     def test_layout_settings_come_from_the_shared_context_file(self):
         settings = agent.load_output_settings()
         self.assertEqual(settings["width"], 120)

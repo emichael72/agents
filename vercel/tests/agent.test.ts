@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ask, buildAgent, loadInstructions, loadModels, loadOutputSettings, Output, resolveModel, wrap } from '../agent.ts';
+import { ask, buildAgent, linkSegments, loadInstructions, loadModels, loadOutputSettings, Output, resolveModel, wrap } from '../agent.ts';
 import { loadTools, localTools } from '../tools.ts';
 
 const usage = {
@@ -191,4 +191,9 @@ test('token counts follow the response time', () => {
   output.addUsage(1300, 56, 2);
   output.finish();
   assert.match(printed.replace(/\x1b\[[0-9;]*m/g, ''), /Response time: \d+\.\ds · tokens: 2,500 in, 90 out \(3 model calls\)\n$/);
+});
+
+test('links split into shown text and address', () => {
+  assert.deepEqual(linkSegments('see [PR #5](https://x/y) and http://a.b/c.'),
+                   [['see ', undefined], ['PR #5', 'https://x/y'], [' and ', undefined], ['http://a.b/c', 'http://a.b/c'], ['.', undefined]]);
 });

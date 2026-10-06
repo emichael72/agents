@@ -119,9 +119,13 @@ Response time: 6.3s · tokens: 4,313 in, 53 out (2 model calls)
 2. **Everything fits in `width` columns** (`context/output.json`, 120), or in the terminal if it is
    narrower. Gray lines wrap with a two-space indent; the streamed answer wraps between words as
    it arrives. A word longer than the width, such as a URL, is never broken.
-3. **The answer has exactly one blank line before and after it.** A tool call prints together with
+3. **Links are clickable.** On a terminal, a Markdown link `[text](url)` shows as *text* and a web
+   address as itself, both as clickable OSC 8 links (VS Code's terminal, iTerm2, GNOME Terminal and
+   others), in the answer and in the gray tool lines. A link is never split while the answer
+   streams. `"links": false` turns this off; piped output is always plain.
+4. **The answer has exactly one blank line before and after it.** A tool call prints together with
    its result, in the order they ran. `--quiet` hides the tool lines.
-4. **Each response ends with its time and tokens**: `Response time: N.Ns` from sending the prompt
+5. **Each response ends with its time and tokens**: `Response time: N.Ns` from sending the prompt
    to the end of the answer, tools included; then the tokens the model calls used, as the server
    reports them: *in* (sent to the model: instructions, tool list, history, tool results, added
    up over every call) and *out* (generated), and how many model calls the answer took.

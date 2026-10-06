@@ -20,6 +20,7 @@ Description:
 import asyncio
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Callable, Optional
@@ -30,6 +31,8 @@ from jsonschema import ValidationError, validate
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import ANSI
 from rich.console import Console
+from rich.style import Style
+from rich.text import Text
 
 from .client import MCPClient
 
@@ -416,6 +419,33 @@ def load_agent_settings(config_data: dict, config_file) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+# A Markdown link, [text](url), or a bare web address: shown as a clickable OSC 8 link
+LINK = re.compile(r"\[([^\]\n]+)\]\((https?://[^\s)]+)\)|(https?://[^\s<>()\[\]\"'`]+)")
+OPEN_LINK = re.compile(r"\[[^\]\n]*$|\]\([^)\s]*$")  # A Markdown link that is not finished yet
+
+
+def link_segments(text: str) -> list[tuple[str, Optional[str]]]:
+    """
+    Split text into plain parts and links, the same way in all three agents.
+    Args:
+        text: The text.
+    Returns:
+        list[tuple[str, Optional[str]]]: (shown text, URL or None) pairs. A Markdown link shows only
+            its text; a bare address shows itself, without trailing punctuation.
+    """
+    segments, position = [], 0
+    for match in LINK.finditer(text):
+        shown, url = (match.group(1), match.group(2)) if match.group(1) else (match.group(3), match.group(3))
+        trailing = ""
+        if not match.group(1):
+            stripped = url.rstrip(".,;:!?")
+            trailing, url, shown = url[len(stripped):], stripped, stripped
+        segments += [(text[position:match.start()], None), (shown, url), (trailing, None)]
+        position = match.end()
+    segments.append((text[position:], None))
+    return [(part, url) for part, url in segments if part]
+
+
 def wrap(text: str, width: int, indent: str = "  ") -> list[str]:
     """
     Word-wrap text to a width, the same way in all three agents. Each line wraps on its own;
@@ -466,6 +496,7 @@ class Output:
             self.width = min(self.width, out.width)
         self.show_time = bool(settings.get("show_time", True))
         self.show_tokens = bool(settings.get("show_tokens", False))
+        self.links = bool(settings.get("links", False))  # OSC 8 links (rich adds them only on a terminal)
         self.usage: Optional[dict] = None  # Tokens and model calls of this response, when the server reports them
         self.in_text = False  # A text block is open
         self.pending = ""  # Trailing newlines held back until more text follows
@@ -506,7 +537,7 @@ class Output:
             self.in_text = True
         body = chunk.rstrip("\n")
         if body:
-            self.out.print(self._wrap_stream(self.pending + body), end="", markup=False, soft_wrap=True)
+            self.out.print(self._render(self._wrap_stream(self.pending + body)), end="", soft_wrap=True)
             self.pending = chunk[len(body):]
         else:
             self.pending += chunk
@@ -520,12 +551,12 @@ class Output:
         """
         self.end()
         for line in wrap(text, self.width):
-            self.out.print(line, style="bright_black", markup=False, soft_wrap=True)
+            self.out.print(self._render(line), style="bright_black", soft_wrap=True)
 
     def end(self) -> None:
         """Close the open text block, if any: end its line and add the blank line after it."""
         if self.in_text:
-            self.out.print(self._take_word(), end="", markup=False, soft_wrap=True)
+            self.out.print(self._render(self._take_word()), end="", soft_wrap=True)
             self.out.print("\n")
         self.in_text = False
         self.pending = ""
@@ -546,6 +577,21 @@ class Output:
         if parts:
             self.line(" · ".join(parts))
 
+    def _render(self, text: str) -> Text:
+        """
+        Turn text into a rich Text, with its links as clickable OSC 8 links when links are on.
+        Args:
+            text: Plain text, possibly with Markdown links or web addresses.
+        Returns:
+            Text: The text to print; rich writes the link codes only on a terminal.
+        """
+        if not self.links:
+            return Text(text)
+        rendered = Text()
+        for part, url in link_segments(text):
+            rendered.append(part, style=Style(link=url) if url else None)
+        return rendered
+
     def _wrap_stream(self, text: str) -> str:
         """
         Word-wrap streamed text: words are held until they end, so they can move to the next line.
@@ -560,6 +606,8 @@ class Output:
                 printed.append(self._take_word() + "\n")
                 self.column = 0
                 self.spaces = ""
+            elif char == " " and self.links and OPEN_LINK.search(self.word) and len(self.word) < 300:
+                self.word += char  # Inside [text](url): keep the link together
             elif char == " ":
                 printed.append(self._take_word())
                 self.spaces += " "
@@ -575,12 +623,13 @@ class Output:
         """
         if not self.word:
             return ""
-        if self.column and self.column + len(self.spaces) + len(self.word) > self.width:
+        length = sum(len(part) for part, _ in link_segments(self.word)) if self.links else len(self.word)
+        if self.column and self.column + len(self.spaces) + length > self.width:
             placed = "\n" + self.word
-            self.column = len(self.word)
+            self.column = length
         else:
             placed = self.spaces + self.word
-            self.column += len(placed)
+            self.column += len(self.spaces) + length
         self.word = self.spaces = ""
         return placed
 

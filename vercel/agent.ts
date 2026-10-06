@@ -99,7 +99,36 @@ export function buildAgent(model: LanguageModel, tools: ToolSet, parallel = fals
 type Agent = ReturnType<typeof buildAgent>;
 type Write = (text: string) => void;
 
-export type OutputSettings = { width?: number; show_time?: boolean; show_tokens?: boolean };
+export type OutputSettings = { width?: number; show_time?: boolean; show_tokens?: boolean; links?: boolean };
+
+// A Markdown link, [text](url), or a bare web address: shown as a clickable OSC 8 link
+const LINK = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>()[\]"'`]+)/g;
+const OPEN_LINK = /\[[^\]\n]*$|\]\([^)\s]*$/; // A Markdown link that is not finished yet
+
+/**
+ * Split text into plain parts and links, the same way in all three agents.
+ * @param text The text.
+ * @returns [shown text, URL or undefined] pairs. A Markdown link shows only its text; a bare address
+ *   shows itself, without trailing punctuation.
+ */
+export function linkSegments(text: string): [string, string | undefined][] {
+  const segments: [string, string | undefined][] = [];
+  let position = 0;
+  for (const match of text.matchAll(LINK)) {
+    let shown = match[1] ?? match[3];
+    let url = match[2] ?? match[3];
+    let trailing = '';
+    if (!match[1]) {
+      const stripped = url.replace(/[.,;:!?]+$/, '');
+      trailing = url.slice(stripped.length);
+      url = shown = stripped;
+    }
+    segments.push([text.slice(position, match.index), undefined], [shown, url], [trailing, undefined]);
+    position = match.index + match[0].length;
+  }
+  segments.push([text.slice(position), undefined]);
+  return segments.filter(([part]) => part);
+}
 
 /** Read the shared terminal layout settings: "width" (wrap column) and "show_time". */
 export function loadOutputSettings(file = OUTPUT_FILE): OutputSettings {
@@ -152,6 +181,7 @@ export class Output {
   private readonly width: number;
   private readonly showTime: boolean;
   private readonly showTokens: boolean;
+  private readonly links: boolean; // OSC 8 links, only when writing to a terminal
   private usage?: { input: number; output: number; requests: number }; // When the server reports it
   private readonly write: Write;
 
@@ -164,6 +194,7 @@ export class Output {
     this.width = Math.min(settings.width ?? 120, process.stdout.isTTY ? process.stdout.columns : Infinity);
     this.showTime = settings.show_time ?? true;
     this.showTokens = settings.show_tokens ?? false;
+    this.links = (settings.links ?? false) && Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
   }
 
   /** Start timing a response. */
@@ -190,7 +221,7 @@ export class Output {
     }
     const body = chunk.replace(/\n+$/, '');
     if (body) {
-      this.write(this.wrapStream(this.pending + body));
+      this.write(this.render(this.wrapStream(this.pending + body)));
       this.pending = chunk.slice(body.length);
     } else {
       this.pending += chunk;
@@ -200,12 +231,12 @@ export class Output {
   /** Print a whole dark gray line (a tool call or result, the banner), wrapped to the width. */
   line(text: string): void {
     this.end();
-    for (const line of wrap(text, this.width)) this.write(gray(line) + '\n');
+    for (const line of wrap(text, this.width)) this.write(gray(this.render(line)) + '\n');
   }
 
   /** Close the open text block, if any: end its line and add the blank line after it. */
   end(): void {
-    if (this.inText) this.write(this.takeWord() + '\n\n');
+    if (this.inText) this.write(this.render(this.takeWord()) + '\n\n');
     this.inText = false;
     this.pending = '';
     this.column = 0;
@@ -226,6 +257,12 @@ export class Output {
     if (parts.length) this.line(parts.join(' · '));
   }
 
+  /** Show the text's Markdown links and web addresses as clickable OSC 8 links, when links are on. */
+  private render(text: string): string {
+    if (!this.links) return text;
+    return linkSegments(text).map(([part, url]) => url ? `\x1b]8;;${url}\x1b\\${part}\x1b]8;;\x1b\\` : part).join('');
+  }
+
   /** Word-wrap streamed text: words are held until they end, so they can move to the next line. */
   private wrapStream(text: string): string {
     let printed = '';
@@ -234,6 +271,8 @@ export class Output {
         printed += this.takeWord() + '\n';
         this.column = 0;
         this.spaces = '';
+      } else if (char === ' ' && this.links && OPEN_LINK.test(this.word) && this.word.length < 300) {
+        this.word += char; // Inside [text](url): keep the link together
       } else if (char === ' ') {
         printed += this.takeWord();
         this.spaces += ' ';
@@ -248,12 +287,13 @@ export class Output {
   private takeWord(): string {
     if (!this.word) return '';
     let placed: string;
-    if (this.column && this.column + this.spaces.length + this.word.length > this.width) {
+    const length = this.links ? linkSegments(this.word).reduce((sum, [part]) => sum + part.length, 0) : this.word.length;
+    if (this.column && this.column + this.spaces.length + length > this.width) {
       placed = '\n' + this.word;
-      this.column = this.word.length;
+      this.column = length;
     } else {
       placed = this.spaces + this.word;
-      this.column += placed.length;
+      this.column += this.spaces.length + length;
     }
     this.word = this.spaces = '';
     return placed;
