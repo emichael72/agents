@@ -221,9 +221,10 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
         content = quiz.Quiz.model_validate_json(row["content"])
         # Only public fields enter the rendered form
         questions = [{"question": q.question, "options": q.options} for q in content.questions]
+        state, description = quiz.gate_state(row)
         return templates.TemplateResponse(request=request, name="quiz.html", context={
-            "row": row, "title": content.title, "questions": questions,
-            "csrf": csrf(qid), "repo": quiz.REPO})
+            "row": row, "title": content.title, "questions": questions, "csrf": csrf(qid),
+            "repo": quiz.REPO, "state": state, "description": description})
 
     @app.post("/q/{qid}", response_class=HTMLResponse)
     async def grade(qid: str, request: Request, _user: str = Depends(authenticate)):

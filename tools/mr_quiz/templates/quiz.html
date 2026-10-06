@@ -8,32 +8,59 @@
   <div class="meta">
     <a href="https://github.com/{{ repo }}/pull/{{ row.pr }}" rel="noreferrer">Pull request #{{ row.pr }}</a>
     <code>{{ row.sha[:7] }}</code>
-    <span>{{ questions|length }} questions · 100% to pass</span>
+    <span class="status">GitHub check: {{ description }}</span>
   </div>
-  <p>Review the change, then choose one answer for each question. You can retry if needed.</p>
 
-  {% if row.passed %}
-    <p class="card success">This revision has already passed.</p>
+  {# Documentation: checked by doxy_check on the changed C/C++ files #}
+  {% if row.docs_ok %}
+    <section class="card success">
+      <strong>Documentation</strong>
+      <p>{{ row.docs_report or 'The changed files are documented.' }}</p>
+    </section>
+  {% else %}
+    <section class="card failure">
+      <strong>Documentation problems</strong>
+      <p>
+        These changed files are not correctly documented, so this revision cannot merge.
+        Fix the comments and push; the next revision is checked again.
+      </p>
+      <pre class="report">{{ row.docs_report }}</pre>
+    </section>
   {% endif %}
 
-  {# Only questions and choices reach the page; the answer key stays on the server #}
-  <form method="post">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    {% for question in questions %}
-      {% set qi = loop.index0 %}
-      <fieldset>
-        <legend>Question {{ loop.index }}</legend>
-        <p><strong>{{ question.question }}</strong></p>
-        {% for option in question.options %}
-          <label>
-            <input type="radio" name="q{{ qi }}" value="{{ loop.index0 }}" required>
-            {{ option }}
-          </label>
-        {% endfor %}
-      </fieldset>
-    {% endfor %}
-    <button type="submit">Check my understanding →</button>
-  </form>
+  {% if row.cosmetic %}
+    <section class="card success">
+      <strong>No quiz needed</strong>
+      <p>This change only touches comments, formatting or documentation; the code is unchanged.</p>
+    </section>
+  {% elif not row.docs_ok %}
+    <p class="muted">The quiz opens once the documentation is fixed.</p>
+  {% else %}
+    <p>Review the change, then choose one answer for each question ({{ questions|length }} questions,
+      100% to pass). You can retry if needed.</p>
+    {% if row.passed %}
+      <p class="card success">This revision has already passed.</p>
+    {% endif %}
 
-  <p class="footer">Generated from the PR diff by {{ row.source }}. New commits require a new assessment.</p>
+    {# Only questions and choices reach the page; the answer key stays on the server #}
+    <form method="post">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      {% for question in questions %}
+        {% set qi = loop.index0 %}
+        <fieldset>
+          <legend>Question {{ loop.index }}</legend>
+          <p><strong>{{ question.question }}</strong></p>
+          {% for option in question.options %}
+            <label>
+              <input type="radio" name="q{{ qi }}" value="{{ loop.index0 }}" required>
+              {{ option }}
+            </label>
+          {% endfor %}
+        </fieldset>
+      {% endfor %}
+      <button type="submit">Check my understanding →</button>
+    </form>
+  {% endif %}
+
+  <p class="footer">Assessed by {{ row.source }}. New commits require a new assessment.</p>
 {% endblock %}

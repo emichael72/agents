@@ -3,12 +3,15 @@
 A merge gate that checks the developer understands the code they are about to merge. When a pull
 request is opened (or a commit is pushed to it), a model reads the diff and writes a short
 multiple-choice quiz about it. The PR cannot merge until its author answers every question
-correctly.
+correctly, and until its changed C/C++ files are correctly documented (checked with the
+[`doxy_check`](../doxy_check/README.md) tool). A change that only touches comments, formatting or
+documentation needs no quiz, only correct documentation.
 
 It is a tool and a resident service:
 
 - **The tool** (`mr_quiz`, what the agents call) reports the gate: whether the service is running,
-  and for each open PR whether its quiz is waiting (with the link) or passed.
+  and for each open PR whether it has documentation problems, its quiz is waiting (with the
+  link), or it may merge.
 - **The service** (`mr-quiz`, a systemd user unit on minion) polls GitHub, generates the quizzes,
   serves them at `http://minion:8000` and posts the result to the PR.
 
@@ -29,16 +32,35 @@ bash mr_quiz/mr_quiz.sh serve           # what the systemd unit runs
    and the rule also applies to administrators. Until the status says success, GitHub blocks the
    merge button.
 2. Every 30 seconds the service lists the open PRs that target `main`. For each new revision
-   (head and base commit) of a PR opened by the configured developer, it posts "Preparing the
-   developer quiz", fetches the diff and asks the model for three questions.
-3. The quiz is validated (one correct answer among four distinct options), its choices shuffled,
-   and its answer key stored in `data/quiz.sqlite3`. The `developer-quiz` status turns into
-   "Complete the developer quiz", and its **Details** link opens the quiz.
-4. The developer answers in the browser; the server grades. A perfect score posts success and the
-   PR can be merged (the service never merges by itself). A miss posts failure; retries are
-   unlimited.
-5. A new commit, or a change on `main`, needs a new quiz: the old one can no longer be submitted,
-   and the poller generates the next one.
+   (head and base commit) of a PR opened by the configured developer, it posts "Checking
+   documentation and preparing the developer quiz" and inspects the change (`changes.py`):
+   - **Documentation:** it downloads the PR's files and runs `doxy_check` on the whole tree,
+     keeping the problems in the files the PR changed. The whole tree is checked so that a
+     function documented in an unchanged header still counts as documented.
+   - **Code or cosmetic:** it compares each changed C/C++ file before and after with comments and
+     formatting removed (string literals and preprocessor line ends still count). Documentation
+     files (`.md`, `.txt`, ...) never change code; any other file, such as a Makefile, always does.
+3. The model gets the diff and the server's analysis. For a cosmetic change it answers
+   `"cosmetic": true` with no questions; otherwise it writes three questions. The server accepts
+   "cosmetic" only if its own comparison agrees, so a model cannot wave a code change through.
+4. The status is decided in this order:
+
+   | Situation | `developer-quiz` |
+   | --- | --- |
+   | Documentation problems in a changed file | failure, whatever the quiz |
+   | Cosmetic change, documentation OK | success, no quiz |
+   | Code change, quiz passed | success |
+   | Code change, last attempt failed | failure (retries are unlimited) |
+   | Code change, not yet answered | pending, "Complete the developer quiz" |
+
+   The check's **Details** link opens the revision's page: the documentation result (with each
+   problem as `file:line: message`), and the quiz when one is needed. The quiz is validated (one
+   correct answer among four distinct options), its choices shuffled, and its answer key stored in
+   `data/quiz.sqlite3`; grading happens on the server. A pass lets the PR merge (the service never
+   merges by itself).
+5. A new commit, or a change on `main`, needs a new assessment: the old one can no longer be
+   submitted, and the poller makes the next one. Fixing documentation problems therefore means
+   pushing the fix.
 
 If generation fails three times for a revision, the status becomes an error; push again or run
 `create` by hand.
@@ -89,6 +111,9 @@ This is a single-user demo, not tamper-proof enforcement:
 - The `gh` login that posts the status could post success directly; a real deployment would use
   a dedicated GitHub App as the only allowed status source, HTTPS and per-user sign-in.
 - Model-generated questions can be wrong; look at a quiz before presenting it.
+- The cosmetic comparison understands C/C++ only. A PR that also touches any other code file
+  (a Makefile, a script) always gets a quiz.
+- The documentation check needs Doxygen on the server; if it cannot run, the check fails.
 - Diffs over 60,000 characters are rejected. The diff is never executed.
 
 ## Tests

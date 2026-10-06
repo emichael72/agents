@@ -55,6 +55,10 @@ def status(pr: Optional[int] = None, port: int = 8000) -> str:
             row = quiz.find_quiz(info["number"], head, info["base"]["sha"])
             if row is None:
                 state = "no quiz yet; the service creates one within a minute or two"
+            elif not row["docs_ok"]:
+                state = f"documentation problems, merge blocked: {quiz.BASE_URL}/q/{row['id']}"
+            elif row["cosmetic"]:
+                state = "cosmetic change (comments/formatting only), documentation OK, may merge"
             elif row["passed"]:
                 state = "quiz passed, may merge"
             else:

@@ -3,7 +3,9 @@ Module: quiz.py
 
 Description:
     The developer quiz: a model reads a pull request's diff and writes a short multiple-choice
-    quiz about it; the PR may merge only after its author passes that quiz.
+    quiz about it; the PR may merge only after its author passes that quiz. The changed C/C++ files
+    must also be correctly documented (the doxy_check tool), and a change that only touches
+    comments, formatting or documentation needs no quiz.
 
     The module provides:
       - Quiz generation through the model profiles shared by the agents (context/models.json).
@@ -17,6 +19,9 @@ Description:
       - Answer keys stay in the server's database; they are never rendered or sent to GitHub.
       - The diff is untrusted data: it goes to the model as text and is never executed.
       - Single-user demo: only PRs opened by the configured developer are assessed.
+      - The gate passes when the documentation is correct and either the change is cosmetic or the
+        quiz was passed. A change counts as cosmetic only when the model says so and the server's
+        own comparison of the code (changes.py) agrees.
 """
 
 import json
@@ -33,6 +38,9 @@ from typing import Any, Iterator, Optional
 # Third-party
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+# Local imports
+import changes
 
 TOOL_DIR = Path(__file__).resolve().parent
 MODELS_FILE = TOOL_DIR.parent.parent / "context" / "models.json"
@@ -77,10 +85,29 @@ class Question(BaseModel):
 
 
 class Quiz(BaseModel):
-    """A quiz as the model writes it: a title and 3 to 5 questions."""
+    """
+    A quiz as the model writes it: a title and 3 to 5 questions, or, for a change that only touches
+    comments, formatting or documentation, `cosmetic` set and no questions.
+    """
     model_config = ConfigDict(extra="forbid", strict=True)
     title: str = Field(min_length=3, max_length=200)
-    questions: list[Question] = Field(min_length=3, max_length=5)
+    cosmetic: bool = False
+    questions: list[Question] = Field(max_length=5)
+
+    @model_validator(mode="after")
+    def questions_match_kind(self) -> "Quiz":
+        """
+        Require 3 to 5 questions for a code change, and none for a cosmetic one.
+        Returns:
+            Quiz: The validated quiz.
+        Raises:
+            ValueError: If the number of questions does not match `cosmetic`.
+        """
+        if self.cosmetic and self.questions:
+            raise ValueError("A cosmetic change has no questions")
+        if not self.cosmetic and len(self.questions) < 3:
+            raise ValueError("A code change needs at least 3 questions")
+        return self
 
 
 @contextmanager
@@ -120,6 +147,13 @@ def init() -> str:
           passed INTEGER NOT NULL, created TEXT DEFAULT CURRENT_TIMESTAMP
         );
         """)
+        # Columns added after the first version; older databases get them with these defaults
+        for column in ("docs_ok INTEGER NOT NULL DEFAULT 1", "docs_report TEXT NOT NULL DEFAULT ''",
+                       "cosmetic INTEGER NOT NULL DEFAULT 0"):
+            try:
+                db.execute("ALTER TABLE quizzes ADD COLUMN " + column)
+            except sqlite3.OperationalError:
+                pass  # Already there
     secret_file = DATA / "secret_key"
     if not secret_file.exists():
         try:
@@ -209,16 +243,35 @@ def publish_status(sha: str, state: str, description: str, target_url: str) -> N
         "target_url": target_url})
 
 
-def publish(row: dict[str, Any], state: str) -> None:
+def gate_state(row: dict[str, Any], failed_attempt: bool = False) -> tuple[str, str]:
     """
-    Post a quiz's status to its revision and record what was posted.
+    Decide a revision's `developer-quiz` status. Documentation problems fail it whatever the quiz;
+    otherwise a cosmetic change or a passed quiz succeeds.
     Args:
         row: The quiz row.
-        state: "pending", "success" or "failure".
+        failed_attempt: The developer just failed the quiz.
+    Returns:
+        tuple[str, str]: The state ("pending", "success" or "failure") and its description.
     """
-    description = {"pending": "Complete the developer quiz",
-                   "failure": "Quiz not passed; retry the assessment",
-                   "success": "Developer passed the revision-specific quiz"}[state]
+    if not row["docs_ok"]:
+        return "failure", "Documentation problems in the changed files; see Details"
+    if row["cosmetic"]:
+        return "success", "Cosmetic change: no quiz needed; documentation OK"
+    if row["passed"]:
+        return "success", "Developer passed the revision-specific quiz"
+    if failed_attempt:
+        return "failure", "Quiz not passed; retry the assessment"
+    return "pending", "Complete the developer quiz"
+
+
+def publish(row: dict[str, Any], failed_attempt: bool = False) -> None:
+    """
+    Post a revision's status (see `gate_state`) and record what was posted.
+    Args:
+        row: The quiz row.
+        failed_attempt: The developer just failed the quiz.
+    """
+    state, description = gate_state(row, failed_attempt)
     publish_status(row["sha"], state, description, f"{BASE_URL}/q/{row['id']}")
     with connect() as db:
         db.execute("UPDATE quizzes SET published=? WHERE id=?", (state, row["id"]))
@@ -262,11 +315,11 @@ def list_quizzes() -> list[dict[str, Any]]:
     """
     List every quiz, newest first, without content or answer keys.
     Returns:
-        list[dict]: id, pr, sha, passed, published and created per quiz.
+        list[dict]: id, pr, sha, passed, docs_ok, cosmetic, published and created per quiz.
     """
     with connect() as db:
         return [dict(r) for r in db.execute(
-            "SELECT id,pr,sha,passed,published,created FROM quizzes ORDER BY created DESC")]
+            "SELECT id,pr,sha,passed,docs_ok,cosmetic,published,created FROM quizzes ORDER BY created DESC")]
 
 
 def load_instructions(path: Path = INSTRUCTIONS_FILE) -> str:
@@ -330,13 +383,17 @@ def parse_quiz(text: str) -> Quiz:
     return Quiz.model_validate_json(fenced.group(1) if fenced else text)
 
 
-def generate(diff: str, profile: Optional[str] = None) -> tuple[Quiz, str]:
+def generate(diff: str, profile: Optional[str] = None,
+             code_files: Optional[list[str]] = None) -> tuple[Quiz, str]:
     """
     Ask the model for a quiz about a diff. Uses the OpenAI-compatible chat completions API,
-    which both LM Studio and OpenAI serve. An invalid reply is retried once.
+    which both LM Studio and OpenAI serve. An invalid reply is retried once; so is a reply that
+    calls the change cosmetic when the server found code changes.
     Args:
         diff: The PR's unified diff.
         profile: The model profile; None uses QUIZ_MODEL_PROFILE, then the models file's default.
+        code_files: The changed files whose code changed (changes.py); [] for a cosmetic change,
+            None when unknown. Given to the model as the server's analysis.
     Returns:
         tuple[Quiz, str]: The quiz, and "<profile name> / <model>" for the record.
     Raises:
@@ -345,6 +402,11 @@ def generate(diff: str, profile: Optional[str] = None) -> tuple[Quiz, str]:
     """
     settings = resolve_model(profile or PROFILE)
     instructions = load_instructions()  # Read per quiz, so edits apply without a restart
+    prompt = "Code diff:\n" + diff
+    if code_files is not None:
+        analysis = ("code changed in: " + ", ".join(code_files) if code_files
+                    else "no code changed; only comments, formatting or documentation files")
+        prompt = f"Server analysis: {analysis}.\n\n" + prompt
     error = None
     for _ in range(GENERATION_ATTEMPTS):
         response = httpx.post(
@@ -352,7 +414,7 @@ def generate(diff: str, profile: Optional[str] = None) -> tuple[Quiz, str]:
             headers={"Authorization": "Bearer " + settings["api_key"]},
             json={"model": settings["model"], "temperature": 0.2, "max_tokens": 2500,
                   "messages": [{"role": "system", "content": instructions},
-                               {"role": "user", "content": "Code diff:\n" + diff}]},
+                               {"role": "user", "content": prompt}]},
             timeout=settings["timeout"])
         response.raise_for_status()
         choice = response.json()["choices"][0]
@@ -360,16 +422,22 @@ def generate(diff: str, profile: Optional[str] = None) -> tuple[Quiz, str]:
             error = "the model did not finish its response"
             continue
         try:
-            return parse_quiz(choice["message"]["content"] or ""), f"{settings['name']} / {settings['model']}"
+            quiz = parse_quiz(choice["message"]["content"] or "")
         except ValidationError as exc:
             error = f"the reply was not a valid quiz ({exc.error_count()} errors)"
+            continue
+        if quiz.cosmetic and code_files:
+            error = "the model called a code change cosmetic"
+            continue
+        return quiz, f"{settings['name']} / {settings['model']}"
     raise ValueError(f"No quiz was created: {error}.")
 
 
 def create_quiz(number: int, profile: Optional[str] = None, fixed: Optional[str] = None) -> dict[str, Any]:
     """
-    Make sure the PR's current revision has a quiz, and post its pending status.
-    An existing quiz for the same revision is reused (re-posting its status), so a pass is
+    Make sure the PR's current revision is assessed, and post its status: check the changed files'
+    documentation and whether the change is cosmetic, then have the model write the quiz.
+    An existing assessment of the same revision is reused (re-posting its status), so a pass is
     never thrown away.
     Args:
         number: The PR number.
@@ -379,7 +447,8 @@ def create_quiz(number: int, profile: Optional[str] = None, fixed: Optional[str]
         dict: The quiz row.
     Raises:
         ValueError: If the PR may not be assessed, its diff is empty or too large, it moved
-            during generation, or the model did not return a valid quiz.
+            during generation, the model did not return a valid quiz, or a fixed quiz calls a
+            code change cosmetic.
         RuntimeError: If a GitHub request fails.
     """
     init()
@@ -388,17 +457,20 @@ def create_quiz(number: int, profile: Optional[str] = None, fixed: Optional[str]
     head, base = before["head"]["sha"], before["base"]["sha"]
     existing = find_quiz(number, head, base)
     if existing:
-        publish(existing, "success" if existing["passed"] else "pending")
+        publish(existing)
         return existing
 
     diff = gh("pr", "diff", str(number), "--repo", REPO)
     if not diff.strip() or len(diff) > MAX_DIFF_CHARS:
         raise ValueError(f"Diff must be nonempty and at most {MAX_DIFF_CHARS:,} characters.")
-    publish_status(head, "pending", "Preparing the developer quiz", BASE_URL + "/")
+    publish_status(head, "pending", "Checking documentation and preparing the developer quiz", BASE_URL + "/")
+    inspection = changes.inspect_pr(gh, REPO, number, head, base)
     if fixed:
         quiz, source = Quiz.model_validate_json(Path(fixed).read_text()), "fixed fixture"
+        if quiz.cosmetic and inspection["code_files"]:
+            raise ValueError("The fixed quiz calls the change cosmetic, but its code changed.")
     else:
-        quiz, source = generate(diff, profile)
+        quiz, source = generate(diff, profile, inspection["code_files"])
 
     # Generation takes a while: make sure the quiz still matches the PR
     after = pr_info(number)
@@ -414,10 +486,12 @@ def create_quiz(number: int, profile: Optional[str] = None, fixed: Optional[str]
     qid = secrets.token_urlsafe(16)
     with connect() as db:
         db.execute(
-            "INSERT INTO quizzes(id,pr,sha,base_sha,developer,content,source) VALUES(?,?,?,?,?,?,?)",
-            (qid, number, head, base, DEVELOPER, quiz.model_dump_json(), source))
+            "INSERT INTO quizzes(id,pr,sha,base_sha,developer,content,source,docs_ok,docs_report,cosmetic) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (qid, number, head, base, DEVELOPER, quiz.model_dump_json(), source,
+             int(inspection["docs_ok"]), inspection["docs_report"], int(quiz.cosmetic)))
     row = get_quiz(qid)
-    publish(row, "pending")
+    publish(row)
     return row
 
 
@@ -432,10 +506,15 @@ def submit(qid: str, answers: list[int]) -> dict[str, Any]:
         dict: score, total, passed, and the questions with explanations once passed.
     Raises:
         KeyError: If there is no such quiz.
-        ValueError: If the answers are malformed or the PR moved past the quiz's revision.
+        ValueError: If the revision takes no quiz (documentation problems or a cosmetic change), the
+            answers are malformed, or the PR moved past the quiz's revision.
         RuntimeError: If a GitHub request fails (the attempt is already saved; resubmit).
     """
     row = get_quiz(qid)
+    if not row["docs_ok"]:
+        raise ValueError("Fix the documentation problems and push; this revision cannot pass.")
+    if row["cosmetic"]:
+        raise ValueError("This is a cosmetic change; it needs no quiz.")
     check_pr(pr_info(row["pr"]), row["sha"], row["base_sha"])
     quiz = Quiz.model_validate_json(row["content"])
     if len(answers) != len(quiz.questions) or any(type(a) is not int or a not in range(4) for a in answers):
@@ -452,6 +531,6 @@ def submit(qid: str, answers: list[int]) -> dict[str, Any]:
 
     # Recheck after grading, before writing success to the exact tested SHA
     check_pr(pr_info(row["pr"]), row["sha"], row["base_sha"])
-    publish(row, "success" if row["passed"] else "failure")
+    publish(row, failed_attempt=not row["passed"])
     return {"score": score, "total": len(quiz.questions), "passed": bool(row["passed"]),
             "questions": quiz.questions if row["passed"] else []}

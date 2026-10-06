@@ -1,0 +1,192 @@
+"""
+Module: changes.py
+
+Description:
+    Inspects what a pull request changes, before any quiz is written: whether its C/C++ files are
+    correctly documented (the doxy_check tool), and whether the change is only cosmetic (comments,
+    formatting, documentation files) rather than code.
+
+    The module provides:
+      - `inspect_pr`: downloads the PR's head and merge-base trees from GitHub and returns the
+        documentation result and the cosmetic verdict for the changed files.
+      - `check_docs`: runs doxy_check on a whole tree and keeps the problems in the changed files.
+        The whole tree is checked so that a function documented in an unchanged header still
+        counts as documented.
+      - `code_tokens` / `is_cosmetic`: compares C/C++ sources with comments and formatting removed.
+
+    Key design points:
+      - The cosmetic verdict is mechanical, so a model cannot wave a code change through by calling
+        it cosmetic. Only C/C++ sources (compared token by token) and documentation files count;
+        any other changed file (a Makefile, a script) is treated as a code change.
+      - Downloaded code is only read and parsed by Doxygen, never built or executed.
+"""
+
+import io
+import json
+import re
+import subprocess
+import tarfile
+import tempfile
+from pathlib import Path
+from typing import Any, Optional
+
+TOOLS_DIR = Path(__file__).resolve().parent.parent
+DOXY_CHECK = TOOLS_DIR / "doxy_check" / "doxy_check.sh"
+
+C_EXTENSIONS = {".c", ".h", ".cc", ".cpp", ".hpp", ".cxx", ".hh"}
+DOC_EXTENSIONS = {".md", ".txt", ".rst", ".dox"}
+DOC_NAMES = {"LICENSE", "AUTHORS", "CHANGELOG", "NOTICE"}
+
+# One C/C++ token: a comment, a string or character literal, a word or number, whitespace, or one
+# other character. Literals are matched whole, so comment markers inside them are not comments.
+TOKEN = re.compile(r"""
+    (?P<comment>//[^\n]*|/\*.*?\*/)
+  | (?P<literal>"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')
+  | (?P<word>\w+)
+  | (?P<newline>\n)
+  | (?P<space>[ \t\r\f\v]+|\\\n)
+  | (?P<other>.)
+""", re.VERBOSE | re.DOTALL)
+
+
+def code_tokens(source: str) -> list[str]:
+    """
+    Reduce C/C++ source to the tokens that matter to the compiler: comments and formatting are
+    dropped, while line ends are kept inside preprocessor directives (where they end the directive).
+    Args:
+        source: The file's text.
+    Returns:
+        list[str]: The tokens.
+    """
+    tokens: list[str] = []
+    in_directive = False
+    at_line_start = True
+    for match in TOKEN.finditer(source):
+        kind, text = match.lastgroup, match.group()
+        if kind == "newline":
+            if in_directive:
+                tokens.append("\n")
+            in_directive, at_line_start = False, True
+        elif kind in ("comment", "space"):
+            continue
+        else:
+            if at_line_start and text == "#":
+                in_directive = True
+            at_line_start = False
+            tokens.append(text)
+    return tokens
+
+
+def is_cosmetic(path: str, before: Optional[str], after: Optional[str]) -> bool:
+    """
+    Decide whether one file's change leaves the code as it was.
+    Args:
+        path: The file's path in the repository.
+        before: Its text before the change; None if the PR adds it.
+        after: Its text after the change; None if the PR removes it.
+    Returns:
+        bool: True for documentation files, and for C/C++ files whose code tokens did not change.
+    """
+    name = Path(path)
+    if name.suffix.lower() in DOC_EXTENSIONS or name.name in DOC_NAMES:
+        return True
+    if name.suffix.lower() in C_EXTENSIONS:
+        return code_tokens(before or "") == code_tokens(after or "")
+    return False
+
+
+def check_docs(tree: Path, changed: list[str]) -> tuple[bool, str]:
+    """
+    Run doxy_check on a whole tree and keep the problems reported for the changed files.
+    Args:
+        tree: The checked-out repository.
+        changed: The changed C/C++ files, relative to the tree.
+    Returns:
+        tuple[bool, str]: Whether the changed files are correctly documented, and the report: the
+            problems (file:line: message), a short confirmation, or why the check could not run.
+    """
+    if not changed:
+        return True, "No C/C++ files changed."
+    try:
+        result = subprocess.run(["bash", str(DOXY_CHECK), "."], cwd=tree, capture_output=True,
+                                text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        return False, "The documentation check timed out."
+    if result.returncode:
+        return False, "The documentation check could not run: " + (result.stdout or result.stderr).strip()
+
+    # Group each problem with its continuation lines, then keep the changed files' problems
+    problems: list[list[str]] = []
+    for line in result.stdout.splitlines()[1:]:
+        if line.startswith((" ", "\t")) and problems:
+            problems[-1].append(line)
+        elif re.match(r"^[^ ].*:\d+: ", line):
+            problems.append([line])
+    wanted = set(changed)
+    kept = ["\n".join(p) for p in problems if p[0].split(":", 1)[0].removeprefix("./") in wanted]
+    if not kept:
+        return True, f"All {len(changed)} changed C/C++ file(s) are documented."
+    return False, "\n".join(kept)
+
+
+def _download_tree(repo: str, sha: str, dest: Path) -> Path:
+    """
+    Download and unpack one commit's files from GitHub.
+    Args:
+        repo: owner/name.
+        sha: The commit.
+        dest: An empty folder to unpack into.
+    Returns:
+        Path: The unpacked repository's root folder.
+    Raises:
+        RuntimeError: If the download fails.
+    """
+    result = subprocess.run(["gh", "api", f"repos/{repo}/tarball/{sha}"], capture_output=True, timeout=120)
+    if result.returncode:
+        raise RuntimeError("GitHub download failed: " + result.stderr.decode(errors="replace").strip()[:400])
+    with tarfile.open(fileobj=io.BytesIO(result.stdout)) as archive:
+        archive.extractall(dest, filter="data")  # Refuses absolute paths, links out of dest, devices
+    (root,) = [p for p in dest.iterdir() if p.is_dir()]  # GitHub wraps the files in one folder
+    return root
+
+
+def _read(root: Path, path: Optional[str]) -> Optional[str]:
+    """Read a file of a downloaded tree as text, or None if it does not exist there."""
+    if path is None or not (root / path).is_file():
+        return None
+    return (root / path).read_text(encoding="utf-8", errors="replace")
+
+
+def inspect_pr(gh, repo: str, number: int, head: str, base_sha: str) -> dict[str, Any]:
+    """
+    Inspect a PR revision: its documentation and whether it only changes comments and formatting.
+    Args:
+        gh: The GitHub CLI runner (quiz.gh).
+        repo: owner/name.
+        number: The PR number.
+        head: The head SHA to inspect.
+        base_sha: The tip of the branch the PR targets; the change is measured from the merge base.
+    Returns:
+        dict: docs_ok (bool), docs_report (str), cosmetic (bool) and code_files (the changed files
+            whose code changed, for the model's prompt).
+    Raises:
+        RuntimeError: If a GitHub request fails.
+    """
+    files = json.loads(gh("api", f"repos/{repo}/pulls/{number}/files?per_page=100"))
+    compare = json.loads(gh("api", f"repos/{repo}/compare/{base_sha}...{head}"))
+    base = compare["merge_base_commit"]["sha"]
+
+    with tempfile.TemporaryDirectory() as work:
+        after_root = _download_tree(repo, head, Path(work) / "head")
+        before_root = _download_tree(repo, base, Path(work) / "base")
+        code_files = []
+        for f in files:
+            old_path = f.get("previous_filename", f["filename"])
+            before = None if f["status"] == "added" else _read(before_root, old_path)
+            after = None if f["status"] == "removed" else _read(after_root, f["filename"])
+            if not is_cosmetic(f["filename"], before, after):
+                code_files.append(f["filename"])
+        changed_c = [f["filename"] for f in files
+                     if f["status"] != "removed" and Path(f["filename"]).suffix.lower() in C_EXTENSIONS]
+        docs_ok, docs_report = check_docs(after_root, changed_c)
+    return {"docs_ok": docs_ok, "docs_report": docs_report, "cosmetic": not code_files, "code_files": code_files}

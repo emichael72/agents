@@ -8,6 +8,7 @@ import copy
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 import unittest
@@ -19,6 +20,7 @@ IMPORT_DATA = tempfile.TemporaryDirectory()
 os.environ["QUIZ_DATA_DIR"] = IMPORT_DATA.name
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import changes  # noqa: E402
 import quiz  # noqa: E402
 import server  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -30,6 +32,8 @@ FIXTURE = {"title": "C math quiz", "questions": [
     for i in range(3)]}
 INFO = {"number": 1, "state": "open", "base": {"ref": "main", "sha": "b" * 40},
         "head": {"sha": "a" * 40}, "user": {"login": quiz.DEVELOPER}, "title": "Compute pi"}
+CODE_CHANGE = {"docs_ok": True, "docs_report": "All 1 changed C/C++ file(s) are documented.",
+               "cosmetic": False, "code_files": ["src/pi.c"]}
 MODELS = {"default": "local", "profiles": {
     "local": {"name": "Local", "base_url": "http://boba:1234/v1", "model": "qwen", "api_key": "lm-studio"},
     "openai": {"name": "OpenAI", "base_url": "https://api.openai.com/v1", "model": "gpt",
@@ -53,6 +57,8 @@ class QuizTests(unittest.TestCase):
         self.mock_gh = self.gh.start()
         self.model = patch.object(quiz, "generate", return_value=(quiz.Quiz.model_validate(FIXTURE), "test model"))
         self.model.start()
+        self.inspect = patch.object(quiz.changes, "inspect_pr", return_value=dict(CODE_CHANGE))
+        self.mock_inspect = self.inspect.start()
         self.row = quiz.create_quiz(1)
         self.qid = self.row["id"]
         self.content = quiz.Quiz.model_validate_json(quiz.get_quiz(self.qid)["content"])
@@ -63,6 +69,7 @@ class QuizTests(unittest.TestCase):
 
     def tearDown(self):
         self.client.close()
+        self.inspect.stop()
         self.model.stop()
         self.gh.stop()
         self.info.stop()
@@ -195,6 +202,57 @@ class QuizTests(unittest.TestCase):
         self.assertNotIn("<script>", page.text)
         self.assertIn("&lt;script&gt;", page.text)
 
+    def new_revision(self, sha, inspection, content=None):
+        """Assess a new head commit with the given inspection result (and model reply)."""
+        info = copy.deepcopy(INFO)
+        info["head"]["sha"] = sha * 40
+        self.mock_info.return_value = info
+        self.mock_inspect.return_value = inspection
+        if content is not None:
+            quiz.generate.return_value = (quiz.Quiz.model_validate(content), "test model")
+        return quiz.create_quiz(1)
+
+    def test_documentation_problems_fail_the_check_and_show_on_the_page(self):
+        report = "src/pi.c:6: error: Member print_pi() (function) of file pi.c is not documented."
+        row = self.new_revision("d", dict(CODE_CHANGE, docs_ok=False, docs_report=report))
+        self.assertEqual(self.mock_gh.call_args.kwargs["payload"]["state"], "failure")
+        self.assertIn("Documentation problems", self.mock_gh.call_args.kwargs["payload"]["description"])
+        page = self.client.get("/q/" + row["id"]).text
+        self.assertIn("print_pi() (function) of file pi.c is not documented", page)
+        self.assertNotIn('name="q0"', page)  # No quiz until the documentation is fixed
+        with self.assertRaisesRegex(ValueError, "documentation"):
+            quiz.submit(row["id"], [q.correct for q in quiz.Quiz.model_validate_json(row["content"]).questions])
+
+    def test_cosmetic_change_passes_without_a_quiz(self):
+        cosmetic = {"title": "Comment updates", "cosmetic": True, "questions": []}
+        row = self.new_revision("e", dict(CODE_CHANGE, cosmetic=True, code_files=[]), cosmetic)
+        payload = self.mock_gh.call_args.kwargs["payload"]
+        self.assertEqual((payload["state"], payload["description"]),
+                         ("success", "Cosmetic change: no quiz needed; documentation OK"))
+        page = self.client.get("/q/" + row["id"]).text
+        self.assertIn("No quiz needed", page)
+        self.assertNotIn('name="q0"', page)
+
+    def test_model_judges_a_code_free_change_worth_a_quiz(self):
+        row = self.new_revision("f", dict(CODE_CHANGE, cosmetic=True, code_files=[]), FIXTURE)
+        self.assertEqual(row["cosmetic"], 0)
+        self.assertEqual(self.mock_gh.call_args.kwargs["payload"]["state"], "pending")
+
+    def test_fixed_quiz_cannot_call_a_code_change_cosmetic(self):
+        fixture = Path(self.temp.name) / "cosmetic.json"
+        fixture.write_text(json.dumps({"title": "Comment updates", "cosmetic": True, "questions": []}))
+        info = copy.deepcopy(INFO)
+        info["head"]["sha"] = "9" * 40
+        self.mock_info.return_value = info
+        with self.assertRaisesRegex(ValueError, "cosmetic"):
+            quiz.create_quiz(1, fixed=str(fixture))
+
+    def test_quiz_kind_and_question_count_must_match(self):
+        with self.assertRaises(ValueError):
+            quiz.Quiz.model_validate({"title": "Comment updates", "cosmetic": True, "questions": FIXTURE["questions"]})
+        with self.assertRaises(ValueError):
+            quiz.Quiz.model_validate({"title": "Code change", "questions": []})
+
 
 class ModelTests(unittest.TestCase):
 
@@ -229,6 +287,18 @@ class ModelTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 quiz.generate("a small diff", "local")
 
+    def test_a_code_change_called_cosmetic_is_rejected(self):
+        settings = {"name": "Local", "base_url": "http://x/v1", "model": "m", "api_key": "k", "timeout": 5}
+        cosmetic = json.dumps({"title": "Comment updates", "cosmetic": True, "questions": []})
+        with patch.object(quiz, "resolve_model", return_value=settings), patch.object(quiz.httpx, "post") as post:
+            post.return_value.json.side_effect = [reply(cosmetic), reply(cosmetic)]
+            with self.assertRaisesRegex(ValueError, "cosmetic"):
+                quiz.generate("a small diff", "local", ["src/pi.c"])
+            self.assertIn("Server analysis: code changed in: src/pi.c",
+                          post.call_args.kwargs["json"]["messages"][1]["content"])
+            post.return_value.json.side_effect = [reply(cosmetic)]
+            self.assertTrue(quiz.generate("a small diff", "local", [])[0].cosmetic)
+
 
 class PollerTests(unittest.TestCase):
 
@@ -237,6 +307,7 @@ class PollerTests(unittest.TestCase):
         patches = [patch.object(quiz, "DATA", Path(self.temp.name)),
                    patch.object(quiz, "gh", return_value="diff --git a/pi.c b/pi.c"),
                    patch.object(quiz, "pr_info", return_value=copy.deepcopy(INFO)),
+                   patch.object(quiz.changes, "inspect_pr", return_value=dict(CODE_CHANGE)),
                    patch.object(quiz, "open_prs", return_value=[copy.deepcopy(INFO),
                                                                 dict(INFO, number=2, user={"login": "someone-else"})])]
         self.mocks = [p.start() for p in patches]
@@ -261,6 +332,48 @@ class PollerTests(unittest.TestCase):
                 self.assertEqual(poller.poll_once(), [])
         self.assertEqual(generate.call_count, server.MAX_FAILURES)
         self.assertEqual(self.mock_gh.call_args.kwargs["payload"]["state"], "error")
+
+
+class ChangesTests(unittest.TestCase):
+    """The cosmetic verdict and the documentation check (changes.py)."""
+
+    BEFORE = '#include "pi.h"\n#define WIDTH 15\nint print_pi(void)\n{\n    return printf("%.15f", x) < 0;\n}\n'
+
+    def test_comments_and_formatting_are_cosmetic(self):
+        after = ('/** @file pi.c\n * @brief Pi. */\n#include "pi.h"\n#define WIDTH 15\n'
+                 'int print_pi( void ) { return printf( "%.15f", x )<0; }  // Print it\n')
+        self.assertTrue(changes.is_cosmetic("src/pi.c", self.BEFORE, after))
+        self.assertTrue(changes.is_cosmetic("README.md", "old", "new"))
+
+    def test_code_literals_directives_and_other_files_are_not_cosmetic(self):
+        for after in (self.BEFORE.replace("< 0", "<= 0"),            # Code
+                      self.BEFORE.replace('"%.15f"', '"%.15f "'),  # Space inside a string literal
+                      self.BEFORE.replace("#define WIDTH 15\nint", "#define WIDTH 15 int"),  # Directive end
+                      self.BEFORE.replace('"%.15f"', '"/* %.15f */"')):  # Comment marker inside a literal
+            self.assertFalse(changes.is_cosmetic("src/pi.c", self.BEFORE, after), after)
+        self.assertFalse(changes.is_cosmetic("Makefile", "LDLIBS =", "LDLIBS = -lm"))
+        self.assertFalse(changes.is_cosmetic("src/new.c", None, "int x;"))
+        self.assertTrue(changes.is_cosmetic("src/new.h", None, "/* Only a comment */"))
+
+    @unittest.skipUnless(shutil.which("doxygen"), "doxygen is not installed")
+    def test_documentation_is_checked_on_the_whole_tree_but_reported_for_changed_files(self):
+        header = '/** @file pi.h\n * @brief Pi. */\n/** @brief Print pi.\n * @return 0 on success. */\nint print_pi(void);\n'
+        source = '/** @file pi.c\n * @brief Pi. */\n#include "pi.h"\nint print_pi(void) { return 0; }\n'
+        bare = 'int other(void) { return 1; }\n'
+        with tempfile.TemporaryDirectory() as folder:
+            tree = Path(folder)
+            (tree / "src").mkdir()
+            (tree / "src" / "pi.h").write_text(header)
+            (tree / "src" / "pi.c").write_text(source)
+            (tree / "src" / "other.c").write_text(bare)
+            # pi.c's function is documented in its header; other.c is not changed, so not reported
+            self.assertEqual(changes.check_docs(tree, ["src/pi.c"]),
+                             (True, "All 1 changed C/C++ file(s) are documented."))
+            ok, report = changes.check_docs(tree, ["src/pi.c", "src/other.c"])
+            self.assertFalse(ok)
+            self.assertIn("src/other.c:1: error: File has no @file", report)
+            self.assertNotIn("pi.c", report)
+        self.assertEqual(changes.check_docs(Path("."), []), (True, "No C/C++ files changed."))
 
 
 if __name__ == "__main__":

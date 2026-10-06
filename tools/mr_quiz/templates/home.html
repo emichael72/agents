@@ -28,7 +28,12 @@
       <div class="meta">
         <strong>Pull request #{{ row.pr }}</strong>
         <code>{{ row.sha[:7] }}</code>
-        <span class="status">{{ 'Passed' if row.passed else 'Awaiting pass' }}</span>
+        <span class="status">
+          {% if not row.docs_ok %}Documentation problems
+          {% elif row.cosmetic %}Cosmetic, no quiz needed
+          {% elif row.passed %}Passed
+          {% else %}Awaiting pass{% endif %}
+        </span>
       </div>
       <p>Created {{ row.created }} UTC · GitHub status: {{ row.published or 'not delivered' }}</p>
       <a class="button" href="/q/{{ row.id }}">Open assessment →</a>
