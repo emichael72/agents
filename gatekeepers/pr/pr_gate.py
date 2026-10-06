@@ -15,7 +15,10 @@ Description:
 import argparse
 import json
 import logging
+import os
+import subprocess
 import sys
+import time
 from typing import Optional
 
 # Third-party
@@ -23,6 +26,50 @@ import httpx
 
 # Local imports
 import quiz
+
+
+UNIT = "pr-gate"  # The gate's systemd user unit; the only service the agents may control
+SERVICE_ACTIONS = ("start", "stop", "restart")
+
+
+def running(port: int = 8000) -> bool:
+    """Whether the service answers its health check."""
+    try:
+        httpx.get(f"http://127.0.0.1:{port}/health", timeout=3).raise_for_status()
+        return True
+    except httpx.HTTPError:
+        return False
+
+
+def control(action: str, port: int = 8000) -> str:
+    """
+    Start, stop or restart the gate's own systemd user unit (UNIT), and nothing else. Stopping it
+    cannot let a change through: the repository's branch protection still requires the gate's
+    check, so pull requests simply wait until it runs again.
+    Args:
+        action: "start", "stop" or "restart".
+        port: The service port, to wait until it answers after a start.
+    Returns:
+        str: What was done, and the service's state afterwards.
+    Raises:
+        ValueError: If the action is unknown, the unit is not installed, or systemctl fails.
+    """
+    if action not in SERVICE_ACTIONS:
+        raise ValueError(f"Unknown action '{action}'; use status, {', '.join(SERVICE_ACTIONS)}.")
+    if subprocess.run(["systemctl", "--user", "cat", UNIT], capture_output=True).returncode != 0:
+        raise ValueError(f"The {UNIT} service is not installed; run ./install.sh --gate install.")
+    result = subprocess.run(["systemctl", "--user", action, UNIT], capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise ValueError(f"systemctl {action} {UNIT} failed: {(result.stderr or result.stdout).strip()[:300]}")
+    who = os.environ.get("AGENT_NAME", "the command line")
+    logging.getLogger("pr_gate").info("%s %s by %s", UNIT, action, who)
+    if action == "stop":
+        return f"Stopped the {UNIT} service (asked by {who}). Pull requests wait for its check until it runs again."
+    for _ in range(20):  # Wait until it answers, up to 10 s
+        if running(port):
+            return f"{action.capitalize()}ed the {UNIT} service (asked by {who}); it is running at {quiz.BASE_URL}."
+        time.sleep(0.5)
+    return f"{action.capitalize()}ed the {UNIT} service, but it does not answer yet; see ./install.sh --gate logs."
 
 
 def status(pr: Optional[int] = None, port: int = 8000) -> str:
@@ -35,11 +82,10 @@ def status(pr: Optional[int] = None, port: int = 8000) -> str:
         str: One line about the service, then one line per PR.
     """
     quiz.init()
-    try:
-        httpx.get(f"http://127.0.0.1:{port}/health", timeout=3).raise_for_status()
+    if running(port):
         lines = [f"pr_gate service: running at {quiz.BASE_URL}"]
-    except httpx.HTTPError:
-        lines = ["pr_gate service: not running, so new commits are not assessed (./install.sh --gate start)"]
+    else:
+        lines = ["pr_gate service: not running, so new commits are not assessed (start it with action start)"]
 
     prs = [quiz.pr_info(pr)] if pr else quiz.open_prs()
     if not prs:
@@ -103,6 +149,8 @@ def main(argv: Optional[list[str]] = None) -> None:
     status_cmd = sub.add_parser("status", help="Show the open PRs and their quiz state")
     status_cmd.add_argument("--pr", type=int, help="Only this PR")
     status_cmd.add_argument("--port", type=int, default=8000, help="Local service port (default 8000)")
+    status_cmd.add_argument("--action", default="status", choices=("status", *SERVICE_ACTIONS),
+                            help="status (default), or start, stop or restart the pr-gate service first")
 
     create_cmd = sub.add_parser("create", help="Create (or re-post) the quiz for a PR's current revision")
     create_cmd.add_argument("pr", type=int)
@@ -120,6 +168,10 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     args = parser.parse_args(argv)
     if args.command == "status":
+        if args.action != "status":
+            print(control(args.action, args.port))
+            if args.action == "stop":
+                return
         print(status(args.pr, args.port))
     elif args.command == "create":
         row = quiz.create_quiz(args.pr, args.profile, args.fixed)

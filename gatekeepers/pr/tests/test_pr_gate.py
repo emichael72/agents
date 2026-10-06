@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -22,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import changes  # noqa: E402
 import quiz  # noqa: E402
+import pr_gate  # noqa: E402
 import server  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -469,6 +471,31 @@ class ChangesTests(unittest.TestCase):
             self.assertIn("src/other.c:1: error: File has no @file", report)
             self.assertNotIn("pi.c", report)
         self.assertEqual(changes.check_docs(Path("."), []), (True, "No C/C++ files changed."))
+
+
+class ServiceControlTests(unittest.TestCase):
+    """The agents may start, stop or restart the gate's own service, and nothing else."""
+
+    def test_only_the_gate_unit_is_controlled(self):
+        calls = []
+
+        def fake_run(command, **kwargs):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with patch.object(pr_gate.subprocess, "run", side_effect=fake_run), \
+                patch.dict(os.environ, {"AGENT_NAME": "Test Agent"}):
+            text = pr_gate.control("stop")
+        self.assertIn("Stopped the pr-gate service (asked by Test Agent)", text)
+        self.assertEqual(calls, [["systemctl", "--user", "cat", "pr-gate"], ["systemctl", "--user", "stop", "pr-gate"]])
+        with self.assertRaisesRegex(ValueError, "Unknown action"):
+            pr_gate.control("disable")
+
+    def test_a_missing_unit_is_reported(self):
+        missing = subprocess.CompletedProcess([], 1, "", "No files found")
+        with patch.object(pr_gate.subprocess, "run", return_value=missing), \
+                self.assertRaisesRegex(ValueError, "install.sh --gate install"):
+            pr_gate.control("start")
 
 
 if __name__ == "__main__":

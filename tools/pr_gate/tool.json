@@ -1,8 +1,10 @@
 {
-  "description": "Shows the developer quiz gate for pull requests in the core_dump GitHub repository: whether the quiz service is running, and for each open PR whether its author still has to pass the quiz (with the quiz link) or may merge.",
+  "description": "Reports and controls the pull request gate (gatekeepers/pr) for the core_dump GitHub repository: whether its service is running, and for each open PR whether it is blocked (build, tests, documentation, or a quiz waiting, with its link) or may merge. With action start, stop or restart it controls the gate's own service (pr-gate) and nothing else; stopping it never lets a change merge.",
   "command": "bash",
   "args": ["../gatekeepers/pr/pr_gate.sh", "status"],
+  "timeout": 60,
   "params": [
+    {"name": "action", "type": "string", "description": "status (default), start, stop or restart the gate's service", "style": "flag", "required": false},
     {"name": "pr", "type": "integer", "description": "Only this pull request number; omit it for every open PR", "style": "flag", "required": false}
   ],
   "resource": "pr_gate/README.md"
