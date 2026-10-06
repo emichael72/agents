@@ -1,0 +1,9 @@
+{
+  "description": "Checks that C/C++ source and header files are correctly documented with Doxygen comments (file, functions, parameters, return values), using the settings in doxy_check/Doxyfile.check. Reports each documentation problem as file:line: message, or that everything is documented.",
+  "command": "bash",
+  "args": ["doxy_check/doxy_check.sh"],
+  "params": [
+    {"name": "paths", "type": "string", "description": "One or more C/C++ files (.c, .h, .cc, .cpp, .hpp) or folders to check, separated by spaces; relative to the tools folder, or absolute (~ allowed)", "style": "positional"}
+  ],
+  "resource": "doxy_check/README.md"
+}

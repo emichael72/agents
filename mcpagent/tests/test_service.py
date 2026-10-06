@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import json
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -78,6 +79,28 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             result = (await self.rpc('tools/call', {'name': name, 'arguments': args}))['result']
             self.assertFalse(result['isError'], result)
             self.assertIn(expected, result['content'][0]['text'])
+
+    @unittest.skipUnless(shutil.which('doxygen'), 'doxygen is not installed')
+    async def test_doxy_check_reports_documentation_problems(self):
+        good = '/** @file good.c\n * @brief Good. */\n\n/** @brief Add.\n * @param a A.\n * @param b B.\n' \
+               ' * @return The sum. */\nint add(int a, int b) { return a + b; }\n'
+        bad = '/** @file bad.c\n * @brief Bad. */\n\nint subtract(int a, int b) { return a - b; }\n'
+        bare = 'int negate(int a) { return -a; }\n'
+        with tempfile.TemporaryDirectory() as folder:
+            for name, text in [('good.c', good), ('bad.c', bad), ('bare.h', bare)]:
+                (Path(folder) / name).write_text(text)
+
+            async def check(paths):
+                return (await self.rpc('tools/call', {'name': 'doxy_check', 'arguments': {'paths': paths}}))['result']
+
+            result = await check(f'{folder}/good.c')
+            self.assertFalse(result['isError'], result)
+            self.assertIn('All documented: 1 file(s)', result['content'][0]['text'])
+            text = (await check(f'{folder}/bad.c {folder}/bare.h'))['content'][0]['text']
+            self.assertIn('Documentation problems: 2 in 2 file(s)', text)
+            self.assertIn('bad.c:4: error: Member subtract', text)
+            self.assertIn('bare.h:1: error: File has no @file', text)
+            self.assertTrue((await check(f'{folder}/missing.c'))['isError'])
 
     def test_tool_manifests_are_discovered(self):
         with tempfile.TemporaryDirectory() as folder:
