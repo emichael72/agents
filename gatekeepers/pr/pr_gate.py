@@ -72,6 +72,32 @@ def control(action: str, port: int = 8000) -> str:
     return f"{action.capitalize()}ed the {UNIT} service, but it does not answer yet; see ./install.sh --gate logs."
 
 
+def history(pr: Optional[int] = None, limit: int = 30) -> str:
+    """
+    Describe past assessments, newest first, as the History page shows them.
+    Args:
+        pr: Only this pull request; None for all.
+        limit: At most this many assessments.
+    Returns:
+        str: One line per assessment: when (UTC), pull request and title, revision, outcome,
+            attempts and best score; then the History page's link.
+    """
+    quiz.init()
+    rows = quiz.history(pr)
+    if not rows:
+        return "No assessments yet" + (f" for PR #{pr}." if pr else ".")
+    lines = [f"{len(rows)} assessment(s){f' of PR #{pr}' if pr else ''}, newest first (times in UTC):"]
+    for row in rows[:limit]:
+        attempts = (f"{row['attempts']} attempt(s), best {row['best']}/{row['total']}" if row["attempts"]
+                    else "no attempts")
+        lines.append(f"{row['created'][:16]}  PR #{row['pr']} {row['pr_title']}  {row['sha'][:7]}  "
+                     f"{row['outcome']}  ({attempts})")
+    if len(rows) > limit:
+        lines.append(f"... {len(rows) - limit} older assessment(s)")
+    lines.append(f"History page: {quiz.BASE_URL}/history" + (f"?pr={pr}" if pr else ""))
+    return "\n".join(lines)
+
+
 def status(pr: Optional[int] = None, port: int = 8000) -> str:
     """
     Describe the open PRs and their quizzes.
@@ -149,8 +175,9 @@ def main(argv: Optional[list[str]] = None) -> None:
     status_cmd = sub.add_parser("status", help="Show the open PRs and their quiz state")
     status_cmd.add_argument("--pr", type=int, help="Only this PR")
     status_cmd.add_argument("--port", type=int, default=8000, help="Local service port (default 8000)")
-    status_cmd.add_argument("--action", default="status", choices=("status", *SERVICE_ACTIONS),
-                            help="status (default), or start, stop or restart the pr-gate service first")
+    status_cmd.add_argument("--action", default="status", choices=("status", "history", *SERVICE_ACTIONS),
+                            help="status (default), history of past assessments, or start, stop or restart "
+                                 "the pr-gate service first")
 
     create_cmd = sub.add_parser("create", help="Create (or re-post) the quiz for a PR's current revision")
     create_cmd.add_argument("pr", type=int)
@@ -168,6 +195,9 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     args = parser.parse_args(argv)
     if args.command == "status":
+        if args.action == "history":
+            print(history(args.pr))
+            return
         if args.action != "status":
             print(control(args.action, args.port))
             if args.action == "stop":

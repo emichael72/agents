@@ -297,6 +297,10 @@ class QuizTests(unittest.TestCase):
         self.assertEqual(len(quiz.history(pr=999)), 0)
         self.assertIn("Show all pull requests", self.client.get("/history?pr=1").text)
         self.assertEqual(self.client.get("/history", follow_redirects=False).status_code, 200)
+        text = pr_gate.history(pr=1)  # The agents' pr_gate tool, action history
+        self.assertIn("PR #1 Compute pi", text)
+        self.assertIn("(2 attempt(s), best 3/3)", text)
+        self.assertTrue(text.endswith(f"{quiz.BASE_URL}/history?pr=1"))
         self.assertEqual(TestClient(self.app).get("/history", follow_redirects=False).status_code, 303)  # Sign-in
 
     def test_failed_build_or_tests_fail_the_check_and_show_on_the_page(self):
