@@ -27,12 +27,16 @@ Description:
     shows /work/<name> as <name>; it stops after TIMEOUT seconds and MAX_LINES lines.
 """
 
+import grp
 import json
+import os
+import pwd
 import re
 import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Optional
 
@@ -161,12 +165,36 @@ def check(command: str, cwd: Path, commands: dict[str, dict], allowed: dict[str,
                 raise ValueError(f"{name}: run it where its files are (cd there) instead of using -C or -f.")
 
 
-def sandbox(allowed: dict[str, fs_gate.Folder], cwd: Path) -> list[str]:
+def identity_files(folder: Path) -> Path:
+    """
+    Write a minimal /etc/passwd and /etc/group for the sandbox: only the user running the agent,
+    so whoami, ls -l and git know the name without the host's list of accounts.
+    Args:
+        folder: An empty folder for the two files.
+    Returns:
+        Path: The folder, holding passwd and group.
+    """
+    uid, gid = os.getuid(), os.getgid()
+    try:
+        user = pwd.getpwuid(uid).pw_name
+    except KeyError:
+        user = f"user{uid}"
+    try:
+        group = grp.getgrgid(gid).gr_name
+    except KeyError:
+        group = user
+    (folder / "passwd").write_text(f"{user}:x:{uid}:{gid}::/tmp/home:/bin/bash\n")
+    (folder / "group").write_text(f"{group}:x:{gid}:\n")
+    return folder
+
+
+def sandbox(allowed: dict[str, fs_gate.Folder], cwd: Path, identity: Optional[Path] = None) -> list[str]:
     """
     Build the bubblewrap command line for the allowed folders.
     Args:
         allowed: The allowed folders.
         cwd: The real folder to start in.
+        identity: A folder from identity_files, mounted as /etc/passwd and /etc/group; None for none.
     Returns:
         list[str]: bwrap and its options, ending with "--" (the command follows).
     """
@@ -177,6 +205,8 @@ def sandbox(allowed: dict[str, fs_gate.Folder], cwd: Path) -> list[str]:
     for etc in ("/etc/localtime", "/etc/ld.so.cache", "/etc/alternatives"):
         if Path(etc).exists():
             args += ["--ro-bind", etc, etc]
+    if identity is not None:
+        args += ["--ro-bind", str(identity / "passwd"), "/etc/passwd", "--ro-bind", str(identity / "group"), "/etc/group"]
     for name, folder in allowed.items():
         mount = str(WORK / name)
         if "r" not in folder.access:
@@ -235,9 +265,11 @@ def run(cwd: str, command: str) -> tuple[bool, str]:
     if not shutil.which("bwrap"):
         raise ValueError("bubblewrap (bwrap) is not installed, so the shell cannot run safely.")
     try:
-        result = subprocess.run([*sandbox(allowed, folder), "/usr/bin/bash", "--noprofile", "--norc", "-c", command],
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
-                                timeout=TIMEOUT)
+        with tempfile.TemporaryDirectory(prefix="shell-identity-") as identity:
+            result = subprocess.run([*sandbox(allowed, folder, identity_files(Path(identity))),
+                                     "/usr/bin/bash", "--noprofile", "--norc", "-c", command],
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
+                                    timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
         return False, f"Stopped after {TIMEOUT}s: {command}"
     output = fs_gate.display(result.stdout, allowed).replace(f"{WORK}/", "")

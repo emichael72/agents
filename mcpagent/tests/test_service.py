@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import json
 import os
+import pwd
 import shutil
 import subprocess
 import tempfile
@@ -168,6 +169,10 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                                  ('proj', 'echo a#b; python3'), ('proj', 'cd .. && ls'), ('proj', 'make -C /work/docs'),
                                  ('docs', 'make'), ('docs', './x'), ('proj', 'ls\npython3')):
                 self.assertTrue((await shell(cwd, command))[0], command)
+            # The sandbox knows only this user (a minimal /etc/passwd), and offers tar and shellcheck
+            error, text = await shell('proj', 'whoami && cat /etc/passwd | wc -l && tar -czf /tmp/a.tgz hello.c && tar -tzf /tmp/a.tgz')
+            self.assertFalse(error, text)
+            self.assertEqual(json.loads(text)['logs'], [pwd.getpwuid(os.getuid()).pw_name, '1', 'hello.c'])
             # Refused by the sandbox (the kernel)
             for cwd, command in (('docs', 'touch x'), ('proj', 'touch locked/x'), ('proj', 'cat /etc/passwd'),
                                  ('proj', 'ls /home'), ('proj', f'touch {tools}/x'), ('proj', 'touch /work/tools/x'),
