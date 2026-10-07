@@ -21,7 +21,11 @@ mcpagent/jsons/schemas/mcpagent.schema.json  JSON schema for mcpagent.json
 mcpagent/common/logger.py             the client's and the server's logger
 mcpagent/common/errors.py             ExceptionReport: what the entry points print on an error
 mcpagent/client/__main__.py           client module entry point (python -m mcpagent.client)
-mcpagent/client/agent.py              OpenAI Responses tool calling over MCP tools
+mcpagent/client/session.py            AgentSession: the terminal front end, one prompt or a chat
+mcpagent/client/agent.py              MCPAgent: OpenAI Responses tool calling over MCP tools
+mcpagent/client/profiles.py           ModelProfiles: the shared model profiles and their overrides
+mcpagent/client/context.py            AgentContext: shared instructions, identity, memory, settings
+mcpagent/client/output.py             Output: the terminal layout shared by the three agents
 mcpagent/client/client.py             MCP client for multiple servers
 mcpagent/client/connection.py         transport, handshake and session handling
 mcpagent/client/types.py              client types

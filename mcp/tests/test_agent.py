@@ -24,8 +24,10 @@ from rich.console import Console
 
 from mcpagent import MCPClient, MCPService
 from mcpagent.config import REPO_ROOT, MCPAgentConfig
-from mcpagent.client.agent import (MCPAgent, Output, load_instructions, load_models, load_output_settings,
-                                   resolve_model, identity_text, load_agent_settings, worth_saving, wrap)
+from mcpagent.client.agent import MCPAgent
+from mcpagent.client.context import AgentContext
+from mcpagent.client.output import Output
+from mcpagent.client.profiles import ModelProfiles
 
 
 # The scripted turn every agent's tests replay
@@ -292,9 +294,9 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         """
         Load the shared model profiles through the shipped jsons/mcpagent.json.
         Returns:
-            dict: The parsed models file.
+            ModelProfiles: The profiles.
         """
-        return load_models(self.shipped_config())
+        return ModelProfiles.load(self.shipped_config())
 
     @staticmethod
     def shipped_config():
@@ -306,53 +308,55 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         return MCPAgentConfig.load().data['client']
 
     async def test_model_profiles_come_from_the_shared_models_file(self):
-        config = self.shipped_models()
+        profiles = self.shipped_models()
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key-not-real'}):
             for name in ('LOCAL_LLM_BASE_URL', 'LOCAL_LLM_MODEL', 'LOCAL_LLM_API_KEY'):
                 os.environ.pop(name, None)
-            with patch('mcpagent.client.agent.loaded_model', return_value=None):  # No loaded model reported
-                local = resolve_model(config)  # "default": "local"
-            fallback = config['profiles']['local']  # Whatever the file names, so editing it never breaks this test
+            with patch.object(ModelProfiles, 'loaded_model', return_value=None):  # No loaded model reported
+                local = profiles.resolve()  # "default": "local"
+            fallback = profiles.models['profiles']['local']  # Whatever the file names, so editing it never breaks this test
             self.assertEqual((local['base_url'], local['model']), (fallback['base_url'], fallback['model']))
-            with patch('mcpagent.client.agent.loaded_model', return_value='qwen/loaded-now'):
-                self.assertEqual(resolve_model(config)['model'], 'qwen/loaded-now')  # model_auto
-                self.assertEqual(resolve_model(config, model='explicit')['model'], 'explicit')
+            with patch.object(ModelProfiles, 'loaded_model', return_value='qwen/loaded-now'):
+                self.assertEqual(profiles.resolve()['model'], 'qwen/loaded-now')  # model_auto
+                self.assertEqual(profiles.resolve(model='explicit')['model'], 'explicit')
             self.assertEqual(local['api_key'], 'lm-studio')  # the OpenAI key is never used for another server
             os.environ['LOCAL_LLM_MODEL'] = 'from-env'
-            self.assertEqual(resolve_model(config, 'local')['model'], 'from-env')
-            self.assertEqual(resolve_model(config, 'local', model='from-cli')['model'], 'from-cli')
-            self.assertEqual(resolve_model(config, 'openai')['api_key'], 'test-key-not-real')
-            self.assertEqual(resolve_model(config, 'openai')['error_hints'], 'openai')
+            self.assertEqual(profiles.resolve('local')['model'], 'from-env')
+            self.assertEqual(profiles.resolve('local', model='from-cli')['model'], 'from-cli')
+            self.assertEqual(profiles.resolve('openai')['api_key'], 'test-key-not-real')
+            self.assertEqual(profiles.resolve('openai')['error_hints'], 'openai')
             self.assertIsNone(local['error_hints'])  # A local server gets the generic error advice
 
     async def test_instructions_come_from_the_shared_context_file(self):
-        instructions = load_instructions(self.shipped_config())
+        context = AgentContext(self.shipped_config())
+        instructions = context.instructions()
         self.assertTrue(instructions.startswith('You are an agent'))
         self.assertIn('allowed folder', instructions)
-        self.assertEqual(load_instructions({}), '')  # no instructions_file configured
-        self.assertIn('Nothing to save', load_instructions(self.shipped_config(), 'on_exit'))
-        name = load_agent_settings(self.shipped_config())['names']['mcpagent']
+        self.assertEqual(AgentContext({}).instructions(), '')  # no instructions_file configured
+        self.assertIn('Nothing to save', context.instructions('on_exit'))
+        name = context.agent_settings()['names'][AgentContext.NAME_KEY]
         self.assertEqual(name, 'mcp')
-        self.assertTrue(identity_text(name, self.shipped_config()).startswith('Your name is mcp.'))
+        self.assertTrue(context.identity(name).startswith('Your name is mcp.'))
+        self.assertTrue(context.system_prompt(context.agent_settings()).startswith('Your name is mcp.'))
 
     def test_exit_saves_only_after_a_tool_call_or_several_exchanges(self):
         ask, answer = {'role': 'user', 'content': 'hi'}, message('hello')
-        self.assertFalse(worth_saving([]))
-        self.assertFalse(worth_saving([ask, answer]))
-        self.assertTrue(worth_saving([ask, answer, ask, answer]))
-        self.assertTrue(worth_saving([ask, call('time', {}), answer]))
+        self.assertFalse(AgentContext.worth_saving([]))
+        self.assertFalse(AgentContext.worth_saving([ask, answer]))
+        self.assertTrue(AgentContext.worth_saving([ask, answer, ask, answer]))
+        self.assertTrue(AgentContext.worth_saving([ask, call('time', {}), answer]))
 
     async def test_missing_key_and_unknown_profile(self):
-        config = self.shipped_models()
+        profiles = self.shipped_models()
         with patch.dict(os.environ, {'OPENAI_API_KEY': ''}):
             with self.assertRaisesRegex(ValueError, 'OPENAI_API_KEY'):
-                resolve_model(config, 'openai')
+                profiles.resolve('openai')
         with self.assertRaisesRegex(ValueError, "Unknown model profile 'nope'.*local, openai"):
-            resolve_model(config, 'nope')
+            profiles.resolve('nope')
         with self.assertRaisesRegex(ValueError, "missing model"):
-            resolve_model({'profiles': {'broken': {'base_url': 'http://x', 'api_key': 'k'}}}, 'broken')
+            ModelProfiles({'profiles': {'broken': {'base_url': 'http://x', 'api_key': 'k'}}}).resolve('broken')
         with self.assertRaisesRegex(ValueError, 'models_file'):
-            load_models({})
+            ModelProfiles.load({})
 
     async def test_local_profile_sends_its_own_key_to_its_own_server(self):
         seen = []
@@ -362,7 +366,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
             return web.json_response({"status": "completed", "output": [message('Hi')]})
 
         self.model_handler = respond
-        settings = resolve_model(self.shipped_models(), 'local', base_url=self.model_url)
+        settings = self.shipped_models().resolve('local', base_url=self.model_url)
         local = MCPAgent(self.agent.mcp, base_url=settings['base_url'], model=settings['model'],
                            api_key=settings['api_key'], provider=settings['name'])
         local.tools = self.agent.tools
@@ -378,7 +382,7 @@ class OutputTests(unittest.TestCase):
     """The terminal layout shared by the three agents (README.md, "Terminal output")."""
 
     def test_layout_settings_come_from_the_shared_context_file(self):
-        settings = load_output_settings(MCPAgentConfig.load().data['client'])
+        settings = AgentContext(MCPAgentConfig.load().data['client']).output_settings()
         self.assertEqual((settings['width'], settings['show_time']), (120, True))
 
     # The agents keep independent tests for their shared terminal behavior.
@@ -441,7 +445,7 @@ class OutputTests(unittest.TestCase):
     def test_lines_and_streamed_answer_wrap_and_the_response_is_timed(self):
         printed = io.StringIO()
         output = Output(Console(file=printed), {'width': 30, 'show_time': True})
-        self.assertEqual(wrap('one two three four five six seven', 15), ['one two three', '  four five six', '  seven'])
+        self.assertEqual(Output.wrap('one two three four five six seven', 15), ['one two three', '  four five six', '  seven'])
         answer = 'The quiz service is running and pull request number one is still waiting for its quiz.'
         for i in range(0, len(answer), 7):
             output.text(answer[i:i + 7])

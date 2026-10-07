@@ -5,7 +5,7 @@ Description:
     Command-line entry point of the MCP Agent: `python -m mcpagent.client`, run from the
     mcp project directory.
 
-    Starts the agent (`run_agent`): a model that uses the tools of the MCP servers in the
+    Starts the agent (`AgentSession`): a model that uses the tools of the MCP servers in the
     "client" section of the MCPAgent config (default: jsons/mcpagent.json in this package),
     with a model profile from the shared agents/context/models.json. Runs one prompt
     (--prompt) or an interactive session.
@@ -24,7 +24,7 @@ from colorama import Fore, Style, init
 # Local imports
 from mcpagent.common.errors import ExceptionReport
 from .. import __version__
-from .agent import run_agent
+from .session import AgentSession
 from mcpagent.config import DEFAULT_CONFIG
 
 
@@ -82,8 +82,9 @@ def main() -> int:
 
         profile = args.profile or ("local" if args.local else "openai" if args.openai else None)
         context = args.context.expanduser().read_text(encoding="utf-8") if args.context else ""
-        return asyncio.run(run_agent(config_file, profile=profile, model=args.model, base_url=args.base_url,
-                                     prompt=args.prompt, context=context, trace=args.debug))
+        session = AgentSession(config_file, profile=profile, model=args.model, base_url=args.base_url,
+                               context=context, trace=args.debug)
+        return asyncio.run(session.run(args.prompt))
 
     except KeyboardInterrupt:
         print(f"\n\n{Fore.LIGHTBLACK_EX}Interrupted by user, shutting down.{Style.RESET_ALL}\n")
