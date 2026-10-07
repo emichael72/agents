@@ -38,6 +38,63 @@ Python 3.10+ (`python3` if new enough, otherwise the newest `python3.N` in `PATH
 the `.ts` files directly, so there is no build step). Neither `.venv/` nor `node_modules/` is
 committed.
 
+## Choosing a model
+
+By default every agent uses the `local` profile in [`context/models.json`](context/models.json),
+an LM Studio server. All three agents take the same options to use another model; run them from
+the repository root, and start the MCP server (`.venv/bin/python mcp/server.py`) before MCPAgent.
+
+**OpenAI.** The `openai` profile ships ready to use (`gpt-4.1-mini`). Set the key without echoing
+it or saving it in shell history, then pass `--openai`:
+
+```bash
+read -rsp "OpenAI API key: " OPENAI_API_KEY && export OPENAI_API_KEY  # Bash
+read -rs "OPENAI_API_KEY?OpenAI API key: " && export OPENAI_API_KEY   # zsh
+
+.venv/bin/python mcp/client.py --openai       # MCPAgent
+.venv/bin/python pydantic/agent.py --openai   # the Pydantic Agent
+node vercel/agent.ts --openai                 # the Vercel Agent
+```
+
+Prompts, tool schemas and tool outputs then go to OpenAI and are billed to the key's project.
+
+**Another model for one run.** `--model` picks a different model on the profile's server, and
+`--base-url` a different OpenAI-compatible server:
+
+```bash
+.venv/bin/python pydantic/agent.py --openai --model gpt-4.1          # another OpenAI model
+.venv/bin/python pydantic/agent.py --model qwen/qwen3-coder-30b      # another model in LM Studio
+.venv/bin/python pydantic/agent.py --base-url http://otherhost:1234/v1
+```
+
+The environment variables a profile names do the same for every run: `OPENAI_MODEL` for the
+`openai` profile, and `LOCAL_LLM_MODEL` and `LOCAL_LLM_BASE_URL` for `local` (see "Shared
+settings"). The command line wins over the variables, and the variables over the file.
+
+**A different default.** Set `"default"` in `context/models.json` to the profile every agent
+should use without a flag, e.g. `"default": "openai"`.
+
+**Another provider.** Add a profile for any OpenAI-compatible server and select it with
+`--profile`; the fields are described under "Context" below:
+
+```json
+"mistral": {
+  "name": "Mistral",
+  "base_url": "https://api.mistral.ai/v1",
+  "model": "mistral-large-latest",
+  "api_key_env": "MISTRAL_API_KEY",
+  "timeout": 60
+}
+```
+
+```bash
+.venv/bin/python pydantic/agent.py --profile mistral
+```
+
+MCPAgent also needs the server to support the `/v1/responses` endpoint, which OpenAI and LM
+Studio do; the Pydantic and Vercel Agents use chat completions. With `-d`, each agent prints the
+profile, model and server it is using when it starts.
+
 ## Tools
 
 `tools/` holds one folder per tool: a `tool.json` manifest, the script and its `README.md`.
