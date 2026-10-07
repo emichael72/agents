@@ -1,7 +1,6 @@
 # Pinned, tested versions of MCPAgent's dependencies. The repository's install.sh installs these
 # (and pydantic/requirements.txt) into the shared .venv; MCPAgent itself runs from the source tree.
 aiohttp==3.14.4
-colorama==0.4.6
 jsonschema==4.26.0
 prompt_toolkit==3.0.53
 rich==15.0.0

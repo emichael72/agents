@@ -34,7 +34,8 @@ from urllib.parse import urlparse, unquote
 # Third-party
 from aiohttp import web
 from jsonschema import validate, ValidationError
-from colorama import Fore, Style
+from rich.console import Console
+from rich.text import Text
 
 # Local imports
 from mcpagent.config import DEFAULT_CONFIG, REPO_ROOT, MCPAgentConfig
@@ -877,13 +878,16 @@ class MCPService:
 
         # noinspection HttpUrlsUsage
         base = f"http://{host}:{port}"
+        console = Console(highlight=False, soft_wrap=True)  # The curl lines are not re-wrapped
         # Muted, like the agents: dark gray for labels and hints, plain text for what to read or copy
-        gray, reset = Fore.LIGHTBLACK_EX, Style.RESET_ALL
+        gray = "bright_black"
         title = "MCPAgent HTTP Service Info:"
 
-        # Clear screen and print header
-        print("\033[2J\033[3J\033[H", end="")
-        print(f"\n{Style.BRIGHT}{title}{reset}\n{gray}{'-' * len(title)}{reset}")
+        if console.is_terminal:
+            print("\033[2J\033[3J\033[H", end="", flush=True)  # Clear the screen and its scrollback
+        console.print()
+        console.print(title, style="bold", markup=False)
+        console.print("-" * len(title), style=gray)
         info = [
             ("Base", base),
             ("Diagnostic event feed", f"{base}/sse"),
@@ -893,29 +897,34 @@ class MCPService:
         if isinstance(host_bind_address, str):
             info.append(("Bind address", host_bind_address))
         for label, value in info:
-            print(f"{gray}{f'- {label}:':<25}{reset}{value}")
+            console.print(Text.assemble((f"- {label}:".ljust(25), gray), value))
 
         if show_examples:
-            print(f"\n{gray}Example commands you can run in another shell:{reset}")
+            examples = [
+                ("1. Listen for SSE broadcasts:", f"   curl -s -N --noproxy {host} {base}/sse"),
+                ("2. List available tools:",
+                 f"   curl -s --noproxy {host} "
+                 "-H \"Content-Type: application/json\" "
+                 "-d \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":1,\\\"method\\\":\\\"tools/list\\\",\\\"params\\\":{}}\" "
+                 f"{base}/message | jq"),
+                ("3. Execute tool 'time' with argument 'UTC':",
+                 f"   curl -s --noproxy {host} "
+                 "-H \"Content-Type: application/json\" "
+                 "-d \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":2,\\\"method\\\":\\\"tools/call\\\","
+                 "\\\"params\\\":{\\\"name\\\":\\\"time\\\","
+                 "\\\"arguments\\\":{\\\"timezone\\\":\\\"UTC\\\"}}}\" "
+                 f"{base}/message | jq"),
+            ]
+            console.print()
+            console.print("Example commands you can run in another shell:", style=gray, markup=False)
+            for heading, command in examples:
+                console.print()
+                console.print(heading, style=gray, markup=False)
+                console.print(command, markup=False)
 
-            print(f"\n{gray}1. Listen for SSE broadcasts:{reset}")
-            print(f"   curl -s -N --noproxy {host} {base}/sse")
-
-            print(f"\n{gray}2. List available tools:{reset}")
-            print(f"   curl -s --noproxy {host} "
-                  "-H \"Content-Type: application/json\" "
-                  "-d \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":1,\\\"method\\\":\\\"tools/list\\\",\\\"params\\\":{}}\" "
-                  f"{base}/message | jq")
-
-            print(f"\n{gray}3. Execute tool 'time' with argument 'UTC':{reset}")
-            print(f"   curl -s --noproxy {host} "
-                  "-H \"Content-Type: application/json\" "
-                  "-d \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":2,\\\"method\\\":\\\"tools/call\\\","
-                  "\\\"params\\\":{\\\"name\\\":\\\"time\\\","
-                  "\\\"arguments\\\":{\\\"timezone\\\":\\\"UTC\\\"}}}\" "
-                  f"{base}/message | jq")
-
-        print(f"\n{gray}Running... Press Ctrl+C to stop.{reset}\n")
+        console.print()
+        console.print("Running... Press Ctrl+C to stop.", style=gray, markup=False)
+        console.print()
 
     @classmethod
     def serve(cls, config_path: Optional[Union[str, Path]] = None) -> int:

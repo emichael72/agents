@@ -8,7 +8,8 @@ Description:
 import os
 import sys
 
-from colorama import Fore, Style
+from rich.console import Console
+from rich.text import Text
 
 
 class ExceptionReport:
@@ -36,6 +37,9 @@ class ExceptionReport:
         """
         Print the error, its origin and the command line that was run.
         """
-        print(f"\n{Fore.RED}Exception:{Style.RESET_ALL} {self.error}.\n"
-              f"File: {self.file_name}\nLine: {self.line_number}")
-        print(f"Invocation: {' '.join(sys.argv)}\n")
+        console = Console(highlight=False, soft_wrap=True)  # Long lines are not re-wrapped
+        console.print()
+        console.print(Text.assemble(("Exception:", "red"), f" {self.error}."))
+        console.print(f"File: {self.file_name}\nLine: {self.line_number}", markup=False)
+        console.print(f"Invocation: {' '.join(sys.argv)}", markup=False)
+        console.print()

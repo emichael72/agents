@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 # Third-party
-from colorama import Fore, Style, init
+from rich.console import Console
 
 # Local imports
 from mcpagent.common.errors import ExceptionReport
@@ -60,7 +60,6 @@ def main() -> int:
     Returns:
         int: Exit code (0 = success, nonzero = failure).
     """
-    init(autoreset=True)  # Init colorama
     exit_code: int = 1
 
     try:
@@ -86,7 +85,8 @@ def main() -> int:
         return asyncio.run(session.run(args.prompt))
 
     except KeyboardInterrupt:
-        print(f"\n\n{Fore.LIGHTBLACK_EX}Interrupted by user, shutting down.{Style.RESET_ALL}\n")
+        Console(highlight=False).print("\n\nInterrupted by user, shutting down.\n", style="bright_black",
+                                       markup=False)
 
     except Exception as runtime_error:
         ExceptionReport(runtime_error).print()
