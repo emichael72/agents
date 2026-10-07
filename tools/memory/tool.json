@@ -1,5 +1,13 @@
 {
-  "description": "The agents' memory between runs. save: remember a fact under a topic (adds a line; replace rewrites the note) whenever the user states a preference, asks you to remember something, or you learn something lasting about a project. read: a topic's note (the index of topics is already in your instructions). forget: delete a topic. Never store secrets.",
+  "description": [
+    "The agents' memory between runs.",
+    "save: remember a fact under a topic (adds a line; replace rewrites the note)",
+    "whenever the user states a preference, asks you to remember something,",
+    "or you learn something lasting about a project.",
+    "read: a topic's note (the index of topics is already in your instructions).",
+    "forget: delete a topic.",
+    "Never store secrets."
+  ],
   "command": "python3",
   "args": ["memory/memory.py"],
   "params": [

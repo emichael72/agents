@@ -1,5 +1,11 @@
 {
-  "description": "Reports on the machine running the tools: system (OS, kernel, uptime), CPU (model, cores, current utilization, load, temperature), memory and swap use, disks, network interfaces, GPU, the busiest processes, and software versions (Python, gcc, make, git, node, ...). Ask for one section to keep it short.",
+  "description": [
+    "Reports on the machine running the tools: system (OS, kernel, uptime),",
+    "CPU (model, cores, current utilization, load, temperature),",
+    "memory and swap use, disks, network interfaces, GPU, the busiest processes,",
+    "and software versions (Python, gcc, make, git, node, ...).",
+    "Ask for one section to keep it short."
+  ],
   "command": "python3",
   "args": ["sysinfo/sysinfo.py"],
   "params": [

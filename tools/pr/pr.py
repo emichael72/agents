@@ -9,7 +9,7 @@ Description:
 
     This is the one tool that reaches GitHub, with the credentials of the user running the agent
     (git and gh). With action sync, it brings the default branch up to date with GitHub
-    (fast-forward only), which the agents' sandboxed shell cannot do. Otherwise it opens a pull
+    (fast-forward only), which the agents' sandboxed shell cannot do. The open action creates a pull
     request, the same way every time:
       1. Check the repository: on its default branch, no commits of its own, changes to submit.
       2. Bring the default branch up to date with GitHub (fast-forward only).
@@ -33,9 +33,9 @@ import time
 from pathlib import Path
 from typing import Optional
 
-# The file-system gate (context/paths.json) lives in agents/gatekeepers/fs
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "gatekeepers" / "fs"))
-import fs_gate  # noqa: E402
+# Import the shared filesystem gate from the repository root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from gatekeepers.fs import fs_gate
 
 OPTIONS = ("action", "title", "body", "branch")
 CLANG_FORMAT = fs_gate.CONTEXT_DIR / "clang-format.yaml"  # The default style
@@ -134,7 +134,8 @@ def wait_for_check(repo: Path, sha: str) -> str:
         return ""
     name = subprocess.run(["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
                           cwd=repo, capture_output=True, text=True, timeout=TIMEOUT).stdout.strip()
-    deadline, status = time.monotonic() + WAIT_SECONDS, None
+    deadline = time.monotonic() + WAIT_SECONDS
+    status: Optional[dict[str, Optional[str]]] = None
     while name and time.monotonic() < deadline:
         result = subprocess.run(["gh", "api", f"repos/{name}/commits/{sha}/status"], cwd=repo,
                                 capture_output=True, text=True, timeout=TIMEOUT)

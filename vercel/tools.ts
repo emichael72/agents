@@ -19,7 +19,7 @@ const execFileAsync = promisify(execFile);
 
 type Param = { name: string; type?: string; description?: string; style?: 'flag' | 'positional'; required?: boolean };
 type JSONSchemaInput = Parameters<typeof z.fromJSONSchema>[0];
-type Manifest = { description?: string; command: string; args?: string[]; env?: Record<string, string>; params?: Param[]; timeout?: number };
+type Manifest = { description?: string | string[]; command: string; args?: string[]; env?: Record<string, string>; params?: Param[]; timeout?: number };
 
 /** Run a tool command from the tools folder and return its output. */
 export async function runScript(command: string[], env: Record<string, string> = {},
@@ -71,7 +71,7 @@ export function loadTools(toolsDir = TOOLS_DIR): ToolSet {
     if (!existsSync(manifestPath)) continue;
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Manifest;
     tools[name] = tool({
-      description: manifest.description,
+      description: Array.isArray(manifest.description) ? manifest.description.join(' ') : manifest.description,
       inputSchema: z.fromJSONSchema(inputSchema(manifest) as JSONSchemaInput) as z.ZodType<Record<string, unknown>>,
       execute: (input) => runScript(buildArgv(manifest, input), manifest.env, (manifest.timeout ?? SCRIPT_TIMEOUT_MS / 1000) * 1000),
     });

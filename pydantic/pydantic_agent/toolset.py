@@ -121,7 +121,10 @@ def manifest_tool(name: str, manifest: dict) -> Tool:
         return run_script(*build_argv(manifest, arguments), env=manifest.get("env"),
                           timeout=float(manifest.get("timeout", SCRIPT_TIMEOUT)))
 
-    return Tool.from_schema(call, name=name, description=manifest.get("description"), json_schema=schema)
+    description = manifest.get("description")
+    if isinstance(description, list):
+        description = " ".join(description)
+    return Tool.from_schema(call, name=name, description=description, json_schema=schema)
 
 
 def load_toolset(tools_dir: Path = TOOLS_DIR) -> FunctionToolset:

@@ -1,5 +1,13 @@
 {
-  "description": "Reports and controls the pull request gate (gatekeepers/pr) for the core_dump GitHub repository: whether its service is running, and for each open PR whether it is blocked (build, tests, documentation, or a quiz waiting, with its link) or may merge. With action history it lists past assessments (quizzes) with their pull request, time, outcome and attempts. With action start, stop or restart it controls the gate's own service (pr-gate) and nothing else; stopping it never lets a change merge.",
+  "description": [
+    "Reports and controls the pull request gate (gatekeepers/pr) for the core_dump GitHub repository:",
+    "whether its service is running, and for each open PR whether it is blocked",
+    "(build, tests, documentation, or a quiz waiting, with its link) or may merge.",
+    "With action history it lists past assessments (quizzes)",
+    "with their pull request, time, outcome and attempts.",
+    "With action start, stop or restart it controls the gate's own service (pr-gate) and nothing else;",
+    "stopping it never lets a change merge."
+  ],
   "command": "bash",
   "args": ["../gatekeepers/pr/pr_gate.sh", "status"],
   "timeout": 60,

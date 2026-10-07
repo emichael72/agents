@@ -4,13 +4,13 @@ Edits a text file inside the allowed folders ([`../../context/paths.json`](../..
 then shows the changed lines, numbered, with three lines of context so the edit can be checked. Its
 `hex` action only reads: it shows part of any file, binary too, as a hex dump.
 
-| Action | Parameters | Does |
-| --- | --- | --- |
-| `replace` (default) | `old`, `new`, `all` | Replaces the exact text `old` with `new`. `old` must match once; if it matches several places, the error lists their lines (add surrounding text, or set `all`). |
-| `lines` | `start`, `end`, `new` | Replaces lines `start`..`end` (as numbered by `cat -n` in the shell) with `new`; an empty `new` deletes them. |
-| `insert` | `line`, `new` | Inserts `new` after line `line`; `0` inserts at the top. |
-| `write` | `new` | Creates the file, or replaces all of it, with `new`. |
-| `hex` | `offset`, `length` | Read only: shows `length` bytes (default 256, at most 4,096) from `offset` (default 0; negative counts from the end) as a hex dump, like `hexdump -C`, and says where to continue. Needs only read access. |
+| Action              | Parameters            | Does                                                                                                                                                                                                       |
+|---------------------|-----------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `replace` (default) | `old`, `new`, `all`   | Replaces the exact text `old` with `new`. `old` must match once; if it matches several places, the error lists their lines (add surrounding text, or set `all`).                                           |
+| `lines`             | `start`, `end`, `new` | Replaces lines `start`..`end` (as numbered by `cat -n` in the shell) with `new`; an empty `new` deletes them.                                                                                              |
+| `insert`            | `line`, `new`         | Inserts `new` after line `line`; `0` inserts at the top.                                                                                                                                                   |
+| `write`             | `new`                 | Creates the file, or replaces all of it, with `new`.                                                                                                                                                       |
+| `hex`               | `offset`, `length`    | Read only: shows `length` bytes (default 256, at most 4,096) from `offset` (default 0; negative counts from the end) as a hex dump, like `hexdump -C`, and says where to continue. Needs only read access. |
 
 **Usage Example:**
 

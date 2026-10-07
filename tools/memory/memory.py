@@ -26,9 +26,9 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
-# The file-system gate (context/paths.json) lives in agents/gatekeepers/fs
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "gatekeepers" / "fs"))
-import fs_gate  # noqa: E402
+# Import the shared filesystem gate from the repository root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from gatekeepers.fs import fs_gate
 
 FOLDER = "memory"  # The allowed folder's name in context/paths.json
 INDEX = "index.md"

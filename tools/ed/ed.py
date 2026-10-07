@@ -32,9 +32,9 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-# The file-system gate (context/paths.json) lives in agents/gatekeepers/fs
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "gatekeepers" / "fs"))
-import fs_gate  # noqa: E402
+# Import the shared filesystem gate from the repository root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from gatekeepers.fs import fs_gate
 
 ACTIONS = ("replace", "lines", "insert", "write", "hex")
 OPTIONS = ("action", "old", "new", "all", "start", "end", "line", "offset", "length")
@@ -114,8 +114,8 @@ def as_lines(new: str, newline: str) -> list[str]:
     """
     Split text to insert into whole lines, each ending with the file's newline.
     Args:
-        new: The text; "" means no lines.
-        newline: "\\n" or "\\r\\n".
+        new: The text; an empty string means no lines.
+        newline: The file's line ending, either LF or CRLF.
     Returns:
         list[str]: The lines.
     """

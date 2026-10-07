@@ -40,9 +40,9 @@ import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Optional
 
-# The file-system gate (context/paths.json) lives in agents/gatekeepers/fs
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "gatekeepers" / "fs"))
-import fs_gate  # noqa: E402
+# Import the shared filesystem gate from the repository root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from gatekeepers.fs import fs_gate
 
 COMMANDS_FILE = Path(__file__).resolve().parent / "commands.json"
 CLANG_FORMAT = fs_gate.CONTEXT_DIR / "clang-format.yaml"  # The default C/C++ style, at /work/.clang-format
@@ -115,8 +115,8 @@ def check(command: str, cwd: Path, commands: dict[str, dict], allowed: dict[str,
     lexer.whitespace_split = True
     try:
         tokens = list(lexer)
-    except ValueError as e:
-        raise ValueError(f"Cannot parse the command: {e}") from None
+    except ValueError as parse_error:
+        raise ValueError(f"Cannot parse the command: {parse_error}") from None
 
     segments: list[list[str]] = [[]]
     for token in tokens:
@@ -135,7 +135,8 @@ def check(command: str, cwd: Path, commands: dict[str, dict], allowed: dict[str,
         if "/" in name:  # A program in an allowed folder: needs execute access there
             program = to_host(name, current, allowed)
             located = fs_gate.locate(program, allowed) if program else None
-            if not located or "x" not in located[0].access_at(program):  # It may not exist yet (make builds it)
+            # The program may not exist yet (make builds it).
+            if program is None or located is None or "x" not in located[0].access_at(program):
                 raise ValueError(f"'{name}' is not a program in a folder with execute (x) access.")
             continue
         if own_tool(name):
@@ -157,7 +158,10 @@ def check(command: str, cwd: Path, commands: dict[str, dict], allowed: dict[str,
                 raise ValueError(f"cd: '{words[1] if len(words) > 1 else ''}' is not a folder in the allowed folders.")
             current = target
         if commands[name].get("needs"):
-            folder, shown = fs_gate.locate(current, allowed)
+            located = fs_gate.locate(current, allowed)
+            if located is None:
+                raise ValueError("The working folder is outside the allowed folders.")
+            folder, shown = located
             missing = [r for r in commands[name]["needs"] if r not in folder.access_at(current)]
             if missing:
                 raise ValueError(f"{name} needs {'/'.join(missing)} access, which {shown} does not have.")
@@ -198,6 +202,8 @@ def sandbox(allowed: dict[str, fs_gate.Folder], cwd: Path, identity: Optional[Pa
         identity: A folder from identity_files, mounted as /etc/passwd and /etc/group; None for none.
     Returns:
         list[str]: bwrap and its options, ending with "--" (the command follows).
+    Raises:
+        ValueError: If the working folder is outside the allowed folders.
     """
     args = ["bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--clearenv",
             "--ro-bind", "/usr", "/usr", "--symlink", "usr/bin", "/bin", "--symlink", "usr/sbin", "/sbin",
@@ -229,7 +235,10 @@ def sandbox(allowed: dict[str, fs_gate.Folder], cwd: Path, identity: Optional[Pa
         if config.is_file():
             args += ["--ro-bind", str(config), str(WORK / name)]
     located = fs_gate.locate(cwd, allowed)
-    args += ["--chdir", str(WORK / located[1])]
+    if located is None:
+        raise ValueError("The working folder is outside the allowed folders.")
+    _, shown = located
+    args += ["--chdir", str(WORK / shown)]
     environment = {
         "PATH": "/usr/bin:/bin", "HOME": "/tmp/home", "LANG": "C.UTF-8", "TERM": "dumb",
         "PAGER": "cat", "GIT_PAGER": "cat", "GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": "true",

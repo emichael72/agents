@@ -688,6 +688,8 @@ class MCPService:
                 raise RuntimeError(f"Invalid MCP tool name: {tool_name}")
 
             description = entry.get("description") or f"Run '{key}' tool."
+            if isinstance(description, list):
+                description = " ".join(description)
 
             command = entry.get("command")
             if not command:

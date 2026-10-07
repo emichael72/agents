@@ -9,8 +9,9 @@ person: the change waits on GitHub for review, and in `core_dump` the
 can merge.
 
 **Before starting work**, `action: sync` brings the repository's default branch up to date with
-GitHub (fast-forward only): the agents' shell has no network, so without it they would work on
-stale code. It refuses when there are uncommitted changes or local commits, so it never loses work.
+GitHub (fast-forward only). The agents' shell has no network access. Syncing first keeps the agents
+from working on stale code. The sync action refuses when there are uncommitted changes or local
+commits, so it never loses work.
 The pull request gate's service also keeps `core_dump` current on its own (`QUIZ_LOCAL_CLONE`), so
 `sync` mostly confirms it.
 

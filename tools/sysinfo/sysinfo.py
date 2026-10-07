@@ -143,11 +143,12 @@ def memory() -> list[tuple[str, str]]:
               if len(line.split()) >= 2 and line.split()[1].isdigit()}
     total, available = values.get("MemTotal", 0), values.get("MemAvailable", 0)
     swap_total, swap_free = values.get("SwapTotal", 0), values.get("SwapFree", 0)
-    rows = [("ram", f"{size(total - available)} used of {size(total)} ({100 * (total - available) / total:.0f}%), "
-                    f"{size(available)} available") if total else ("ram", "unknown")]
-    rows.append(("cache", f"{size(values.get('Cached', 0) + values.get('Buffers', 0))} buffers and page cache"))
-    rows.append(("swap", f"{size(swap_total - swap_free)} used of {size(swap_total)}" if swap_total else "none"))
-    return rows
+    return [
+        ("ram", f"{size(total - available)} used of {size(total)} ({100 * (total - available) / total:.0f}%), "
+                f"{size(available)} available" if total else "unknown"),
+        ("cache", f"{size(values.get('Cached', 0) + values.get('Buffers', 0))} buffers and page cache"),
+        ("swap", f"{size(swap_total - swap_free)} used of {size(swap_total)}" if swap_total else "none"),
+    ]
 
 
 def disk() -> list[tuple[str, str]]:
@@ -254,8 +255,8 @@ def report(section: Optional[str] = None) -> str:
     for name, collect in chosen.items():
         try:
             rows = collect()
-        except Exception as e:  # One unreadable section should not hide the others
-            rows = [("error", str(e))]
+        except Exception as section_error:  # One unreadable section should not hide the others
+            rows = [("error", str(section_error))]
         width = max(len(key) for key, _ in rows)
         blocks.append(f"[{name}]\n" + "\n".join(f"{key:<{width}}  {value}" for key, value in rows))
     return "\n\n".join(blocks)

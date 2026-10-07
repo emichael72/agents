@@ -6,11 +6,11 @@ Every agent loads `.memory/index.md` into its instructions at start-up, so it kn
 remembers without being asked; this tool saves, reads and forgets the notes behind the index. See
 "Memory" in the [repository README](../../README.md#memory).
 
-| Action | Parameters | Does |
-| --- | --- | --- |
-| `save` | `topic`, `text`, `summary`, `replace` (optional) | Adds `text` as a line to the topic's note (`replace` rewrites the note), and updates its index line |
-| `read` | `topic` (optional) | The topic's note, or the index |
-| `forget` | `topic` | Deletes the note and its index line |
+| Action   | Parameters                                       | Does                                                                                                |
+|----------|--------------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| `save`   | `topic`, `text`, `summary`, `replace` (optional) | Adds `text` as a line to the topic's note (`replace` rewrites the note), and updates its index line |
+| `read`   | `topic` (optional)                               | The topic's note, or the index                                                                      |
+| `forget` | `topic`                                          | Deletes the note and its index line                                                                 |
 
 **Usage Example:**
 

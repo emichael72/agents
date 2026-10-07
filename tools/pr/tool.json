@@ -1,5 +1,19 @@
 {
-  "description": "Opens a pull request (PR) on GitHub with the uncommitted changes of a repository in an allowed folder with write access, e.g. core_dump: formats the changed C/C++ files, creates a new branch, commits all changes, pushes it and opens the pull request into the default branch, then waits for the merge gate and returns the quiz link. The user may call a pull request a merge request or MR; it is the same thing, and this is the tool for it. Use it only when the change is complete and clean: make builds with no errors or warnings, make check passes, and doxy reports no documentation problems. Never commit, branch or merge with git yourself; this tool does it. With action sync it instead updates the repository's default branch from GitHub: do that before starting work, so you work on the latest code. It never merges a pull request; a person reviews it.",
+  "description": [
+    "Opens a pull request (PR) on GitHub with the uncommitted changes of a repository",
+    "in an allowed folder with write access, e.g. core_dump:",
+    "formats the changed C/C++ files, creates a new branch, commits all changes,",
+    "pushes it and opens the pull request into the default branch,",
+    "then waits for the merge gate and returns the quiz link.",
+    "The user may call a pull request a merge request or MR;",
+    "it is the same thing, and this is the tool for it.",
+    "Use it only when the change is complete and clean: make builds with no errors or warnings,",
+    "make check passes, and doxy reports no documentation problems.",
+    "Never commit, branch or merge with git yourself; this tool does it.",
+    "With action sync it instead updates the repository's default branch from GitHub:",
+    "do that before starting work, so you work on the latest code.",
+    "It never merges a pull request; a person reviews it."
+  ],
   "command": "python3",
   "args": ["pr/pr.py"],
   "timeout": 150,

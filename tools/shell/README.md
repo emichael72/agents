@@ -27,12 +27,12 @@ for `clang-tidy`. Output shows
 Every command line runs in [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`), so the
 limits are enforced by the kernel, whatever the command or its arguments:
 
-| Inside the sandbox | |
-| --- | --- |
-| `/usr` | read-only (the programs) |
-| `/work/<name>` | each allowed folder: read-only, or writable with `w` access; sub-folder overrides apply |
-| `/tmp` | private and empty, deleted afterwards (`HOME` is `/tmp/home`) |
-| everything else | absent: no `/home`, no `/etc` (except time zone and library cache), no network |
+| Inside the sandbox |                                                                                         |
+|--------------------|-----------------------------------------------------------------------------------------|
+| `/usr`             | read-only (the programs)                                                                |
+| `/work/<name>`     | each allowed folder: read-only, or writable with `w` access; sub-folder overrides apply |
+| `/tmp`             | private and empty, deleted afterwards (`HOME` is `/tmp/home`)                           |
+| everything else    | absent: no `/home`, no `/etc` (except time zone and library cache), no network          |
 
 `.git/config` and `.git/hooks` stay read-only even in writable folders, and git runs with hooks and
 fsmonitor off, so nothing planted in a repository runs later outside the sandbox. A script the
@@ -69,11 +69,11 @@ others (`find -exec`, `awk`'s `system()`), only ever inside the sandbox.
 
 From `context/paths.json`, for a folder and everything in it:
 
-| Right | Shell | ed |
-| --- | --- | --- |
-| `r` | the folder is mounted (read-only without `w`) | |
-| `w` | the folder is mounted writable | required |
-| `x` | `./program` and `make` may run there | |
+| Right | Shell                                         | ed       |
+|-------|-----------------------------------------------|----------|
+| `r`   | the folder is mounted (read-only without `w`) |          |
+| `w`   | the folder is mounted writable                | required |
+| `x`   | `./program` and `make` may run there          |          |
 
 Requires bubblewrap (`sudo dnf install bubblewrap` on Fedora, `sudo apt install bubblewrap` on
 Debian/Ubuntu).

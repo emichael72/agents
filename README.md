@@ -7,7 +7,7 @@ running `qwen/qwen3-coder-30b`), and run the same tools, which they discover in 
 
 | Agent      | Built with                                           | Who runs the agent loop | README                                   |
 |------------|------------------------------------------------------|-------------------------|------------------------------------------|
-| `mcp`      | Python, no framework (MCPAgent)                      | hand-written code       | [mcp/README.md](mcp/README.md) |
+| `mcp`      | Python, no framework (MCPAgent)                      | hand-written code       | [mcp/README.md](mcp/README.md)           |
 | `pydantic` | Python, [pydantic-ai](https://pydantic.dev/docs/ai/) | the framework           | [pydantic/README.md](pydantic/README.md) |
 | `vercel`   | TypeScript, [AI SDK](https://ai-sdk.dev)             | the framework           | [vercel/README.md](vercel/README.md)     |
 

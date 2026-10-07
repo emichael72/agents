@@ -1,5 +1,16 @@
 {
-  "description": "Edits a text file inside the allowed folders with write access. action replace (the default) swaps exact text old for new (old must match once, or set all); lines replaces lines start..end with new (empty new deletes them; take the numbers from cat -n in the shell); insert puts new after line (0 = top); write creates or overwrites the whole file with new. Shows the changed lines afterwards. action hex only reads: it shows length bytes of any file (binary too) from offset as a hex dump, needing only read access. Cannot change read-only folders, the tools or context folders, or .git folders.",
+  "description": [
+    "Edits a text file inside the allowed folders with write access.",
+    "action replace (the default) swaps exact text old for new (old must match once, or set all);",
+    "lines replaces lines start..end with new (empty new deletes them;",
+    "take the numbers from cat -n in the shell);",
+    "insert puts new after line (0 = top);",
+    "write creates or overwrites the whole file with new.",
+    "Shows the changed lines afterwards.",
+    "action hex only reads: it shows length bytes of any file (binary too) from offset",
+    "as a hex dump, needing only read access.",
+    "Cannot change read-only folders, the tools or context folders, or .git folders."
+  ],
   "command": "python3",
   "args": ["ed/ed.py"],
   "params": [

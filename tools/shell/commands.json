@@ -1,5 +1,13 @@
 {
-  "description": "Commands the shell tool may run, each with a short note for the model. A command that also exists as its own tool (tools/<name>/tool.json) is refused by the shell: the dedicated tool wins. \"needs\": \"x\" means the command runs the folder's own code (make runs the Makefile), so it needs execute access where it runs. Every command runs in a sandbox that sees only the folders in context/paths.json, with no network.",
+  "description": [
+    "Commands the shell tool may run, each with a short note for the model.",
+    "A command that also exists as its own tool (tools/<name>/tool.json)",
+    "is refused by the shell: the dedicated tool wins.",
+    "\"needs\": \"x\" means the command runs the folder's own code (make runs the Makefile),",
+    "so it needs execute access where it runs.",
+    "Every command runs in a sandbox that sees only the folders in context/paths.json,",
+    "with no network."
+  ],
   "commands": {
     "addr2line": "turn addresses into file:line (addr2line -e prog 0x...)",
     "ar": "list or extract static libraries (ar t lib.a)",

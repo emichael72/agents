@@ -87,6 +87,9 @@ reported to the model as a tool failure, with the script's output as the message
 
 ## Adding a tool
 
+The top-level `description` may be a string or a list of strings. Each agent joins a list with
+spaces before sending the description to the model.
+
 1. Create a folder named after the tool, e.g. `tools/uptime/`.
 2. Add the script, e.g. `uptime/uptime.sh`. Print the result to stdout, and exit nonzero
    with an explanation on failure.
