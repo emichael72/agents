@@ -9,8 +9,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   ask, buildAgent, identityText, linkSegments, loadInstructions, loadModels, loadOutputSettings, memoryText, Output, resolveModel, worthSaving, wrap,
-} from '../agent.ts';
-import { loadTools, localTools, runScript } from '../tools.ts';
+  loadTools, localTools, REPO_ROOT, runScript, TOOLS_DIR,
+} from '../vercelagent/index.ts';
 
 const usage = {
   inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
@@ -50,9 +50,15 @@ const quiet = { trace: false, write: () => {} };
 
 /** The scripted turn every agent's tests replay (tests/scenario.json). */
 type Step = { tool: string; arguments: object; outcome: 'ok' | 'error'; output: string };
-const SCENARIO = JSON.parse(readFileSync(path.join(import.meta.dirname, '..', '..', 'tests', 'scenario.json'), 'utf8')) as
+const SCENARIO = JSON.parse(readFileSync(path.join(REPO_ROOT, 'tests', 'scenario.json'), 'utf8')) as
   { prompt: string; calls: Step[] };
 const CALLS: [string, object][] = SCENARIO.calls.map((step) => [step.tool, step.arguments]);
+
+test('the package finds the shared folders from the repository root', () => {
+  assert.equal(REPO_ROOT, path.resolve(import.meta.dirname, '..', '..')); // tests/ -> vercel/ -> the root
+  assert.equal(TOOLS_DIR, path.join(REPO_ROOT, 'tools'));
+  assert.ok(readFileSync(path.join(REPO_ROOT, 'pyproject.toml'), 'utf8').includes('name = "agents"'));
+});
 
 test('local tools run for real and failures reach the model', async () => {
   const agent = buildAgent(scriptedModel(CALLS), localTools);

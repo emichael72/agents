@@ -9,11 +9,16 @@ only defines the tools and renders the stream in the terminal.
 ## Layout
 
 ```
-agent.ts        builds the model + ToolLoopAgent, and a thin terminal UI over its fullStream
-                instructions come from the shared ../context/instructions.json
-tools.ts        loads ../tools/*/tool.json and turns each manifest into an AI SDK tool (zod-validated)
-tests/          offline tests: the SDK's MockLanguageModelV4 replaces LM Studio, tools run for real
+agent.ts                launcher that keeps the command: node vercel/agent.ts
+vercelagent/index.ts    public names: what the launcher and the tests import
+vercelagent/agent.ts    model, ToolLoopAgent and a thin terminal UI over its fullStream; main();
+                        shared ../context instructions
+vercelagent/tools.ts    loads ../tools/*/tool.json as AI SDK tools (zod-validated); REPO_ROOT
+tests/                  offline tests: the SDK's MockLanguageModelV4 replaces LM Studio, tools run for real
 ```
+
+The package finds the repository's shared folders (`context/`, `tools/`) from `REPO_ROOT`, the
+nearest folder above it holding `pyproject.toml`, as the Python agents do.
 
 Node 22.18+ runs the TypeScript files directly (type stripping), so there is no build step.
 
@@ -64,10 +69,10 @@ and failures as `✗ tool: error` instead.
 | MCP client | its own | `MCPToolset` | `@ai-sdk/mcp` `createMCPClient` |
 | Conversation history | list of Responses items | `result.all_messages()` | `response.messages` |
 | Loop cap | `max_tool_calls=8` | `UsageLimits(tool_calls_limit=8)` | `stopWhen: isStepCount(9)` |
-| One tool at a time | always | `parallel_tool_call_execution_mode` | `oneAtATime()` wrapper in `tools.ts` |
+| One tool at a time | always | `parallel_tool_call_execution_mode` | `oneAtATime()` wrapper in `vercelagent/tools.ts` |
 
 The AI SDK starts each tool as soon as its call arrives in the stream and has no sequential mode,
-so `tools.ts` chains `execute` calls through a promise queue unless `--parallel` is given. Node is
+so `vercelagent/tools.ts` chains `execute` calls through a promise queue unless `--parallel` is given. Node is
 single-threaded, but `execFile` is asynchronous, so in parallel mode the scripts still run as
 concurrent child processes while the event loop waits.
 

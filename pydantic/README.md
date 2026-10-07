@@ -64,7 +64,7 @@ shown as `→ tool(args)` and results as `← tool: output` instead.
 | MCP client | its own | `MCPToolset` | `@ai-sdk/mcp` `createMCPClient` |
 | Conversation history | list of Responses items | `result.all_messages()` | `response.messages` |
 | Loop cap | `max_tool_calls=8` | `UsageLimits(tool_calls_limit=8)` | `stopWhen: isStepCount(9)` |
-| One tool at a time | always | `parallel_tool_call_execution_mode` | `oneAtATime()` wrapper in `tools.ts` |
+| One tool at a time | always | `parallel_tool_call_execution_mode` | `oneAtATime()` wrapper in `vercelagent/tools.ts` |
 
 ## Parallel tool calls
 

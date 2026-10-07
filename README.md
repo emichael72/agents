@@ -298,7 +298,7 @@ Response time: 6.3s · tokens: 4,313 in, 53 out · 2 model calls
    the server sent no counts.
 
 Each agent implements this in an `Output` class (`mcp/mcpagent/client/agent.py`, `pydantic/pydantic_agent/agent.py`,
-`vercel/agent.ts`), with tests that check the wrapping and the timing line.
+`vercel/vercelagent/agent.ts`), with tests that check the wrapping and the timing line.
 
 ## MCPAgent
 

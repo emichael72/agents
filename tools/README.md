@@ -7,7 +7,7 @@ added here is available to all of them without code changes:
 - **mcp** — the MCP server reads `tools_dir` from `mcp/mcpagent/jsons/mcpagent.jsonc` and serves every manifest
   over MCP, with each tool's `README.md` as an MCP resource.
 - **pydantic** — `pydantic/pydantic_agent/toolset.py` turns each manifest into a pydantic-ai tool.
-- **vercel** — `vercel/tools.ts` turns each manifest into an AI SDK tool.
+- **vercel** — `vercel/vercelagent/tools.ts` turns each manifest into an AI SDK tool.
 
 | Tool | Runs | Parameters | Result |
 | --- | --- | --- | --- |

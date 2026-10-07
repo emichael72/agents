@@ -93,7 +93,7 @@ explain what happened". The tools are listed in [../tools/README.md](../tools/RE
 | MCP client           | its own                                                                        | `MCPToolset`                                           | `@ai-sdk/mcp` `createMCPClient`                       |
 | Conversation history | list of Responses items                                                        | `result.all_messages()`                                | `response.messages`                                   |
 | Loop cap             | `max_tool_calls=8`                                                             | `UsageLimits(tool_calls_limit=8)`                      | `stopWhen: isStepCount(9)`                            |
-| One tool at a time   | always                                                                         | `parallel_tool_call_execution_mode`                    | `oneAtATime()` wrapper in `tools.ts`                  |
+| One tool at a time   | always                                                                         | `parallel_tool_call_execution_mode`                    | `oneAtATime()` wrapper in `vercelagent/tools.ts`      |
 
 The server also runs one tool at a time: a `tools/call` that arrives while another is running is
 rejected with `Busy: another tool is currently running in this workspace`.

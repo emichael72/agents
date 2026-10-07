@@ -11,7 +11,21 @@ import { promisify } from 'node:util';
 import { tool, type ToolSet } from 'ai';
 import { z } from 'zod';
 
-export const TOOLS_DIR = path.join(import.meta.dirname, '..', 'tools');
+/**
+ * Find the repository root: the nearest folder above `start` that holds pyproject.toml.
+ * @param start The folder to search from.
+ * @returns The root folder.
+ */
+function findRepoRoot(start: string): string {
+  for (let dir = start; ; dir = path.dirname(dir)) {
+    if (existsSync(path.join(dir, 'pyproject.toml'))) return dir;
+    if (path.dirname(dir) === dir) throw new Error(`No pyproject.toml above ${start}; is it inside the agents repository?`);
+  }
+}
+
+/** The repository root, found from this file rather than by counting ../ levels. */
+export const REPO_ROOT = findRepoRoot(import.meta.dirname);
+export const TOOLS_DIR = path.join(REPO_ROOT, 'tools');
 const SCRIPT_TIMEOUT_MS = 30_000;
 const AGENT_NAME = 'Vercel Agent'; // Lets tools such as pr and pr_gate say which agent ran them
 
