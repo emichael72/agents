@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 import {
   ask, buildAgent, identityText, linkSegments, loadInstructions, loadModels, loadOutputSettings, memoryText, Output, resolveModel, worthSaving, wrap,
   loadTools, localTools, REPO_ROOT, runScript, TOOLS_DIR,
@@ -73,7 +74,7 @@ test('each tool call prints next to its result', async () => {
   let printed = '';
   const agent = buildAgent(scriptedModel(CALLS), localTools);
   await ask(agent, SCENARIO.prompt, [], { trace: true, write: (text) => { printed += text; } });
-  const lines = printed.replace(/\x1b\[[0-9;]*m/g, '').split('\n')
+  const lines = stripVTControlCharacters(printed).split('\n')
     .filter((line) => /^[→←✗] /.test(line))
     .map((line) => line.slice(0, 2) + line.slice(2).split(/[(:]/)[0]);
   assert.deepEqual(lines, SCENARIO.calls.flatMap((step) =>
@@ -169,7 +170,7 @@ test('by default only the answer and the timing line print', () => {
   output.line('banner or hint');
   output.finish();
   output.note('History cleared.');
-  assert.deepEqual(printed.replace(/\x1b\[[0-9;]*m/g, '').split('\n'),
+  assert.deepEqual(stripVTControlCharacters(printed).split('\n'),
                    ['', 'Two files.', 'Response time: 0.0s', '', 'History cleared.', '']);
 });
 
@@ -184,7 +185,7 @@ test('text around hidden tool calls has one blank line between', () => {
     if (moreText) output.text('It builds cleanly.');
     output.finish();
     const expected = ['', 'Let me check the build.', ...(moreText ? ['', 'It builds cleanly.'] : [])];
-    assert.deepEqual(printed.replace(/\x1b\[[0-9;]*m/g, '').split('\n'), [...expected, 'Response time: 0.0s', '', '']);
+    assert.deepEqual(stripVTControlCharacters(printed).split('\n'), [...expected, 'Response time: 0.0s', '', '']);
   }
 });
 
@@ -232,7 +233,7 @@ test('lines and the streamed answer wrap to the width, and the response is timed
   const answer = 'The quiz service is running and pull request number one is still waiting for its quiz.';
   for (let i = 0; i < answer.length; i += 7) output.text(answer.slice(i, i + 7));
   output.finish();
-  const plain = printed.replace(/\x1b\[[0-9;]*m/g, '');
+  const plain = stripVTControlCharacters(printed);
   const body = plain.split('\n').filter((line) => line && !line.startsWith('Response time'));
   assert.ok(body.every((line) => line.length <= 30));
   assert.equal(body.join(' '), answer);
@@ -249,7 +250,7 @@ test('token counts follow the response time', () => {
   output.addUsage(1200, 34);
   output.addUsage(1300, 56, 2);
   output.finish();
-  assert.match(printed.replace(/\x1b\[[0-9;]*m/g, ''), /Response time: \d+\.\ds · tokens: 2,500 in, 90 out · 3 model calls\n\n$/);
+  assert.match(stripVTControlCharacters(printed), /Response time: \d+\.\ds · tokens: 2,500 in, 90 out · 3 model calls\n\n$/);
 });
 
 test('links split into shown text and address', () => {

@@ -35,6 +35,9 @@ README. Run every command from the repository root; paths are relative to it.
 
 It also installs the pinned development tools in `requirements-dev.txt`: Ruff, the Python linter.
 `.venv/bin/ruff check` checks the repository for likely bugs, with the rules in `ruff.toml`.
+The Vercel Agent's TypeScript gets the same kind of check from Oxlint, pinned in
+`vercel/package.json` and installed with the agent's packages: `npm --prefix vercel run lint`
+(rules in `vercel/.oxlintrc.json`).
 
 None of `.venv/`, `node_modules/` and `.node/` is committed.
 
@@ -335,6 +338,7 @@ node vercel/agent.ts                                # interactive chat
 node vercel/agent.ts --prompt "Time now" --history  # one prompt + raw message dump
 node vercel/agent.ts --parallel                     # run a response's tool calls concurrently
 npm --prefix vercel test                            # offline tests
+npm --prefix vercel run lint                        # Oxlint: likely bugs
 ```
 
 If `install.sh` fetched Node.js into `.node/`, use it for these commands: `.node/bin/node

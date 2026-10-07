@@ -1,0 +1,8 @@
+// Oxlint (npm run lint) checks the Vercel Agent for likely bugs, not style, as Ruff does for the
+// Python (ruff.toml): only the correctness rules, from ESLint, typescript-eslint, unicorn and oxc.
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["eslint", "typescript", "unicorn", "oxc"],
+  "categories": {"correctness": "error"},
+  "ignorePatterns": ["node_modules"]
+}

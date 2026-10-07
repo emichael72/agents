@@ -41,6 +41,7 @@ node vercel/agent.ts --parallel                     # run a response's tool call
 node vercel/agent.ts --mcp ""                       # same tools from MCPAgent's MCP server (see below)
 npm --prefix vercel test                            # offline tests
 npm --prefix vercel run typecheck                   # tsc --noEmit
+npm --prefix vercel run lint                        # Oxlint: likely bugs, not style (.oxlintrc.json)
 ```
 
 In the chat, `/history` prints the messages exchanged with the model, `/reset` clears them,
