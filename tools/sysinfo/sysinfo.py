@@ -27,7 +27,8 @@ from pathlib import Path
 from typing import Callable, Optional
 
 SAMPLE_SECONDS = 0.5
-REPO_DIR = Path(__file__).resolve().parent.parent.parent
+# The repository root: the nearest folder above holding pyproject.toml
+REPO_DIR = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file())
 REAL_FILESYSTEMS = {"ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "vfat", "exfat", "ntfs", "ntfs3", "f2fs",
                     "nfs", "nfs4", "cifs", "fuseblk"}
 SOFTWARE = [  # (name, command printing its version)

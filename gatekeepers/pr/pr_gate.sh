@@ -17,6 +17,7 @@ SCRIPT_PATH="${BASH_SOURCE[0]:-$0}" # zsh sets $0 to the script outside function
 # Globals and configuration (command-line flags override these)
 # ============================================================================
 
+REPO_ROOT=""    # Set by init_paths: the repository root
 GATE_DIR=""     # Set by init_paths: this script's folder
 PYTHON=""       # Set by init_paths: the shared .venv's interpreter
 SHOW_HELP=false # -h/--help: this script's usage, then pr_gate.py's
@@ -43,6 +44,23 @@ log() {
     *) printf '%s\n' "${message}" ;;
     esac
     return 0
+}
+
+#
+# @brief Print the repository root: the nearest folder above this script holding pyproject.toml.
+# @return 0 on success, 1 if there is no such folder
+#
+find_repo_root() {
+    local dir
+    dir="$(cd "$(dirname "${SCRIPT_PATH}")" && pwd)"
+    while [[ ! -f "${dir}/pyproject.toml" ]]; do
+        if [[ "${dir}" == "/" ]]; then
+            log ERROR "no pyproject.toml above %s (not in the agents repository?)" "${SCRIPT_PATH}"
+            return 1
+        fi
+        dir="$(dirname "${dir}")"
+    done
+    printf '%s\n' "${dir}"
 }
 
 #
@@ -103,8 +121,9 @@ parse_args() {
 # @return 0 on success, 1 if the .venv is missing
 #
 init_paths() {
+    REPO_ROOT="$(find_repo_root)" || return 1
     GATE_DIR="$(cd "$(dirname "${SCRIPT_PATH}")" && pwd)"
-    PYTHON="$(cd "${GATE_DIR}/../.." && pwd)/.venv/bin/python"
+    PYTHON="${REPO_ROOT}/.venv/bin/python"
 
     if [[ ! -x "${PYTHON}" ]]; then
         log ERROR "%s not found; run ./install.sh from the repository root" "${PYTHON}"

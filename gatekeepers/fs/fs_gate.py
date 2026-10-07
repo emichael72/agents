@@ -35,7 +35,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-REPO_DIR = Path(__file__).resolve().parents[2]  # agents; relative allowed folders start here
+# The repository root (the nearest folder above holding pyproject.toml); relative allowed
+# folders start here
+REPO_DIR = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file())
 TOOLS_DIR = REPO_DIR / "tools"
 GATEKEEPERS_DIR = REPO_DIR / "gatekeepers"
 CONTEXT_DIR = REPO_DIR / "context"

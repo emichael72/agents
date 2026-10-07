@@ -29,6 +29,7 @@ from aiohttp.test_utils import TestServer
 from rich.console import Console
 
 from mcpagent import MCPClient, MCPService
+from mcpagent.config import REPO_ROOT
 from mcpagent.client.client import DEFAULT_CONFIG as CLIENT_CONFIG
 from mcpagent.server.service import DEFAULT_CONFIG as SERVER_CONFIG
 from mcpagent.client.agent import (MCPAgent, Output, load_instructions, load_models, load_output_settings,
@@ -36,7 +37,7 @@ from mcpagent.client.agent import (MCPAgent, Output, load_instructions, load_mod
 
 
 # The scripted turn every agent's tests replay
-SCENARIO = json.loads((Path(__file__).resolve().parents[2] / 'tests' / 'scenario.json').read_text())
+SCENARIO = json.loads((REPO_ROOT / 'tests' / 'scenario.json').read_text())
 
 def message(text):
     """
@@ -78,7 +79,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         config = SERVER_CONFIG
         old = Path.cwd()
         try:
-            os.chdir(config.parent)
+            os.chdir(REPO_ROOT)  # As start_mcp_server does: config paths are repository-relative
             self.service = MCPService(json5.loads(config.read_text()))
         finally:
             os.chdir(old)
@@ -301,7 +302,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         Returns:
             dict: The parsed models file.
         """
-        return load_models(self.shipped_config(), CLIENT_CONFIG)
+        return load_models(self.shipped_config())
 
     @staticmethod
     def shipped_config():
@@ -331,15 +332,14 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(resolve_model(config, 'openai')['api_key'], 'test-key-not-real')
 
     async def test_instructions_come_from_the_shared_context_file(self):
-        config_file = CLIENT_CONFIG
-        instructions = load_instructions(self.shipped_config(), config_file)
+        instructions = load_instructions(self.shipped_config())
         self.assertTrue(instructions.startswith('You are an agent'))
         self.assertIn('allowed folder', instructions)
-        self.assertEqual(load_instructions({}, config_file), '')  # no instructions_file configured
-        self.assertIn('Nothing to save', load_instructions(self.shipped_config(), config_file, 'on_exit'))
-        name = load_agent_settings(self.shipped_config(), config_file)['names']['mcpagent']
+        self.assertEqual(load_instructions({}), '')  # no instructions_file configured
+        self.assertIn('Nothing to save', load_instructions(self.shipped_config(), 'on_exit'))
+        name = load_agent_settings(self.shipped_config())['names']['mcpagent']
         self.assertEqual(name, 'mcp')
-        self.assertTrue(identity_text(name, self.shipped_config(), config_file).startswith('Your name is mcp.'))
+        self.assertTrue(identity_text(name, self.shipped_config()).startswith('Your name is mcp.'))
 
     def test_exit_saves_only_after_a_tool_call_or_several_exchanges(self):
         ask, answer = {'role': 'user', 'content': 'hi'}, message('hello')
@@ -358,7 +358,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "missing model"):
             resolve_model({'profiles': {'broken': {'base_url': 'http://x', 'api_key': 'k'}}}, 'broken')
         with self.assertRaisesRegex(ValueError, 'models_file'):
-            load_models({}, CLIENT_CONFIG)
+            load_models({})
 
     async def test_local_profile_sends_its_own_key_to_its_own_server(self):
         seen = []
@@ -384,7 +384,7 @@ class OutputTests(unittest.TestCase):
     """The terminal layout shared by the three agents (README.md, "Terminal output")."""
 
     def test_layout_settings_come_from_the_shared_context_file(self):
-        settings = load_output_settings(json5.loads(CLIENT_CONFIG.read_text()), CLIENT_CONFIG)
+        settings = load_output_settings(json5.loads(CLIENT_CONFIG.read_text()))
         self.assertEqual((settings['width'], settings['show_time']), (120, True))
 
     # The agents keep independent tests for their shared terminal behavior.

@@ -44,12 +44,12 @@ from rich.status import Status
 from rich.style import Style
 from rich.text import Text
 
-from .toolset import toolset as local_toolset
+from .toolset import REPO_ROOT, toolset as local_toolset
 
 MCP_URL = "http://127.0.0.1:6275/"  # MCPAgent's server (python mcp/server.py)
 
 # Instructions (system prompt) and model profiles, shared by all three agents
-CONTEXT_DIR = Path(__file__).resolve().parents[2] / "context"
+CONTEXT_DIR = REPO_ROOT / "context"
 INSTRUCTIONS_FILE = CONTEXT_DIR / "instructions.json"
 MODELS_FILE = CONTEXT_DIR / "models.json"
 OUTPUT_FILE = CONTEXT_DIR / "output.json"  # Terminal layout
@@ -138,7 +138,7 @@ def build_agent(model: Model, mcp_url: str | None = None) -> Agent:
     settings = json.loads(AGENT_FILE.read_text(encoding="utf-8"))
     index = settings.get("memory_index")
     instructions = (identity_text(settings.get("names", {}).get("pydantic")) + load_instructions()
-                    + memory_text(CONTEXT_DIR.parent / index if index else None))
+                    + memory_text(REPO_ROOT / index if index else None))
     return Agent(model, instructions=instructions, toolsets=[toolset])
 
 

@@ -20,7 +20,9 @@ from jsonschema import ValidationError, validate
 from pydantic_ai import ModelRetry, Tool, ToolFailed
 from pydantic_ai.toolsets import FunctionToolset
 
-TOOLS_DIR = Path(__file__).resolve().parents[2] / "tools"
+# The repository root: the nearest folder above holding pyproject.toml
+REPO_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file())
+TOOLS_DIR = REPO_ROOT / "tools"
 SCRIPT_TIMEOUT = 30
 AGENT_NAME = "Pydantic Agent"  # Lets tools such as pr and pr_gate say which agent ran them
 

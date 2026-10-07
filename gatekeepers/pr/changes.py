@@ -36,7 +36,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
-TOOLS_DIR = Path(__file__).resolve().parents[2] / "tools"  # doxy and shell
+REPO_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file())
+TOOLS_DIR = REPO_ROOT / "tools"  # doxy and shell
 DOXY = TOOLS_DIR / "doxy" / "doxy.sh"
 SHELL = TOOLS_DIR / "shell" / "shell.py"
 REPORT_LINES = 60

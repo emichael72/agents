@@ -21,19 +21,19 @@
 	"properties": {
 		"instructions_file": {
 			"type": "string",
-			"description": "JSON file whose \"instructions\" lines form the model's instructions (relative to the config file)."
+			"description": "JSON file whose \"instructions\" lines form the model's instructions (relative to the repository root)."
 		},
 		"models_file": {
 			"type": "string",
-			"description": "JSON file with the model profiles (\"default\" and \"profiles\"), relative to the config file."
+			"description": "JSON file with the model profiles (\"default\" and \"profiles\"), relative to the repository root."
 		},
 		"agent_file": {
 			"type": "string",
-			"description": "JSON file with the agent loop settings (\"max_tool_calls\"), relative to the config file."
+			"description": "JSON file with the agent loop settings (\"max_tool_calls\"), relative to the repository root."
 		},
 		"output_file": {
 			"type": "string",
-			"description": "JSON file with the terminal layout (\"width\", \"show_time\"), relative to the config file."
+			"description": "JSON file with the terminal layout (\"width\", \"show_time\"), relative to the repository root."
 		},
 		"log_level": {
 			"type": "string",

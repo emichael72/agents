@@ -44,7 +44,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 import changes
 
 GATE_DIR = Path(__file__).resolve().parent
-MODELS_FILE = GATE_DIR.parent.parent / "context" / "models.json"
+MODELS_FILE = changes.REPO_ROOT / "context" / "models.json"
 INSTRUCTIONS_FILE = GATE_DIR / "context" / "instructions.json"
 
 SETTINGS_FILE = GATE_DIR / "settings.json"

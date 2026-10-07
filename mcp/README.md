@@ -15,8 +15,8 @@ client.py                            client launcher (python mcp/client.py from 
 server.py                            server launcher (python mcp/server.py from the repository root)
 mcpagent/__init__.py                  the package's public names and __version__
 mcpagent/config.py                    JSON/JSONC loading and optional schema validation
-mcpagent/jsons/client.jsonc           MCP servers and shared settings (../../../context/*.json)
-mcpagent/jsons/server.jsonc           server settings; "tools_dir": "../../../tools"
+mcpagent/jsons/client.jsonc           MCP servers and shared settings (context/*.json)
+mcpagent/jsons/server.jsonc           server settings; "tools_dir": "tools"
 mcpagent/jsons/schemas/client.schema  JSON schema for client.jsonc
 mcpagent/client/__main__.py           client module entry point (python -m mcpagent.client)
 mcpagent/client/agent.py              OpenAI Responses tool calling over MCP tools

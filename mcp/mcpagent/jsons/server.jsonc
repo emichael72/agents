@@ -13,8 +13,8 @@
   "show_usage_examples": false,
   "patch_vscode_config": false,
 
-  // Tool manifests and working directories, relative to this file.
-  "tools_dir": "../../../tools",
+  // Tool manifests and working directories, relative to the repository root.
+  "tools_dir": "tools",
   "tools_prefix": null,
 
   // Identify this agent to the shared tools.

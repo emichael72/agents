@@ -37,17 +37,17 @@ from rich.status import Status
 from rich.style import Style
 from rich.text import Text
 
+from mcpagent.config import repo_path
 from .client import MCPClient
 
 OPENAI_HOST = "api.openai.com"  # Only used to decide whether OpenAI-specific error hints apply
 
 
-def load_instructions(config_data: dict[str, Any], config_file: str | Path, key: str = "instructions") -> str:
+def load_instructions(config_data: dict[str, Any], key: str = "instructions") -> str:
     """
     Read the model's instructions from the file the client config names.
     Args:
-        config_data: The parsed client config.
-        config_file: The config's path; "instructions_file" is relative to its folder.
+        config_data: The parsed client config; "instructions_file" is relative to the repository.
         key: Which lines to read: "instructions", or "on_exit" (the prompt sent before exit).
     Returns:
         str: The lines joined with newlines, or "" if none are configured.
@@ -55,16 +55,15 @@ def load_instructions(config_data: dict[str, Any], config_file: str | Path, key:
     instructions_file: Optional[str] = config_data.get("instructions_file")
     if not instructions_file:
         return ""
-    path = Path(config_file).resolve().parent / instructions_file
+    path = repo_path(instructions_file)
     return "\n".join(json.loads(path.read_text(encoding="utf-8")).get(key, []))
 
 
-def load_models(config_data: dict[str, Any], config_file: str | Path) -> dict:
+def load_models(config_data: dict[str, Any]) -> dict:
     """
     Read the model profiles from the file the client config names.
     Args:
-        config_data: The parsed client config.
-        config_file: The config's path; "models_file" is relative to its folder.
+        config_data: The parsed client config; "models_file" is relative to the repository.
     Returns:
         dict: The file's contents: "default" (a profile name) and "profiles" (by name).
     Raises:
@@ -72,8 +71,8 @@ def load_models(config_data: dict[str, Any], config_file: str | Path) -> dict:
     """
     models_file: Optional[str] = config_data.get("models_file")
     if not models_file:
-        raise ValueError('The client config has no "models_file"; point it at ../context/models.json.')
-    path = Path(config_file).resolve().parent / models_file
+        raise ValueError('The client config has no "models_file"; point it at context/models.json.')
+    path = repo_path(models_file)
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -470,19 +469,18 @@ def readable(output: str) -> str:
     return output
 
 
-def load_output_settings(config_data: dict[str, Any], config_file: str | Path) -> dict:
+def load_output_settings(config_data: dict[str, Any]) -> dict:
     """
     Read the terminal layout settings from the file the client config names.
     Args:
-        config_data: The parsed client config.
-        config_file: The config's path; "output_file" is relative to its folder.
+        config_data: The parsed client config; "output_file" is relative to the repository.
     Returns:
         dict: "width" (wrap column) and "show_time", or {} (the defaults) if none is configured.
     """
     output_file: Optional[str] = config_data.get("output_file")
     if not output_file:
         return {}
-    path = Path(config_file).resolve().parent / output_file
+    path = repo_path(output_file)
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -507,17 +505,16 @@ def memory_text(index: Optional[Path]) -> str:
             "and save new facts with it):\n" + "\n".join(lines))
 
 
-def identity_text(name: Optional[str], config_data: dict[str, Any], config_file: str | Path) -> str:
+def identity_text(name: Optional[str], config_data: dict[str, Any]) -> str:
     """
     The identity lines that open the instructions, naming the agent.
     Args:
         name: The agent's name (context/agent.json's names); None when not configured.
         config_data: The parsed client config.
-        config_file: The config's path.
     Returns:
         str: The lines with {name} filled in, and a blank line after them; "" without a name.
     """
-    text = load_instructions(config_data, config_file, "identity")
+    text = load_instructions(config_data, "identity")
     return text.replace("{name}", name) + "\n\n" if name and text else ""
 
 
@@ -534,19 +531,18 @@ def worth_saving(history: list) -> bool:
     return calls > 0 or prompts > 1
 
 
-def load_agent_settings(config_data: dict[str, Any], config_file: str | Path) -> dict:
+def load_agent_settings(config_data: dict[str, Any]) -> dict:
     """
     Read the agent loop settings from the file the client config names.
     Args:
-        config_data: The parsed client config.
-        config_file: The config's path; "agent_file" is relative to its folder.
+        config_data: The parsed client config; "agent_file" is relative to the repository.
     Returns:
         dict: "max_tool_calls", or {} (the defaults) if none is configured.
     """
     agent_file: Optional[str] = config_data.get("agent_file")
     if not agent_file:
         return {}
-    path = Path(config_file).resolve().parent / agent_file
+    path = repo_path(agent_file)
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -873,19 +869,17 @@ async def run_agent(config_file: str | Path, profile=None, model=None, base_url=
 
     try:
         mcp_client = MCPClient(config_file)
-        output = Output(console, load_output_settings(mcp_client.config_data, config_file), debug=trace)
-        models = load_models(mcp_client.config_data, config_file)
+        output = Output(console, load_output_settings(mcp_client.config_data), debug=trace)
+        models = load_models(mcp_client.config_data)
         settings = resolve_model(models, profile=profile, model=model, base_url=base_url)
-        agent_settings = load_agent_settings(mcp_client.config_data, config_file)
-        agent_file: Optional[str] = mcp_client.config_data.get("agent_file")
-        index: Optional[str] = agent_settings.get("memory_index")  # Relative to the repository, two levels above agent.json
-        memory = memory_text((Path(config_file).resolve().parent / agent_file).resolve().parent.parent / index
-                             if agent_file and index else None)
+        agent_settings = load_agent_settings(mcp_client.config_data)
+        index: Optional[str] = agent_settings.get("memory_index")  # Relative to the repository
+        memory = memory_text(repo_path(index) if index else None)
         active_agent = MCPAgent(mcp_client, base_url=settings["base_url"], model=settings["model"],
                          api_key=settings["api_key"], provider=settings["name"], timeout=settings["timeout"],
                          instructions=identity_text(agent_settings.get("names", {}).get("mcpagent"),
-                                                    mcp_client.config_data, config_file)
-                         + load_instructions(mcp_client.config_data, config_file) + memory,
+                                                    mcp_client.config_data)
+                         + load_instructions(mcp_client.config_data) + memory,
                          context=context, trace=output.line,  # Printed in debug mode, else on the spinner
                          max_tool_calls=int(agent_settings.get("max_tool_calls", 8)))
         agent = active_agent  # Retain it for cleanup even if connecting fails.
@@ -897,7 +891,7 @@ async def run_agent(config_file: str | Path, profile=None, model=None, base_url=
             await display_answer(active_agent, prompt)
             return 0
         output.line("Ask me to use a tool. /history shows messages, /reset clears them, exit quits.")
-        on_exit = load_instructions(mcp_client.config_data, config_file, "on_exit")
+        on_exit = load_instructions(mcp_client.config_data, "on_exit")
         session = PromptSession()
         while True:
             try:

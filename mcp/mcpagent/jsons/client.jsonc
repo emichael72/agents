@@ -4,18 +4,20 @@
   "log_level": "ERROR",
   "debug_json_box": false,
 
-  // Instructions (system prompt) for the model, shared by all three agents. Relative to this file.
-  "instructions_file": "../../../context/instructions.json",
+  // Paths below are relative to the repository root.
 
-  // Model profiles, shared by all three agents. Relative to this file.
+  // Instructions (system prompt) for the model, shared by all three agents.
+  "instructions_file": "context/instructions.json",
+
+  // Model profiles, shared by all three agents.
   // Use --profile, --local or --openai to pick one; otherwise the file's "default" is used.
-  "models_file": "../../../context/models.json",
+  "models_file": "context/models.json",
 
-  // Terminal layout (wrap width, response time), shared by all three agents. Relative to this file.
-  "output_file": "../../../context/output.json",
+  // Terminal layout (wrap width, response time), shared by all three agents.
+  "output_file": "context/output.json",
 
-  // Agent loop settings (max_tool_calls), shared by all three agents. Relative to this file.
-  "agent_file": "../../../context/agent.json",
+  // Agent loop settings (max_tool_calls), shared by all three agents.
+  "agent_file": "context/agent.json",
 
   "servers": [{
     "server_id": "tools",

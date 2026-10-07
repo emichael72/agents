@@ -23,7 +23,7 @@ from unittest.mock import patch
 import json5
 from aiohttp.test_utils import TestClient, TestServer
 from mcpagent import MCPClient, MCPService
-from mcpagent.config import JSONS_DIR, SCHEMA_DIR, load_config
+from mcpagent.config import JSONS_DIR, REPO_ROOT, SCHEMA_DIR, load_config, repo_path
 from mcpagent.client.client import DEFAULT_CONFIG as CLIENT_CONFIG
 from mcpagent.server.__main__ import start_mcp_server
 from mcpagent.server.service import DEFAULT_CONFIG as SERVER_CONFIG
@@ -36,7 +36,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         config = SERVER_CONFIG
         old = Path.cwd()
         try:
-            os.chdir(config.parent)
+            os.chdir(REPO_ROOT)  # As start_mcp_server does: config paths are repository-relative
             self.service = MCPService(json5.loads(config.read_text()))
         finally:
             os.chdir(old)
@@ -66,7 +66,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         init = await self.rpc('initialize', {'protocolVersion': 'future'})
         self.assertEqual(init['result']['protocolVersion'], '2025-06-18')
         tools = await self.rpc('tools/list')
-        shared_tools = Path(__file__).resolve().parents[2] / 'tools'  # agents/tools
+        shared_tools = REPO_ROOT / 'tools'  # agents/tools
         self.assertEqual(len(tools['result']['tools']), len(list(shared_tools.glob('*/tool.json'))))
         for name, args, expected in [
             ('sysinfo', {'section': 'software'}, 'python (running this tool)'),
@@ -116,7 +116,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                                ('ed', {'path': path + '/passwd', 'action': 'write', 'new': 'x'})]:
                 result = (await self.rpc('tools/call', {'name': name, 'arguments': args}))['result']
                 self.assertTrue(result['isError'], (name, path))
-        link = Path(__file__).resolve().parents[2] / 'tools' / 'time' / 'escape-test-link'
+        link = REPO_ROOT / 'tools' / 'time' / 'escape-test-link'
         link.symlink_to('/etc')
         try:
             result = (await self.rpc('tools/call', {'name': 'shell', 'arguments': {
@@ -129,7 +129,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
     @unittest.skipUnless(shutil.which('bwrap'), 'bubblewrap is not installed')
     async def test_shell_runs_allowed_commands_in_the_sandbox(self):
         source = '#include <stdio.h>\nint main(void) { int unused; printf("hi\\n"); return 0; }\n'
-        tools = str(Path(__file__).resolve().parents[2] / 'tools')
+        tools = str(REPO_ROOT / 'tools')
         with tempfile.TemporaryDirectory() as folder:
             (Path(folder) / 'rw').mkdir()
             (Path(folder) / 'rw' / 'hello.c').write_text(source)
@@ -296,7 +296,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             (Path(folder) / '.git').mkdir()
             allowed = Path(folder) / 'paths.json'
             allowed.write_text(json.dumps({'paths': {'sample': {'path': folder, 'access': 'rw'},
-                                                    'tools': str(Path(__file__).resolve().parents[2] / 'tools')}}))
+                                                    'tools': str(REPO_ROOT / 'tools')}}))
 
             async def ed(arguments):
                 with patch.dict(os.environ, {'FS_GATE_PATHS': str(allowed)}):
@@ -410,9 +410,15 @@ class ConfigLoadingTests(unittest.TestCase):
             client_config = load_config(CLIENT_CONFIG)
             server_config = load_config(SERVER_CONFIG)
         for key in ('instructions_file', 'models_file', 'output_file', 'agent_file'):
-            self.assertTrue((CLIENT_CONFIG.parent / client_config[key]).is_file())
-        tools_dir = (SERVER_CONFIG.parent / server_config['tools_dir']).resolve()
-        self.assertEqual(tools_dir, Path(__file__).resolve().parents[2] / 'tools')
+            self.assertTrue(repo_path(client_config[key]).is_file())
+        self.assertEqual(repo_path(server_config['tools_dir']), REPO_ROOT / 'tools')
+
+    def test_paths_resolve_from_the_repository_root(self):
+        self.assertTrue((REPO_ROOT / 'pyproject.toml').is_file())
+        self.assertTrue((REPO_ROOT / 'context').is_dir())
+        self.assertEqual(repo_path('context/models.json'), REPO_ROOT / 'context' / 'models.json')
+        self.assertEqual(repo_path('/abs/file.json'), Path('/abs/file.json'))
+        self.assertEqual(repo_path('~/file.json'), Path.home() / 'file.json')
 
     def test_same_name_schema_validates_json_and_jsonc(self):
         (self.schema_dir / 'custom.schema').write_text(json.dumps({

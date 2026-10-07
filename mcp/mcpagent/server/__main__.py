@@ -20,7 +20,7 @@ from colorama import Fore, Style, init
 
 # Local imports
 from mcpagent import MCPService, __version__
-from mcpagent.config import load_config
+from mcpagent.config import REPO_ROOT, load_config
 from .service import DEFAULT_CONFIG
 
 
@@ -112,8 +112,8 @@ def start_mcp_server(config_path: Optional[Union[str, Path]] = None) -> int:
 
     old_cwd = Path.cwd()
     try:
-        # Switch to the directory containing the project file
-        os.chdir(json_path.parent)
+        # Paths in the config (tools_dir) are relative to the repository root
+        os.chdir(REPO_ROOT)
         project_data = load_config(json_path)
 
         # Instantiate and start the service

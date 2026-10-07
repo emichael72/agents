@@ -21,10 +21,11 @@ SCRIPT_PATH="${BASH_SOURCE[0]:-$0}" # zsh sets $0 to the script outside function
 
 MAX_LINES=100                      # Most report lines shown after the summary line
 EXTENSIONS="c|h|cc|cpp|hpp|cxx|hh" # File extensions checked, as an extended regex alternation
+REPO_ROOT=""                       # Set by init_paths: the repository root
 TOOL_DIR=""                        # Set by init_paths: this script's folder
 CONFIG=""                          # Set by init_paths: the Doxygen settings, Doxyfile.check
-FS_GATE=""                         # Set by init_paths: the file-system gate, gatekeepers/fs/fs_gate.py
-WORK_DIR=""                        # Set by main: temporary folder for Doxygen's output, removed on exit
+FS_GATE=""                         # Set by init_paths: gatekeepers/fs/fs_gate.py
+WORK_DIR=""                        # Set by main: Doxygen's temporary output, removed on exit
 INPUT_PATHS=()                     # The paths to check, as given
 FILE_LIST=()                       # Every C/C++ file found under them
 RESOLVED=()                        # Each given path, resolved to an absolute path
@@ -52,6 +53,23 @@ log() {
     *) printf '%s\n' "${message}" ;;
     esac
     return 0
+}
+
+#
+# @brief Print the repository root: the nearest folder above this script holding pyproject.toml.
+# @return 0 on success, 1 if there is no such folder
+#
+find_repo_root() {
+    local dir
+    dir="$(cd "$(dirname "${SCRIPT_PATH}")" && pwd)"
+    while [[ ! -f "${dir}/pyproject.toml" ]]; do
+        if [[ "${dir}" == "/" ]]; then
+            log ERROR "no pyproject.toml above %s (not in the agents repository?)" "${SCRIPT_PATH}"
+            return 1
+        fi
+        dir="$(dirname "${dir}")"
+    done
+    printf '%s\n' "${dir}"
 }
 
 #
@@ -165,9 +183,10 @@ verify_dependencies() {
 # @return 0 on success, 1 if one is missing
 #
 init_paths() {
+    REPO_ROOT="$(find_repo_root)" || return 1
     TOOL_DIR="$(cd "$(dirname "${SCRIPT_PATH}")" && pwd)"
     CONFIG="${TOOL_DIR}/Doxyfile.check"
-    FS_GATE="$(dirname "$(dirname "${TOOL_DIR}")")/gatekeepers/fs/fs_gate.py"
+    FS_GATE="${REPO_ROOT}/gatekeepers/fs/fs_gate.py"
 
     if [[ ! -f "${CONFIG}" ]]; then
         log ERROR "%s not found" "${CONFIG}"

@@ -6,6 +6,7 @@ Description:
     Configs live in jsons; optional schemas live in jsons/schemas.
     A config uses the schema with the same filename stem: client.jsonc uses client.schema.
     Without a matching schema, the config loads without schema validation.
+    Paths named in a config are relative to the repository root (REPO_ROOT), not to the config.
 """
 
 from pathlib import Path
@@ -17,6 +18,20 @@ from jsonschema import ValidationError, validate
 # Configs and schemas share a location for both the client and server.
 JSONS_DIR = Path(__file__).resolve().parent / "jsons"
 SCHEMA_DIR = JSONS_DIR / "schemas"
+
+# The repository root: the nearest folder above this file holding pyproject.toml
+REPO_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file())
+
+
+def repo_path(value: str | Path) -> Path:
+    """
+    Resolve a path named in a config.
+    Args:
+        value: An absolute path, a path starting with ~, or a path relative to the repository root.
+    Returns:
+        Path: The path, with relative ones joined to REPO_ROOT.
+    """
+    return REPO_ROOT / Path(value).expanduser()
 
 
 def load_config(config_file: str | Path) -> dict[str, Any]:

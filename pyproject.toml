@@ -1,0 +1,12 @@
+# The agents repository: MCPAgent, the Pydantic Agent and the Vercel Agent, with their shared
+# tools, context and gatekeepers.
+#
+# This file also marks the repository root. Code that needs a shared folder (context/, tools/,
+# gatekeepers/) walks up from its own location to the nearest folder holding this file, instead
+# of counting ../ levels, so moving a file does not break its paths.
+
+[project]
+name = "agents"
+version = "1.0.0"
+description = "Three agents built three ways, sharing one set of tools, context and gatekeepers"
+requires-python = ">=3.10"

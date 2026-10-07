@@ -620,7 +620,7 @@ class MCPService:
         Load tool entries from <tools_dir>/<tool>/tool.json manifests.
         Manifest paths are relative to tools_dir, which is also each tool's working directory.
         Args:
-            tools_dir (str): Tools folder, relative to the project configuration directory.
+            tools_dir (str): Tools folder, relative to the repository root (the working directory).
             tools_env (dict[str, str]): Environment variables added to every discovered tool.
         Returns:
             dict[str, dict[str, Any]]: Tool entries keyed by tool (folder) name.

@@ -32,7 +32,7 @@ from pydantic_agent import toolset as tools_module
 from pydantic_agent import build_agent
 
 # The scripted turn every agent's tests replay (tests/scenario.json)
-SCENARIO = json.loads((Path(__file__).resolve().parents[2] / "tests" / "scenario.json").read_text())
+SCENARIO = json.loads((tools_module.REPO_ROOT / "tests" / "scenario.json").read_text())
 CALLS = [(step["tool"], step["arguments"]) for step in SCENARIO["calls"]]
 
 

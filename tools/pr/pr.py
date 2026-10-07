@@ -33,8 +33,10 @@ import time
 from pathlib import Path
 from typing import Optional
 
-# Import the shared filesystem gate from the repository root.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+# Import the shared filesystem gate from the repository root (the nearest folder above
+# holding pyproject.toml).
+sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents
+                            if (p / "pyproject.toml").is_file())))
 from gatekeepers.fs import fs_gate
 
 OPTIONS = ("action", "title", "body", "branch")
