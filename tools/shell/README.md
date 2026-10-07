@@ -60,6 +60,11 @@ what is offered:
   (and the sandbox has no network to push or pull anyway).
 - Commands marked `"needs": "x"` (`make`, which runs the Makefile) need execute access where they
   run, and may not use `-C` or `-f` to point elsewhere.
+- **Build flags before `make` only:** `CPPFLAGS`, `CFLAGS`, `CXXFLAGS`, `LDFLAGS` and `LDLIBS` may
+  be set in front of `make`, e.g. `CPPFLAGS='-DTRACE=1' CFLAGS='-Wno-unused-parameter' make`. Set
+  in the environment, they add to the Makefile's own `CFLAGS += ...`, which `make CFLAGS=...`
+  would replace. No other variable may be set, and none in front of another command, so a line
+  cannot change `PATH` or preload a library.
 
 The check is stricter than bash, never looser: it may refuse an unusual line, but it never passes
 a line in which bash would find a command it did not see. Some allowed commands can still start

@@ -64,7 +64,7 @@
     "jq": "query and reformat JSON",
     "ln": "create links (ln -s target name)",
     "ls": "list folder contents",
-    "make": {"about": "build with the folder's Makefile", "needs": "x"},
+    "make": {"about": "build with the folder's Makefile; to add flags and keep the Makefile's, set them before it: CPPFLAGS='-DNAME=1' CFLAGS='-Wno-unused-parameter' make (make CFLAGS=... replaces the Makefile's flags)", "needs": "x"},
     "md5sum": "MD5 checksum",
     "mkdir": "create folders",
     "mktemp": "create a temporary file or folder (mktemp -d)",

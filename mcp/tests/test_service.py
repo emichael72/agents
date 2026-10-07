@@ -126,7 +126,8 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as folder:
             (Path(folder) / 'rw').mkdir()
             (Path(folder) / 'rw' / 'hello.c').write_text(source)
-            (Path(folder) / 'rw' / 'Makefile').write_text('hello: hello.c\n\tcc -Wall -o hello hello.c\n')
+            (Path(folder) / 'rw' / 'Makefile').write_text(
+                'CFLAGS += -Wall\nhello: hello.c\n\tcc $(CPPFLAGS) $(CFLAGS) -o hello hello.c\n')
             (Path(folder) / 'rw' / 'locked').mkdir()
             (Path(folder) / 'ro').mkdir()
             (Path(folder) / 'ro' / 'Makefile').write_text('all:\n\ttrue\n')
@@ -161,10 +162,16 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(error, text)
             self.assertIn('hi', text)
             self.assertIn('hello.c:2:', text.replace('proj/', ''))  # gcc's warning, paths as the model sees them
+            # Build flags set before make add to the Makefile's own (make CFLAGS=... would replace them)
+            error, text = await shell('proj', "CPPFLAGS=-DGREETING=1 CFLAGS='-Wno-unused-variable -O0' make -B -n")
+            self.assertFalse(error, text)
+            self.assertIn('cc -DGREETING=1 -Wno-unused-variable -O0 -Wall -o hello hello.c', text)
             # Refused by the check
             for cwd, command in (('proj', 'python3 -c 1'), ('proj', 'ls > x'), ('proj', 'ls $(echo /)'),
                                  ('proj', 'echo a#b; python3'), ('proj', 'cd .. && ls'), ('proj', 'make -C /work/docs'),
-                                 ('docs', 'make'), ('docs', './x'), ('proj', 'ls\npython3')):
+                                 ('docs', 'make'), ('docs', './x'), ('proj', 'ls\npython3'), ('proj', 'PATH=/tmp make'),
+                                 ('proj', 'CFLAGS=-g ls'), ('proj', 'LD_PRELOAD=x.so make'), ('proj', '"CFLAGS=/x" make'),
+                                 ('proj', 'CFLAGS\\=/x make'), ('docs', 'CFLAGS=-g make')):
                 self.assertTrue((await shell(cwd, command))[0], command)
             with patch.dict(os.environ, {'FS_GATE_PATHS': str(allowed)}):  # No cwd: the first allowed folder
                 result = (await self.rpc('tools/call', {'name': 'shell', 'arguments': {'command': 'pwd'}}))['result']

@@ -66,6 +66,11 @@ class Shell:
                      "rev-parse", "restore"}
     GIT_LIST_ONLY = {"branch": {"-a", "-r", "-v", "-vv", "--all", "--remotes", "--list", "-l", "--show-current"},
                      "tag": {"-l", "--list", "-n"}}
+    # The only variables a command line may set, and only for make (CFLAGS='-DX' make): set in the
+    # environment, the Makefile's own "CFLAGS += ..." still applies, as it does not to make CFLAGS=...
+    BUILD_VARIABLES = ("CPPFLAGS", "CFLAGS", "CXXFLAGS", "LDFLAGS", "LDLIBS")
+    ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=")
+    OPERATOR_CHARACTERS = "();<>|&"  # shlex's punctuation_chars
     # Harmless habits: errors already appear in the output, so these are dropped before the check
     STDERR_HABITS = re.compile(r"(?<!\S)2>(&1|/dev/null)(?!\S)")
     TIMEOUT = 25
@@ -147,9 +152,21 @@ class Shell:
 
         commands = self.commands
         current = cwd
-        for words in segments:
+        for segment_index, words in enumerate(segments):
             if not words:
                 raise ValueError("Empty command between separators.")
+            assigned = []
+            while words and self.ASSIGNMENT.match(words[0]):
+                assigned.append(self.ASSIGNMENT.match(words[0]).group(1))
+                words = words[1:]
+            if assigned and not self.bare_assignments(command, len(assigned), segment_index):
+                raise ValueError("Write a variable before make as NAME=value, with no quotes or backslashes in "
+                                 "NAME= (CFLAGS='-DDEBUG -O0' make).")
+            if assigned:
+                refused = [v for v in assigned if v not in self.BUILD_VARIABLES]
+                if refused or not words or words[0] != "make":
+                    raise ValueError(f"Only {', '.join(self.BUILD_VARIABLES)} may be set before a command, and only "
+                                     f"before make (CFLAGS='-DDEBUG' make), not {' '.join(refused or assigned)}.")
             name = words[0]
             if "/" in name:  # A program in an allowed folder: needs execute access there
                 program = self.to_host(name, current)
@@ -187,6 +204,70 @@ class Shell:
                 if name == "make" and any(w in ("-C", "-f", "--directory", "--file", "--makefile") or w.startswith(
                         ("-C", "-f", "--directory=", "--file=", "--makefile=")) for w in words[1:]):
                     raise ValueError(f"{name}: run it where its files are (cd there) instead of using -C or -f.")
+
+    @classmethod
+    def raw_words(cls, command: str) -> list[str]:
+        """
+        Split a command line into words as written, quotes and backslashes kept: unquoted whitespace
+        ends a word, and a run of unquoted operator characters ( ) ; < > | & is a word of its own,
+        as shlex with punctuation_chars splits it.
+        Args:
+            command: The command line.
+        Returns:
+            list[str]: The words.
+        """
+        words: list[str] = []
+        word, quote, i = "", "", 0
+        while i < len(command):
+            c = command[i]
+            if quote:
+                word += c
+                if c == "\\" and quote == '"' and i + 1 < len(command):
+                    word, i = word + command[i + 1], i + 1
+                elif c == quote:
+                    quote = ""
+            elif c == "\\" and i + 1 < len(command):
+                word, i = word + c + command[i + 1], i + 1
+            elif c in "'\"":
+                word, quote = word + c, c
+            elif c.isspace() or c in cls.OPERATOR_CHARACTERS:
+                if word:
+                    words.append(word)
+                word = ""
+                if not c.isspace():
+                    run = c
+                    while i + 1 < len(command) and command[i + 1] in cls.OPERATOR_CHARACTERS:
+                        run, i = run + command[i + 1], i + 1
+                    words.append(run)
+            else:
+                word += c
+            i += 1
+        if word:
+            words.append(word)
+        return words
+
+    @classmethod
+    def bare_assignments(cls, command: str, count: int, segment_index: int) -> bool:
+        """
+        Whether a command's first `count` words are assignments as bash sees them: NAME= written
+        bare. A quoted or escaped word such as "CFLAGS=/x" reads as an assignment once its quotes
+        are removed, but bash runs it as a command.
+        Args:
+            command: The whole command line.
+            count: How many leading assignments the check found in the command.
+            segment_index: Which command of the line (0 for the first, after the separators).
+        Returns:
+            bool: True when the written words agree.
+        """
+        segments: list[list[str]] = [[]]
+        for word in cls.raw_words(command):
+            if word in cls.SEPARATORS:
+                segments.append([])
+            else:
+                segments[-1].append(word)
+        if segment_index >= len(segments) or len(segments[segment_index]) < count:
+            return False
+        return all(cls.ASSIGNMENT.match(word) for word in segments[segment_index][:count])
 
     @staticmethod
     def identity_files(folder: Path) -> Path:

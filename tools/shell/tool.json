@@ -7,6 +7,8 @@
     "run the command help to list them all and see the folders and their access.",
     "Join commands with |, &&, || or ;.",
     "No redirection (> <), $(...), or network.",
+    "To add compiler flags and keep the Makefile's own, set them before make:",
+    "CPPFLAGS='-DNAME=1' CFLAGS='-Wno-unused-parameter' make (make CFLAGS=... would replace them).",
     "Use ed to edit files."
   ],
   "command": "python3",
