@@ -169,6 +169,9 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                                  ('proj', 'echo a#b; python3'), ('proj', 'cd .. && ls'), ('proj', 'make -C /work/docs'),
                                  ('docs', 'make'), ('docs', './x'), ('proj', 'ls\npython3')):
                 self.assertTrue((await shell(cwd, command))[0], command)
+            with patch.dict(os.environ, {'FS_GATE_PATHS': str(allowed)}):  # No cwd: the first allowed folder
+                result = (await self.rpc('tools/call', {'name': 'shell', 'arguments': {'command': 'pwd'}}))['result']
+            self.assertEqual(json.loads(result['content'][0]['text'])['logs'], ['proj'])
             # The sandbox knows only this user (a minimal /etc/passwd), and offers tar and shellcheck
             error, text = await shell('proj', 'whoami && cat /etc/passwd | wc -l && tar -czf /tmp/a.tgz hello.c && tar -tzf /tmp/a.tgz')
             self.assertFalse(error, text)

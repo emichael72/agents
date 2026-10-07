@@ -13,7 +13,9 @@ python3 shell/shell.py --cwd core_dump --command "git log --oneline -5"
 python3 shell/shell.py --cwd core_dump --command help        # the folders, their access and the commands
 ```
 
-Inside, the allowed folders appear as `/work/<name>`, and the command starts in `cwd`. The agents'
+Inside, the allowed folders appear as `/work/<name>`, and the command starts in `cwd`, or in the
+first folder of `context/paths.json` when `cwd` is omitted (for commands such as `whoami` or `bc`
+that do not depend on a folder). The agents'
 C/C++ style, [`context/clang-format.yaml`](../../context/clang-format.yaml), is mounted at
 `/work/.clang-format`, so `clang-format` uses it for every project that has no `.clang-format` of
 its own; likewise [`context/clang-tidy.yaml`](../../context/clang-tidy.yaml) at `/work/.clang-tidy`

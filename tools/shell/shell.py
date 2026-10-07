@@ -251,7 +251,8 @@ def run(cwd: str, command: str) -> tuple[bool, str]:
     """
     Check and run a command line in the sandbox.
     Args:
-        cwd: <allowed name>/<folder> to start in.
+        cwd: <allowed name>/<folder> to start in; "" for the first allowed folder (context/paths.json),
+            for commands that do not depend on a folder (whoami, date, bc).
         command: The command line.
     Returns:
         tuple[bool, str]: Whether it exited with status 0, and its output.
@@ -262,6 +263,8 @@ def run(cwd: str, command: str) -> tuple[bool, str]:
     commands = {name: entry for name, entry in load_commands().items() if not own_tool(name)}
     if command.strip() in ("", "help"):
         return True, help_text(allowed, commands)
+    if not cwd.strip():
+        cwd = next(iter(allowed))  # The first allowed folder
     folder, shown = fs_gate.resolve(cwd, "dir", "r", allowed)
     command = STDERR_HABITS.sub("", command)
     check(command, folder, commands, allowed)

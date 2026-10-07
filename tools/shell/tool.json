@@ -3,7 +3,7 @@
   "command": "python3",
   "args": ["shell/shell.py"],
   "params": [
-    {"name": "cwd", "type": "string", "description": "Folder to run in, starting with an allowed folder name, e.g. core_dump or core_dump/src", "style": "flag"},
+    {"name": "cwd", "type": "string", "description": "Folder to run in, starting with an allowed folder name, e.g. core_dump or core_dump/src; omit it when the command does not depend on a folder (whoami, date, uname, bc)", "style": "flag", "required": false},
     {"name": "command", "type": "string", "description": "The command line, e.g. ls -la, cat -n src/main.c, git log --oneline -5; help lists the commands", "style": "flag"}
   ],
   "resource": "shell/README.md"
