@@ -104,6 +104,7 @@
     "uptime": "time since boot and load",
     "wc": "count lines, words and bytes",
     "whoami": "print the user name",
+    "xxd": "dump a file in hex, e.g. xxd -s 64 -l 32 file (-r turns a dump back into bytes)",
     "xz": "compress files (.xz)",
     "zcat": "print a .gz file",
     "zip": "create .zip archives"
