@@ -7,3 +7,9 @@ extend-exclude = ["vercel/node_modules"]
 
 [lint]
 select = ["F", "E4", "E7", "E9", "B", "PLE", "EXE", "RUF059", "PLR1704"]
+
+# The tools run under the system's python3 (3.9 on RHEL 9), outside the .venv
+[per-file-target-version]
+"tools/**/*.py" = "py39"
+"gatekeepers/__init__.py" = "py39"
+"gatekeepers/fs/*.py" = "py39"

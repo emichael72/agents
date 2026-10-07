@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Module: pr.py
 
@@ -40,253 +39,300 @@ sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents
 from gatekeepers import CONTEXT_DIR
 from gatekeepers.fs.fs_gate import FsGate
 
-OPTIONS = ("action", "title", "body", "branch")
-CLANG_FORMAT = CONTEXT_DIR / "clang-format.yaml"  # The default style
-FORMATTED = {".c", ".h", ".cc", ".cpp", ".hpp", ".cxx", ".hh"}
-WAIT_CHECK = os.environ.get("PR_WAIT_CHECK", "")  # The status check to wait for; "" waits for none
-WAIT_SECONDS = float(os.environ.get("PR_WAIT_SECONDS") or 0)
-POLL_SECONDS = 3
-BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,80}$")
-TIMEOUT = 60
-# Hooks off: nothing in the repository runs while committing
-GIT = ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]
 
-
-def git(repo: Path, *args: str, check: bool = True) -> str:
+class PullRequests:
     """
-    Run git in a repository.
-    Args:
-        repo: The repository.
-        *args: git's arguments.
-        check: Raise if git fails.
-    Returns:
-        str: Its output, stripped.
-    Raises:
-        ValueError: If git fails and check is set.
+    Opens pull requests from, and syncs, the repositories in the allowed folders.
     """
-    result = subprocess.run([*GIT, "-C", str(repo), *args], capture_output=True, text=True, timeout=TIMEOUT)
-    if check and result.returncode != 0:
-        raise ValueError(f"git {args[0]} failed: {(result.stderr or result.stdout).strip()[:500]}")
-    return result.stdout.strip()
+
+    VERSION = "1.0.0"
+    OPTIONS = ("action", "title", "body", "branch")
+    CLANG_FORMAT = CONTEXT_DIR / "clang-format.yaml"  # The default style
+    FORMATTED = {".c", ".h", ".cc", ".cpp", ".hpp", ".cxx", ".hh"}
+    POLL_SECONDS = 3
+    BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,80}$")
+    TIMEOUT = 60
+    # Hooks off: nothing in the repository runs while committing
+    GIT = ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]
+
+    def __init__(self, gate: Optional[FsGate] = None, wait_check: str = "", wait_seconds: float = 0) -> None:
+        """
+        Args:
+            gate: The allowed folders; None reads context/paths.json.
+            wait_check: The status check to wait for after opening (PR_WAIT_CHECK); "" waits for none.
+            wait_seconds: How long to wait for it (PR_WAIT_SECONDS).
+        """
+        self.gate = gate or FsGate.load()
+        self.wait_check = wait_check
+        self.wait_seconds = wait_seconds
+
+    @classmethod
+    def git(cls, repo: Path, *args: str, check: bool = True) -> str:
+        """
+        Run git in a repository.
+        Args:
+            repo: The repository.
+            *args: git's arguments.
+            check: Raise if git fails.
+        Returns:
+            str: Its output, stripped.
+        Raises:
+            ValueError: If git fails and check is set.
+        """
+        result = subprocess.run([*cls.GIT, "-C", str(repo), *args], capture_output=True, text=True, timeout=cls.TIMEOUT)
+        if check and result.returncode != 0:
+            raise ValueError(f"git {args[0]} failed: {(result.stderr or result.stdout).strip()[:500]}")
+        return result.stdout.strip()
+
+    @classmethod
+    def default_branch(cls, repo: Path) -> str:
+        """The branch the remote's HEAD points to (usually main)."""
+        head = cls.git(repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD", check=False)
+        return head.removeprefix("origin/") or "main"
+
+    @classmethod
+    def format_changes(cls, repo: Path) -> list[str]:
+        """
+        Format the changed and new C/C++ files with clang-format, in place.
+        The style is the repository's own .clang-format when it has one, else the agents' template.
+        Args:
+            repo: The repository.
+        Returns:
+            list[str]: The files clang-format changed (empty when clang-format is not installed).
+        """
+        if not shutil.which("clang-format"):
+            return []
+        paths = []
+        for line in cls.git(repo, "status", "--porcelain", "--untracked-files=all").splitlines():
+            status, path = line[:2], line[3:].split(" -> ")[-1].strip('"')
+            if "D" not in status and Path(path).suffix.lower() in cls.FORMATTED and (repo / path).is_file():
+                paths.append(path)
+        own_style = any((repo / name).is_file() for name in (".clang-format", "_clang-format"))
+        style = "file" if own_style else f"file:{cls.CLANG_FORMAT}"
+        changed = []
+        for path in paths:
+            before = (repo / path).read_bytes()
+            subprocess.run(["clang-format", "-i", f"--style={style}", path], cwd=repo, capture_output=True,
+                           timeout=cls.TIMEOUT)
+            if (repo / path).read_bytes() != before:
+                changed.append(path)
+        return changed
+
+    @classmethod
+    def branch_name(cls, title: str, branch: Optional[str]) -> str:
+        """
+        The branch to create: the one given, or agent/<title in lowercase words>.
+        Args:
+            title: The pull request's title.
+            branch: The requested name, if any.
+        Returns:
+            str: A valid branch name.
+        Raises:
+            ValueError: If the requested name is not valid.
+        """
+        if branch:
+            if not cls.BRANCH.match(branch) or ".." in branch or branch.endswith((".lock", "/", ".")):
+                raise ValueError(f"'{branch}' is not a valid branch name (letters, digits, . _ / -).")
+            return branch
+        slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40].rstrip("-")
+        return f"agent/{slug or 'change'}"
+
+    def wait_for_check(self, repo: Path, sha: str) -> str:
+        """
+        Wait for the merge gate's status check on a commit to be ready, and describe it. With pr_gate,
+        the check is pending with "Checking documentation..." while it works, then links to the quiz
+        (a /q/ page) or settles to success or failure.
+        Args:
+            repo: The repository.
+            sha: The pushed commit.
+        Returns:
+            str: The check's state, description and link, or why it is not known yet.
+        """
+        check, seconds = self.wait_check, self.wait_seconds
+        if not check or seconds <= 0:
+            return ""
+        name = subprocess.run(["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
+                              cwd=repo, capture_output=True, text=True, timeout=self.TIMEOUT).stdout.strip()
+        deadline = time.monotonic() + seconds
+        status: Optional[dict[str, Optional[str]]] = None
+        while name and time.monotonic() < deadline:
+            result = subprocess.run(["gh", "api", f"repos/{name}/commits/{sha}/status"], cwd=repo,
+                                    capture_output=True, text=True, timeout=self.TIMEOUT)
+            if result.returncode == 0:
+                statuses = [s for s in json.loads(result.stdout).get("statuses", []) if s.get("context") == check]
+                status = statuses[0] if statuses else None  # Newest first
+                if status and (status["state"] != "pending" or "/q/" in (status.get("target_url") or "")):
+                    break
+            time.sleep(self.POLL_SECONDS)
+        else:
+            if status:
+                return (f"Merge gate ({check}): still {status['state']} after {seconds:g}s, "
+                        f"{status.get('description', '')}: {status.get('target_url', '')}")
+            return f"Merge gate ({check}): no result after {seconds:g}s; see the pull request's checks."
+        url = status.get("target_url") or ""
+        if status["state"] == "pending":
+            return f"Merge gate ({check}): pending, {status.get('description', '')}.\nQuiz for the reviewer: {url}"
+        return f"Merge gate ({check}): {status['state']}, {status.get('description', '')}: {url}"
+
+    def sync(self, path: str) -> str:
+        """
+        Bring a repository's default branch up to date with GitHub (fast-forward only), so work starts
+        from the latest code. The agents' shell has no network, so this is how they update.
+        Args:
+            path: <allowed name>/<folder> in the repository; it needs write access.
+        Returns:
+            str: What changed: the commits that came in, or that it was already up to date.
+        Raises:
+            ValueError: If the repository is not on its default branch, has uncommitted changes or
+                commits of its own, or GitHub cannot be reached.
+        """
+        folder, shown = self.gate.resolve(path, "dir", "w")
+        repo = Path(self.git(folder, "rev-parse", "--show-toplevel")).resolve()
+        base = self.default_branch(repo)
+        if self.git(repo, "branch", "--show-current") != base:
+            raise ValueError(f"The repository is not on {base}; switch to it before syncing.")
+        if self.git(repo, "status", "--porcelain"):
+            raise ValueError("The repository has uncommitted changes; open a pull request with them, or undo them "
+                             "(git restore in the shell), before syncing.")
+        self.git(repo, "fetch", "--quiet", "origin", base)
+        if self.git(repo, "rev-list", "--count", f"origin/{base}..HEAD") != "0":
+            raise ValueError(f"{base} has commits that are not on GitHub; they need a person to sort out.")
+        before = self.git(repo, "rev-parse", "--short", "HEAD")
+        incoming = self.git(repo, "log", "--oneline", f"HEAD..origin/{base}")
+        if not incoming:
+            return f"{shown}: {base} is up to date with GitHub ({before})."
+        self.git(repo, "merge", "--ff-only", "--quiet", f"origin/{base}")
+        after = self.git(repo, "rev-parse", "--short", "HEAD")
+        return f"{shown}: updated {base} from {before} to {after}:\n{incoming}"
+
+    def open_pr(self, path: str, title: str, body: str = "", branch: Optional[str] = None) -> str:
+        """
+        Submit a repository's uncommitted changes as a pull request.
+        Args:
+            path: <allowed name>/<folder> in the repository; it needs write access.
+            title: The title, also the commit message's first line.
+            body: The description, also the rest of the commit message.
+            branch: The branch to create; None derives it from the title.
+        Returns:
+            str: The pull request's URL, the branch, the commit and the files changed.
+        Raises:
+            ValueError: If the repository is not ready, the branch exists, or a step fails.
+        """
+        title = title.strip()
+        if not 3 <= len(title) <= 120:
+            raise ValueError("Give a title of 3 to 120 characters: what the change does.")
+        folder, shown = self.gate.resolve(path, "dir", "w")
+        repo = Path(self.git(folder, "rev-parse", "--show-toplevel")).resolve()
+        if not self.gate.locate(repo):
+            raise ValueError(f"The repository of '{shown}' starts outside the allowed folders.")
+
+        base = self.default_branch(repo)
+        if self.git(repo, "branch", "--show-current") != base:
+            raise ValueError(f"The repository is not on {base}. Make the changes on {base}, without "
+                             f"committing; this tool creates the branch and the commit.")
+        if not self.git(repo, "status", "--porcelain"):
+            raise ValueError("There are no changes to submit.")
+        self.git(repo, "fetch", "--quiet", "origin", base)
+        if self.git(repo, "rev-list", "--count", f"origin/{base}..HEAD") != "0":
+            raise ValueError(f"{base} has local commits that are not on GitHub; this tool only submits uncommitted changes.")
+        self.git(repo, "merge", "--ff-only", "--quiet", f"origin/{base}")  # Up to date, as the merge gate requires
+
+        name = self.branch_name(title, branch)
+        if name == base or self.git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{name}", check=False) \
+                or self.git(repo, "ls-remote", "--heads", "origin", name):
+            raise ValueError(f"The branch '{name}' already exists; give another branch name.")
+
+        agent = os.environ.get("AGENT_NAME")
+        description = body.strip() + (f"\n\nOpened by the {agent}." if agent else "")
+        formatted = self.format_changes(repo)
+        self.git(repo, "switch", "--quiet", "-c", name)
+        try:
+            self.git(repo, "add", "--all")
+            self.git(repo, "commit", "--quiet", "-m", title, *(["-m", body.strip()] if body.strip() else []))
+            commit = self.git(repo, "rev-parse", "--short", "HEAD")
+            sha = self.git(repo, "rev-parse", "HEAD")
+            changed = self.git(repo, "show", "--stat", "--format=", "HEAD")
+            self.git(repo, "push", "--quiet", "-u", "origin", name)
+            result = subprocess.run(["gh", "pr", "create", "--base", base, "--head", name, "--title", title,
+                                     "--body", description or title], cwd=repo, capture_output=True, text=True,
+                                    timeout=self.TIMEOUT)
+            if result.returncode != 0:
+                raise ValueError(f"The branch {name} was pushed, but the pull request failed: {result.stderr.strip()[:500]}")
+            url = result.stdout.strip().splitlines()[-1]
+        finally:
+            self.git(repo, "switch", "--quiet", base, check=False)  # The changes now live on the branch
+        check = self.wait_for_check(repo, sha)
+        note = f"\nFormatted with clang-format: {', '.join(formatted)}" if formatted else ""
+        return f"Opened {url}\nbranch {name} (commit {commit}) into {base}:\n{changed}{note}" + (f"\n\n{check}" if check else "")
+
+    @classmethod
+    def parse(cls, argv: list[str]) -> dict:
+        """
+        Read "<path> [--action open|sync] [--title <text>] [--body <text>] [--branch <name>]". Values
+        are taken verbatim, as the agents pass them.
+        Args:
+            argv: The arguments.
+        Returns:
+            dict: path and the given options.
+        Raises:
+            ValueError: If the path is missing or an argument is unexpected.
+        """
+        rest = list(argv)
+        options: dict = {}
+        while rest:
+            argument = rest.pop(0)
+            if argument.startswith("--") and argument[2:] in cls.OPTIONS and rest:
+                options[argument[2:]] = rest.pop(0)
+            elif "path" not in options:
+                options["path"] = argument
+            else:
+                raise ValueError(f"Unexpected argument '{argument}'.")
+        if "path" not in options:
+            raise ValueError("Give the repository folder, e.g. core_dump.")
+        return options
+
+    def run(self, argv: list[str]) -> str:
+        """
+        Run the action a command line asks for: open a pull request (the default), or sync.
+        Args:
+            argv: The arguments, as `parse` reads them.
+        Returns:
+            str: The result.
+        Raises:
+            ValueError: If the arguments are invalid, or a step fails.
+        """
+        options = self.parse(argv)
+        action = options.get("action", "open")
+        if action == "sync":
+            return self.sync(options["path"])
+        if action != "open":
+            raise ValueError(f"Unknown action '{action}'; use open (the default) or sync.")
+        if "title" not in options:
+            raise ValueError("Give a title for the pull request.")
+        return self.open_pr(options["path"], options["title"], options.get("body", ""), options.get("branch"))
 
 
-def default_branch(repo: Path) -> str:
-    """The branch the remote's HEAD points to (usually main)."""
-    head = git(repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD", check=False)
-    return head.removeprefix("origin/") or "main"
-
-
-def format_changes(repo: Path) -> list[str]:
+def main(argv: Optional[list[str]] = None) -> int:
     """
-    Format the changed and new C/C++ files with clang-format, in place.
-    The style is the repository's own .clang-format when it has one, else the agents' template.
-    Args:
-        repo: The repository.
-    Returns:
-        list[str]: The files clang-format changed (empty when clang-format is not installed).
-    """
-    if not shutil.which("clang-format"):
-        return []
-    paths = []
-    for line in git(repo, "status", "--porcelain", "--untracked-files=all").splitlines():
-        status, path = line[:2], line[3:].split(" -> ")[-1].strip('"')
-        if "D" not in status and Path(path).suffix.lower() in FORMATTED and (repo / path).is_file():
-            paths.append(path)
-    own_style = any((repo / name).is_file() for name in (".clang-format", "_clang-format"))
-    style = "file" if own_style else f"file:{CLANG_FORMAT}"
-    changed = []
-    for path in paths:
-        before = (repo / path).read_bytes()
-        subprocess.run(["clang-format", "-i", f"--style={style}", path], cwd=repo, capture_output=True, timeout=TIMEOUT)
-        if (repo / path).read_bytes() != before:
-            changed.append(path)
-    return changed
-
-
-def branch_name(title: str, branch: Optional[str]) -> str:
-    """
-    The branch to create: the one given, or agent/<title in lowercase words>.
-    Args:
-        title: The pull request's title.
-        branch: The requested name, if any.
-    Returns:
-        str: A valid branch name.
-    Raises:
-        ValueError: If the requested name is not valid.
-    """
-    if branch:
-        if not BRANCH.match(branch) or ".." in branch or branch.endswith((".lock", "/", ".")):
-            raise ValueError(f"'{branch}' is not a valid branch name (letters, digits, . _ / -).")
-        return branch
-    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40].rstrip("-")
-    return f"agent/{slug or 'change'}"
-
-
-def wait_for_check(repo: Path, sha: str) -> str:
-    """
-    Wait for the merge gate's status check on a commit to be ready, and describe it. With pr_gate,
-    the check is pending with "Checking documentation..." while it works, then links to the quiz
-    (a /q/ page) or settles to success or failure.
-    Args:
-        repo: The repository.
-        sha: The pushed commit.
-    Returns:
-        str: The check's state, description and link, or why it is not known yet.
-    """
-    if not WAIT_CHECK or WAIT_SECONDS <= 0:
-        return ""
-    name = subprocess.run(["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
-                          cwd=repo, capture_output=True, text=True, timeout=TIMEOUT).stdout.strip()
-    deadline = time.monotonic() + WAIT_SECONDS
-    status: Optional[dict[str, Optional[str]]] = None
-    while name and time.monotonic() < deadline:
-        result = subprocess.run(["gh", "api", f"repos/{name}/commits/{sha}/status"], cwd=repo,
-                                capture_output=True, text=True, timeout=TIMEOUT)
-        if result.returncode == 0:
-            statuses = [s for s in json.loads(result.stdout).get("statuses", []) if s.get("context") == WAIT_CHECK]
-            status = statuses[0] if statuses else None  # Newest first
-            if status and (status["state"] != "pending" or "/q/" in (status.get("target_url") or "")):
-                break
-        time.sleep(POLL_SECONDS)
-    else:
-        if status:
-            return (f"Merge gate ({WAIT_CHECK}): still {status['state']} after {WAIT_SECONDS:g}s, "
-                    f"{status.get('description', '')}: {status.get('target_url', '')}")
-        return f"Merge gate ({WAIT_CHECK}): no result after {WAIT_SECONDS:g}s; see the pull request's checks."
-    url = status.get("target_url") or ""
-    if status["state"] == "pending":
-        return f"Merge gate ({WAIT_CHECK}): pending, {status.get('description', '')}.\nQuiz for the reviewer: {url}"
-    return f"Merge gate ({WAIT_CHECK}): {status['state']}, {status.get('description', '')}: {url}"
-
-
-def sync(path: str) -> str:
-    """
-    Bring a repository's default branch up to date with GitHub (fast-forward only), so work starts
-    from the latest code. The agents' shell has no network, so this is how they update.
-    Args:
-        path: <allowed name>/<folder> in the repository; it needs write access.
-    Returns:
-        str: What changed: the commits that came in, or that it was already up to date.
-    Raises:
-        ValueError: If the repository is not on its default branch, has uncommitted changes or
-            commits of its own, or GitHub cannot be reached.
-    """
-    folder, shown = FsGate.load().resolve(path, "dir", "w")
-    repo = Path(git(folder, "rev-parse", "--show-toplevel")).resolve()
-    base = default_branch(repo)
-    if git(repo, "branch", "--show-current") != base:
-        raise ValueError(f"The repository is not on {base}; switch to it before syncing.")
-    if git(repo, "status", "--porcelain"):
-        raise ValueError("The repository has uncommitted changes; open a pull request with them, or undo them "
-                         "(git restore in the shell), before syncing.")
-    git(repo, "fetch", "--quiet", "origin", base)
-    if git(repo, "rev-list", "--count", f"origin/{base}..HEAD") != "0":
-        raise ValueError(f"{base} has commits that are not on GitHub; they need a person to sort out.")
-    before = git(repo, "rev-parse", "--short", "HEAD")
-    incoming = git(repo, "log", "--oneline", f"HEAD..origin/{base}")
-    if not incoming:
-        return f"{shown}: {base} is up to date with GitHub ({before})."
-    git(repo, "merge", "--ff-only", "--quiet", f"origin/{base}")
-    after = git(repo, "rev-parse", "--short", "HEAD")
-    return f"{shown}: updated {base} from {before} to {after}:\n{incoming}"
-
-
-def open_pr(path: str, title: str, body: str = "", branch: Optional[str] = None) -> str:
-    """
-    Submit a repository's uncommitted changes as a pull request.
-    Args:
-        path: <allowed name>/<folder> in the repository; it needs write access.
-        title: The title, also the commit message's first line.
-        body: The description, also the rest of the commit message.
-        branch: The branch to create; None derives it from the title.
-    Returns:
-        str: The pull request's URL, the branch, the commit and the files changed.
-    Raises:
-        ValueError: If the repository is not ready, the branch exists, or a step fails.
-    """
-    title = title.strip()
-    if not 3 <= len(title) <= 120:
-        raise ValueError("Give a title of 3 to 120 characters: what the change does.")
-    gate = FsGate.load()
-    folder, shown = gate.resolve(path, "dir", "w")
-    repo = Path(git(folder, "rev-parse", "--show-toplevel")).resolve()
-    if not gate.locate(repo):
-        raise ValueError(f"The repository of '{shown}' starts outside the allowed folders.")
-
-    base = default_branch(repo)
-    if git(repo, "branch", "--show-current") != base:
-        raise ValueError(f"The repository is not on {base}. Make the changes on {base}, without "
-                         f"committing; this tool creates the branch and the commit.")
-    if not git(repo, "status", "--porcelain"):
-        raise ValueError("There are no changes to submit.")
-    git(repo, "fetch", "--quiet", "origin", base)
-    if git(repo, "rev-list", "--count", f"origin/{base}..HEAD") != "0":
-        raise ValueError(f"{base} has local commits that are not on GitHub; this tool only submits uncommitted changes.")
-    git(repo, "merge", "--ff-only", "--quiet", f"origin/{base}")  # Up to date, as the merge gate requires
-
-    name = branch_name(title, branch)
-    if name == base or git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{name}", check=False) \
-            or git(repo, "ls-remote", "--heads", "origin", name):
-        raise ValueError(f"The branch '{name}' already exists; give another branch name.")
-
-    agent = os.environ.get("AGENT_NAME")
-    description = body.strip() + (f"\n\nOpened by the {agent}." if agent else "")
-    formatted = format_changes(repo)
-    git(repo, "switch", "--quiet", "-c", name)
-    try:
-        git(repo, "add", "--all")
-        git(repo, "commit", "--quiet", "-m", title, *(["-m", body.strip()] if body.strip() else []))
-        commit = git(repo, "rev-parse", "--short", "HEAD")
-        sha = git(repo, "rev-parse", "HEAD")
-        changed = git(repo, "show", "--stat", "--format=", "HEAD")
-        git(repo, "push", "--quiet", "-u", "origin", name)
-        result = subprocess.run(["gh", "pr", "create", "--base", base, "--head", name, "--title", title,
-                                 "--body", description or title], cwd=repo, capture_output=True, text=True,
-                                timeout=TIMEOUT)
-        if result.returncode != 0:
-            raise ValueError(f"The branch {name} was pushed, but the pull request failed: {result.stderr.strip()[:500]}")
-        url = result.stdout.strip().splitlines()[-1]
-    finally:
-        git(repo, "switch", "--quiet", base, check=False)  # The changes now live on the branch
-    gate = wait_for_check(repo, sha)
-    note = f"\nFormatted with clang-format: {', '.join(formatted)}" if formatted else ""
-    return f"Opened {url}\nbranch {name} (commit {commit}) into {base}:\n{changed}{note}" + (f"\n\n{gate}" if gate else "")
-
-
-def main(argv: Optional[list[str]] = None) -> str:
-    """
-    Read "<path> --title <text> [--body <text>] [--branch <name>]" (values taken verbatim) and open
-    the pull request.
+    Parse the command line, run the action and print its result, or "Error: <reason>".
     Args:
         argv: Arguments; None reads sys.argv.
     Returns:
-        str: The result.
+        int: 0 on success, 1 on an error.
     """
-    argv = list(sys.argv[1:] if argv is None else argv)
-    options: dict = {}
-    while argv:
-        argument = argv.pop(0)
-        if argument.startswith("--") and argument[2:] in OPTIONS and argv:
-            options[argument[2:]] = argv.pop(0)
-        elif "path" not in options:
-            options["path"] = argument
-        else:
-            raise ValueError(f"Unexpected argument '{argument}'.")
-    if "path" not in options:
-        raise ValueError("Give the repository folder, e.g. core_dump.")
-    action = options.get("action", "open")
-    if action == "sync":
-        return sync(options["path"])
-    if action != "open":
-        raise ValueError(f"Unknown action '{action}'; use open (the default) or sync.")
-    if "title" not in options:
-        raise ValueError("Give a title for the pull request.")
-    return open_pr(options["path"], options["title"], options.get("body", ""), options.get("branch"))
+    argv = sys.argv[1:] if argv is None else argv
+    if argv in (["-v"], ["--version"]):
+        print(f"pr {PullRequests.VERSION}")
+        return 0
+    try:
+        tool = PullRequests(wait_check=os.environ.get("PR_WAIT_CHECK", ""),
+                            wait_seconds=float(os.environ.get("PR_WAIT_SECONDS") or 0))
+        print(tool.run(argv))
+    except (ValueError, OSError, subprocess.TimeoutExpired) as e:
+        print(f"Error: {e}")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    try:
-        print(main())
-    except (ValueError, OSError, subprocess.TimeoutExpired) as e:
-        print(f"Error: {e}")
-        sys.exit(1)
+    raise SystemExit(main())

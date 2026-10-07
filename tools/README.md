@@ -112,6 +112,13 @@ spaces before sending the description to the model.
 5. Restart the agents (and the MCPAgent server). Each agent lists the tools it loaded; ask one to use
    the new tool.
 
+The Python tools (`ed`, `memory`, `pr`, `shell`, `sysinfo`) run under the system's `python3`, which
+may be outside the `.venv` and as old as 3.9 (RHEL 9), so they use only the standard library and the
+gatekeepers. Each is one class with a `main()` that prints the result, or `Error: <reason>`, and
+returns the exit status; `-v` prints its version. The agents pass each value as one argument,
+verbatim, even when it starts with `-` or spans lines, so these tools read their options themselves
+rather than with argparse.
+
 A tool that takes a path must check it with the file-system gate (`gatekeepers/fs/fs_gate.py`, see
 "Allowed paths"), with the access it needs. A tool named like a command in
 [`shell/commands.json`](shell/commands.json) takes that command over: the shell then refuses it

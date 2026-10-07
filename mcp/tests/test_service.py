@@ -328,9 +328,9 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             error, text = await ed({'path': 'sample/blob.bin', 'action': 'hex', 'offset': -2})
             self.assertIn('00000026  26 27', text)
             self.assertNotIn('more bytes', text)
-            error, text = await ed({'path': 'tools/ed/ed.py', 'action': 'hex', 'length': 16})
+            error, text = await ed({'path': 'tools/ed/tool.json', 'action': 'hex', 'length': 16})  # Read only
             self.assertFalse(error, text)
-            self.assertIn('|#!/usr/bin/env p|', text)
+            self.assertIn('description|', text)
             for args in ({'offset': 40}, {'length': 0}, {'length': 5000}):
                 self.assertTrue((await ed({'path': 'sample/blob.bin', 'action': 'hex', **args}))[0], args)
             self.assertTrue((await ed({'path': 'sample/../escape.bin', 'action': 'hex'}))[0])

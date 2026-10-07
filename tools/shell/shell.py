@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Module: shell.py
 
@@ -47,303 +46,328 @@ sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents
 from gatekeepers import CONTEXT_DIR, TOOLS_DIR
 from gatekeepers.fs.fs_gate import FsGate
 
-COMMANDS_FILE = Path(__file__).resolve().parent / "commands.json"
-CLANG_FORMAT = CONTEXT_DIR / "clang-format.yaml"  # The default C/C++ style, at /work/.clang-format
-CLANG_TIDY = CONTEXT_DIR / "clang-tidy.yaml"  # The default C/C++ checks, at /work/.clang-tidy
-WORK = PurePosixPath("/work")  # Where the allowed folders appear inside the sandbox
-SEPARATORS = {"|", "||", "&&", ";"}
-# git in the shell only looks (and can undo uncommitted edits); committing, branching and syncing
-# with GitHub belong to the pr tool, which keeps the repository in the state it expects
-GIT_READ_ONLY = {"status", "log", "show", "diff", "blame", "grep", "ls-files", "shortlog", "describe",
-                 "rev-parse", "restore"}
-GIT_LIST_ONLY = {"branch": {"-a", "-r", "-v", "-vv", "--all", "--remotes", "--list", "-l", "--show-current"},
-                 "tag": {"-l", "--list", "-n"}}
-# Harmless habits: errors already appear in the output, so these are dropped before the check
-STDERR_HABITS = re.compile(r"(?<!\S)2>(&1|/dev/null)(?!\S)")
-TIMEOUT = 25
-MAX_LINES = 300
-MAX_CHARS = 30_000
 
-
-def load_commands() -> dict[str, dict]:
+class Shell:
     """
-    Read the allowed commands, leaving out those that are also their own tool.
-    Returns:
-        dict[str, dict]: Each command and its entry ("about", optional "needs").
+    Checks command lines against the allowed commands and folders, and runs them in the sandbox.
     """
-    commands = json.loads(COMMANDS_FILE.read_text(encoding="utf-8"))["commands"]
-    return {name: entry if isinstance(entry, dict) else {"about": entry} for name, entry in commands.items()}
 
+    VERSION = "1.0.0"
+    COMMANDS_FILE = Path(__file__).resolve().parent / "commands.json"
+    CLANG_FORMAT = CONTEXT_DIR / "clang-format.yaml"  # The default C/C++ style, at /work/.clang-format
+    CLANG_TIDY = CONTEXT_DIR / "clang-tidy.yaml"  # The default C/C++ checks, at /work/.clang-tidy
+    WORK = PurePosixPath("/work")  # Where the allowed folders appear inside the sandbox
+    SEPARATORS = {"|", "||", "&&", ";"}
+    # git in the shell only looks (and can undo uncommitted edits); committing, branching and syncing
+    # with GitHub belong to the pr tool, which keeps the repository in the state it expects
+    GIT_READ_ONLY = {"status", "log", "show", "diff", "blame", "grep", "ls-files", "shortlog", "describe",
+                     "rev-parse", "restore"}
+    GIT_LIST_ONLY = {"branch": {"-a", "-r", "-v", "-vv", "--all", "--remotes", "--list", "-l", "--show-current"},
+                     "tag": {"-l", "--list", "-n"}}
+    # Harmless habits: errors already appear in the output, so these are dropped before the check
+    STDERR_HABITS = re.compile(r"(?<!\S)2>(&1|/dev/null)(?!\S)")
+    TIMEOUT = 25
+    MAX_LINES = 300
+    MAX_CHARS = 30_000
 
-def own_tool(command: str) -> bool:
-    """Whether a command is also a tool of its own (tools/<command>/tool.json), which then wins."""
-    return command != "shell" and (TOOLS_DIR / command / "tool.json").is_file()
+    def __init__(self, gate: Optional[FsGate] = None, commands: Optional[dict[str, dict]] = None) -> None:
+        """
+        Args:
+            gate: The allowed folders; None reads context/paths.json.
+            commands: The allowed commands; None reads commands.json, leaving out those that are
+                also their own tool.
+        """
+        self.gate = gate or FsGate.load()
+        if commands is None:
+            commands = {name: entry for name, entry in self.load_commands().items() if not self.own_tool(name)}
+        self.commands = commands
 
+    @classmethod
+    def load_commands(cls) -> dict[str, dict]:
+        """
+        Read the allowed commands, leaving out those that are also their own tool.
+        Returns:
+            dict[str, dict]: Each command and its entry ("about", optional "needs").
+        """
+        commands = json.loads(cls.COMMANDS_FILE.read_text(encoding="utf-8"))["commands"]
+        return {name: entry if isinstance(entry, dict) else {"about": entry} for name, entry in commands.items()}
 
-def to_host(path: str, current: Path, gate: FsGate) -> Optional[Path]:
-    """
-    Map a path as a command sees it (relative, or under /work) to the real path.
-    Args:
-        path: The path in the command line.
-        current: The real folder the command runs in.
-        gate: The allowed folders.
-    Returns:
-        Optional[Path]: The resolved real path, or None if it is outside the sandbox's folders.
-    """
-    if path.startswith("/"):
-        parts = PurePosixPath(path).parts
-        if len(parts) < 3 or PurePosixPath(*parts[:2]) != WORK or parts[2] not in gate.folders:
-            return None
-        target = (gate.folders[parts[2]].path / Path(*parts[3:])).resolve()
-    else:
-        target = (current / path).resolve()
-    return target if gate.locate(target) else None
+    @staticmethod
+    def own_tool(command: str) -> bool:
+        """Whether a command is also a tool of its own (tools/<command>/tool.json), which then wins."""
+        return command != "shell" and (TOOLS_DIR / command / "tool.json").is_file()
 
-
-def check(command: str, cwd: Path, commands: dict[str, dict], gate: FsGate) -> None:
-    """
-    Check a command line before it runs.
-    Args:
-        command: The command line.
-        cwd: The real folder it starts in.
-        commands: The allowed commands.
-        gate: The allowed folders.
-    Raises:
-        ValueError: If any part of it is not allowed; the message says why.
-    """
-    if any(c in command for c in "\n\r`") or "$(" in command:
-        raise ValueError("Line breaks, backticks and $(...) are not allowed; use |, && or ; between commands.")
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
-    lexer.commenters = ""  # bash only treats # as a comment at the start of a word; never hide text
-    lexer.whitespace_split = True
-    try:
-        tokens = list(lexer)
-    except ValueError as parse_error:
-        raise ValueError(f"Cannot parse the command: {parse_error}") from None
-
-    segments: list[list[str]] = [[]]
-    for token in tokens:
-        if token in SEPARATORS:
-            segments.append([])
-        elif token and set(token) <= set("<>&|();"):
-            raise ValueError(f"'{token}' is not allowed: no redirection, background jobs, subshells or groups.")
+    def to_host(self, path: str, current: Path) -> Optional[Path]:
+        """
+        Map a path as a command sees it (relative, or under /work) to the real path.
+        Args:
+            path: The path in the command line.
+            current: The real folder the command runs in.
+        Returns:
+            Optional[Path]: The resolved real path, or None if it is outside the sandbox's folders.
+        """
+        if path.startswith("/"):
+            parts = PurePosixPath(path).parts
+            if len(parts) < 3 or PurePosixPath(*parts[:2]) != self.WORK or parts[2] not in self.gate.folders:
+                return None
+            target = (self.gate.folders[parts[2]].path / Path(*parts[3:])).resolve()
         else:
-            segments[-1].append(token)
+            target = (current / path).resolve()
+        return target if self.gate.locate(target) else None
 
-    current = cwd
-    for words in segments:
-        if not words:
-            raise ValueError("Empty command between separators.")
-        name = words[0]
-        if "/" in name:  # A program in an allowed folder: needs execute access there
-            program = to_host(name, current, gate)
-            located = gate.locate(program) if program else None
-            # The program may not exist yet (make builds it).
-            if program is None or located is None or "x" not in located[0].access_at(program):
-                raise ValueError(f"'{name}' is not a program in a folder with execute (x) access.")
-            continue
-        if own_tool(name):
-            raise ValueError(f"Use the {name} tool instead of '{name}' in the shell.")
-        if name not in commands:
-            raise ValueError(f"'{name}' is not an allowed command. Run the command help to see the list.")
-        if name == "git":
-            sub = words[1] if len(words) > 1 else ""
-            if sub in GIT_LIST_ONLY:
-                if any(w not in GIT_LIST_ONLY[sub] for w in words[2:]):
-                    raise ValueError(f"git {sub} may only list here. To commit or create a branch, use the pr tool.")
-            elif sub not in GIT_READ_ONLY:
-                raise ValueError(f"git {sub or '(nothing)'} is not allowed in the shell: it only reads ("
-                                 f"{', '.join(sorted(GIT_READ_ONLY))}). The pr tool commits, creates the branch "
-                                 f"and opens the pull request; pr with action sync updates the repository from GitHub.")
-        if name == "cd":
-            target = to_host(words[1] if len(words) > 1 else ".", current, gate)
-            if not target or not target.is_dir():
-                raise ValueError(f"cd: '{words[1] if len(words) > 1 else ''}' is not a folder in the allowed folders.")
-            current = target
-        if commands[name].get("needs"):
-            located = gate.locate(current)
-            if located is None:
-                raise ValueError("The working folder is outside the allowed folders.")
-            folder, shown = located
-            missing = [r for r in commands[name]["needs"] if r not in folder.access_at(current)]
-            if missing:
-                raise ValueError(f"{name} needs {'/'.join(missing)} access, which {shown} does not have.")
-            if name == "make" and any(w in ("-C", "-f", "--directory", "--file", "--makefile") or w.startswith(
-                    ("-C", "-f", "--directory=", "--file=", "--makefile=")) for w in words[1:]):
-                raise ValueError(f"{name}: run it where its files are (cd there) instead of using -C or -f.")
+    def check(self, command: str, cwd: Path) -> None:
+        """
+        Check a command line before it runs.
+        Args:
+            command: The command line.
+            cwd: The real folder it starts in.
+        Raises:
+            ValueError: If any part of it is not allowed; the message says why.
+        """
+        if any(c in command for c in "\n\r`") or "$(" in command:
+            raise ValueError("Line breaks, backticks and $(...) are not allowed; use |, && or ; between commands.")
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.commenters = ""  # bash only treats # as a comment at the start of a word; never hide text
+        lexer.whitespace_split = True
+        try:
+            tokens = list(lexer)
+        except ValueError as parse_error:
+            raise ValueError(f"Cannot parse the command: {parse_error}") from None
+
+        segments: list[list[str]] = [[]]
+        for token in tokens:
+            if token in self.SEPARATORS:
+                segments.append([])
+            elif token and set(token) <= set("<>&|();"):
+                raise ValueError(f"'{token}' is not allowed: no redirection, background jobs, subshells or groups.")
+            else:
+                segments[-1].append(token)
+
+        commands = self.commands
+        current = cwd
+        for words in segments:
+            if not words:
+                raise ValueError("Empty command between separators.")
+            name = words[0]
+            if "/" in name:  # A program in an allowed folder: needs execute access there
+                program = self.to_host(name, current)
+                located = self.gate.locate(program) if program else None
+                # The program may not exist yet (make builds it).
+                if program is None or located is None or "x" not in located[0].access_at(program):
+                    raise ValueError(f"'{name}' is not a program in a folder with execute (x) access.")
+                continue
+            if self.own_tool(name):
+                raise ValueError(f"Use the {name} tool instead of '{name}' in the shell.")
+            if name not in commands:
+                raise ValueError(f"'{name}' is not an allowed command. Run the command help to see the list.")
+            if name == "git":
+                sub = words[1] if len(words) > 1 else ""
+                if sub in self.GIT_LIST_ONLY:
+                    if any(w not in self.GIT_LIST_ONLY[sub] for w in words[2:]):
+                        raise ValueError(f"git {sub} may only list here. To commit or create a branch, use the pr tool.")
+                elif sub not in self.GIT_READ_ONLY:
+                    raise ValueError(f"git {sub or '(nothing)'} is not allowed in the shell: it only reads ("
+                                     f"{', '.join(sorted(self.GIT_READ_ONLY))}). The pr tool commits, creates the branch "
+                                     f"and opens the pull request; pr with action sync updates the repository from GitHub.")
+            if name == "cd":
+                target = self.to_host(words[1] if len(words) > 1 else ".", current)
+                if not target or not target.is_dir():
+                    raise ValueError(f"cd: '{words[1] if len(words) > 1 else ''}' is not a folder in the allowed folders.")
+                current = target
+            if commands[name].get("needs"):
+                located = self.gate.locate(current)
+                if located is None:
+                    raise ValueError("The working folder is outside the allowed folders.")
+                folder, shown = located
+                missing = [r for r in commands[name]["needs"] if r not in folder.access_at(current)]
+                if missing:
+                    raise ValueError(f"{name} needs {'/'.join(missing)} access, which {shown} does not have.")
+                if name == "make" and any(w in ("-C", "-f", "--directory", "--file", "--makefile") or w.startswith(
+                        ("-C", "-f", "--directory=", "--file=", "--makefile=")) for w in words[1:]):
+                    raise ValueError(f"{name}: run it where its files are (cd there) instead of using -C or -f.")
+
+    @staticmethod
+    def identity_files(folder: Path) -> Path:
+        """
+        Write a minimal /etc/passwd and /etc/group for the sandbox: only the user running the agent,
+        so whoami, ls -l and git know the name without the host's list of accounts.
+        Args:
+            folder: An empty folder for the two files.
+        Returns:
+            Path: The folder, holding passwd and group.
+        """
+        uid, gid = os.getuid(), os.getgid()
+        try:
+            user = pwd.getpwuid(uid).pw_name
+        except KeyError:
+            user = f"user{uid}"
+        try:
+            group = grp.getgrgid(gid).gr_name
+        except KeyError:
+            group = user
+        (folder / "passwd").write_text(f"{user}:x:{uid}:{gid}::/tmp/home:/bin/bash\n")
+        (folder / "group").write_text(f"{group}:x:{gid}:\n")
+        return folder
+
+    def sandbox(self, cwd: Path, identity: Optional[Path] = None) -> list[str]:
+        """
+        Build the bubblewrap command line for the allowed folders.
+        Args:
+            cwd: The real folder to start in.
+            identity: A folder from identity_files, mounted as /etc/passwd and /etc/group; None for none.
+        Returns:
+            list[str]: bwrap (by full path) and its options, ending with "--" (the command follows).
+                Run it with an empty environment: bwrap hands the command its own environment plus
+                the --setenv variables, so the command sees only those (as --clearenv would, which
+                bubblewrap before 0.5, as in RHEL 9, does not have).
+        Raises:
+            ValueError: If the working folder is outside the allowed folders.
+        """
+        args = [shutil.which("bwrap") or "/usr/bin/bwrap", "--unshare-all", "--die-with-parent", "--new-session",
+                "--ro-bind", "/usr", "/usr", "--symlink", "usr/bin", "/bin", "--symlink", "usr/sbin", "/sbin",
+                "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib64", "/lib64",
+                "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/tmp/home"]
+        for etc in ("/etc/localtime", "/etc/ld.so.cache", "/etc/alternatives"):
+            if Path(etc).exists():
+                args += ["--ro-bind", etc, etc]
+        if identity is not None:
+            args += ["--ro-bind", str(identity / "passwd"), "/etc/passwd", "--ro-bind", str(identity / "group"), "/etc/group"]
+        for name, folder in self.gate.folders.items():
+            mount = str(self.WORK / name)
+            # A folder that does not exist yet (.memory before the first note) has nothing to show
+            if "r" not in folder.access or not folder.path.is_dir():
+                continue
+            args += ["--bind" if "w" in folder.access else "--ro-bind", str(folder.path), mount]
+            for sub, access in sorted(folder.subpaths.items(), key=lambda item: len(item[0].parts)):
+                if sub.exists():
+                    inner = str(self.WORK / name / sub.relative_to(folder.path))
+                    args += ["--tmpfs", inner] if "r" not in access else \
+                            ["--bind" if "w" in access else "--ro-bind", str(sub), inner]
+            if "w" in folder.access:  # Nothing planted in a repository may run later, outside the sandbox
+                for git in [folder.path / ".git", *folder.path.glob("*/.git")]:
+                    for protected in ("config", "hooks"):
+                        if (git / protected).exists():
+                            inner = str(self.WORK / name / (git / protected).relative_to(folder.path))
+                            args += ["--ro-bind", str(git / protected), inner]
+        # clang-format and clang-tidy look for their config in each file's parent folders
+        for config, name in ((self.CLANG_FORMAT, ".clang-format"), (self.CLANG_TIDY, ".clang-tidy")):
+            if config.is_file():
+                args += ["--ro-bind", str(config), str(self.WORK / name)]
+        located = self.gate.locate(cwd)
+        if located is None:
+            raise ValueError("The working folder is outside the allowed folders.")
+        _, shown = located
+        args += ["--chdir", str(self.WORK / shown)]
+        environment = {
+            "PATH": "/usr/bin:/bin", "HOME": "/tmp/home", "LANG": "C.UTF-8", "TERM": "dumb",
+            "PAGER": "cat", "GIT_PAGER": "cat", "GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": "true",
+            "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_COUNT": "3",
+            "GIT_CONFIG_KEY_0": "core.hooksPath", "GIT_CONFIG_VALUE_0": "/dev/null",
+            "GIT_CONFIG_KEY_1": "core.fsmonitor", "GIT_CONFIG_VALUE_1": "false",
+            "GIT_CONFIG_KEY_2": "safe.directory", "GIT_CONFIG_VALUE_2": "*",
+        }
+        for key, setting in (("GIT_AUTHOR_NAME", "user.name"), ("GIT_AUTHOR_EMAIL", "user.email")):
+            value = subprocess.run(["git", "config", "--global", setting], capture_output=True, text=True).stdout.strip()
+            if value:
+                environment[key] = environment[key.replace("AUTHOR", "COMMITTER")] = value
+        for key, value in environment.items():
+            args += ["--setenv", key, value]
+        return args + ["--"]
+
+    def run(self, cwd: str, command: str) -> tuple[bool, str]:
+        """
+        Check and run a command line in the sandbox.
+        Args:
+            cwd: <allowed name>/<folder> to start in; "" for the first allowed folder (context/paths.json),
+                for commands that do not depend on a folder (whoami, date, bc).
+            command: The command line.
+        Returns:
+            tuple[bool, str]: Whether it exited with status 0, and its output.
+        Raises:
+            ValueError: If the folder or the command line is not allowed.
+        """
+        if command.strip() in ("", "help"):
+            return True, self.help_text()
+        if not cwd.strip():
+            cwd = next(iter(self.gate.folders))  # The first allowed folder
+        folder, shown = self.gate.resolve(cwd, "dir", "r")
+        command = self.STDERR_HABITS.sub("", command)
+        self.check(command, folder)
+        if not shutil.which("bwrap"):
+            raise ValueError("bubblewrap (bwrap) is not installed, so the shell cannot run safely.")
+        try:
+            with tempfile.TemporaryDirectory(prefix="shell-identity-") as identity:
+                result = subprocess.run([*self.sandbox(folder, self.identity_files(Path(identity))),
+                                         "/usr/bin/bash", "--noprofile", "--norc", "-c", command],
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
+                                        env={}, timeout=self.TIMEOUT)  # Nothing of the caller's environment
+        except subprocess.TimeoutExpired:
+            return False, f"Stopped after {self.TIMEOUT}s: {command}"
+        output = self.gate.display(result.stdout).replace(f"{self.WORK}/", "")
+        if len(output) > self.MAX_CHARS:
+            output = output[:self.MAX_CHARS] + "\n..."
+        lines = output.rstrip("\n").splitlines()
+        if len(lines) > self.MAX_LINES:
+            lines = lines[:self.MAX_LINES] + [f"... {len(lines) - self.MAX_LINES} more lines; narrow the command (head, grep)"]
+        if result.returncode != 0:
+            lines.append(f"[exit {result.returncode}]")
+        return result.returncode == 0, "\n".join(lines) if lines else f"(no output) in {shown}"
+
+    def help_text(self) -> str:
+        """
+        Describe the folders and commands available.
+        Returns:
+            str: The allowed folders with their access, then each command and its note.
+        """
+        commands = self.commands
+        width = max(map(len, commands))
+        lines = [self.gate.describe(), "", "Commands (join them with |, &&, || or ;):"]
+        lines += [f"{name:<{width}}  {entry['about']}" + (f" [needs {entry['needs']}]" if entry.get("needs") else "")
+                  for name, entry in sorted(commands.items())]
+        return "\n".join(lines)
+
+    @staticmethod
+    def parse(argv: list[str]) -> dict[str, str]:
+        """
+        Read "--cwd <folder> --command <line>". Values are taken verbatim, as the agents pass them.
+        Args:
+            argv: The arguments.
+        Returns:
+            dict[str, str]: cwd and command, when given.
+        Raises:
+            ValueError: If an argument is not one of the two options with a value.
+        """
+        rest = list(argv)
+        options = {}
+        while rest:
+            argument = rest.pop(0)
+            if argument in ("--cwd", "--command") and rest:
+                options[argument[2:]] = rest.pop(0)
+            else:
+                raise ValueError(f"Unexpected argument '{argument}'; use --cwd <folder> --command <command line>.")
+        return options
 
 
-def identity_files(folder: Path) -> Path:
+def main(argv: Optional[list[str]] = None) -> int:
     """
-    Write a minimal /etc/passwd and /etc/group for the sandbox: only the user running the agent,
-    so whoami, ls -l and git know the name without the host's list of accounts.
-    Args:
-        folder: An empty folder for the two files.
-    Returns:
-        Path: The folder, holding passwd and group.
-    """
-    uid, gid = os.getuid(), os.getgid()
-    try:
-        user = pwd.getpwuid(uid).pw_name
-    except KeyError:
-        user = f"user{uid}"
-    try:
-        group = grp.getgrgid(gid).gr_name
-    except KeyError:
-        group = user
-    (folder / "passwd").write_text(f"{user}:x:{uid}:{gid}::/tmp/home:/bin/bash\n")
-    (folder / "group").write_text(f"{group}:x:{gid}:\n")
-    return folder
-
-
-def sandbox(gate: FsGate, cwd: Path, identity: Optional[Path] = None) -> list[str]:
-    """
-    Build the bubblewrap command line for the allowed folders.
-    Args:
-        gate: The allowed folders.
-        cwd: The real folder to start in.
-        identity: A folder from identity_files, mounted as /etc/passwd and /etc/group; None for none.
-    Returns:
-        list[str]: bwrap (by full path) and its options, ending with "--" (the command follows).
-            Run it with an empty environment: bwrap hands the command its own environment plus
-            the --setenv variables, so the command sees only those (as --clearenv would, which
-            bubblewrap before 0.5, as in RHEL 9, does not have).
-    Raises:
-        ValueError: If the working folder is outside the allowed folders.
-    """
-    args = [shutil.which("bwrap") or "/usr/bin/bwrap", "--unshare-all", "--die-with-parent", "--new-session",
-            "--ro-bind", "/usr", "/usr", "--symlink", "usr/bin", "/bin", "--symlink", "usr/sbin", "/sbin",
-            "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib64", "/lib64",
-            "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/tmp/home"]
-    for etc in ("/etc/localtime", "/etc/ld.so.cache", "/etc/alternatives"):
-        if Path(etc).exists():
-            args += ["--ro-bind", etc, etc]
-    if identity is not None:
-        args += ["--ro-bind", str(identity / "passwd"), "/etc/passwd", "--ro-bind", str(identity / "group"), "/etc/group"]
-    for name, folder in gate.folders.items():
-        mount = str(WORK / name)
-        # A folder that does not exist yet (.memory before the first note) has nothing to show
-        if "r" not in folder.access or not folder.path.is_dir():
-            continue
-        args += ["--bind" if "w" in folder.access else "--ro-bind", str(folder.path), mount]
-        for sub, access in sorted(folder.subpaths.items(), key=lambda item: len(item[0].parts)):
-            if sub.exists():
-                inner = str(WORK / name / sub.relative_to(folder.path))
-                args += ["--tmpfs", inner] if "r" not in access else \
-                        ["--bind" if "w" in access else "--ro-bind", str(sub), inner]
-        if "w" in folder.access:  # Nothing planted in a repository may run later, outside the sandbox
-            for git in [folder.path / ".git", *folder.path.glob("*/.git")]:
-                for protected in ("config", "hooks"):
-                    if (git / protected).exists():
-                        inner = str(WORK / name / (git / protected).relative_to(folder.path))
-                        args += ["--ro-bind", str(git / protected), inner]
-    # clang-format and clang-tidy look for their config in each file's parent folders
-    for config, name in ((CLANG_FORMAT, ".clang-format"), (CLANG_TIDY, ".clang-tidy")):
-        if config.is_file():
-            args += ["--ro-bind", str(config), str(WORK / name)]
-    located = gate.locate(cwd)
-    if located is None:
-        raise ValueError("The working folder is outside the allowed folders.")
-    _, shown = located
-    args += ["--chdir", str(WORK / shown)]
-    environment = {
-        "PATH": "/usr/bin:/bin", "HOME": "/tmp/home", "LANG": "C.UTF-8", "TERM": "dumb",
-        "PAGER": "cat", "GIT_PAGER": "cat", "GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": "true",
-        "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_COUNT": "3",
-        "GIT_CONFIG_KEY_0": "core.hooksPath", "GIT_CONFIG_VALUE_0": "/dev/null",
-        "GIT_CONFIG_KEY_1": "core.fsmonitor", "GIT_CONFIG_VALUE_1": "false",
-        "GIT_CONFIG_KEY_2": "safe.directory", "GIT_CONFIG_VALUE_2": "*",
-    }
-    for key, setting in (("GIT_AUTHOR_NAME", "user.name"), ("GIT_AUTHOR_EMAIL", "user.email")):
-        value = subprocess.run(["git", "config", "--global", setting], capture_output=True, text=True).stdout.strip()
-        if value:
-            environment[key] = environment[key.replace("AUTHOR", "COMMITTER")] = value
-    for key, value in environment.items():
-        args += ["--setenv", key, value]
-    return args + ["--"]
-
-
-def run(cwd: str, command: str) -> tuple[bool, str]:
-    """
-    Check and run a command line in the sandbox.
-    Args:
-        cwd: <allowed name>/<folder> to start in; "" for the first allowed folder (context/paths.json),
-            for commands that do not depend on a folder (whoami, date, bc).
-        command: The command line.
-    Returns:
-        tuple[bool, str]: Whether it exited with status 0, and its output.
-    Raises:
-        ValueError: If the folder or the command line is not allowed.
-    """
-    gate = FsGate.load()
-    commands = {name: entry for name, entry in load_commands().items() if not own_tool(name)}
-    if command.strip() in ("", "help"):
-        return True, help_text(gate, commands)
-    if not cwd.strip():
-        cwd = next(iter(gate.folders))  # The first allowed folder
-    folder, shown = gate.resolve(cwd, "dir", "r")
-    command = STDERR_HABITS.sub("", command)
-    check(command, folder, commands, gate)
-    if not shutil.which("bwrap"):
-        raise ValueError("bubblewrap (bwrap) is not installed, so the shell cannot run safely.")
-    try:
-        with tempfile.TemporaryDirectory(prefix="shell-identity-") as identity:
-            result = subprocess.run([*sandbox(gate, folder, identity_files(Path(identity))),
-                                     "/usr/bin/bash", "--noprofile", "--norc", "-c", command],
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
-                                    env={}, timeout=TIMEOUT)  # Nothing of the caller's environment
-    except subprocess.TimeoutExpired:
-        return False, f"Stopped after {TIMEOUT}s: {command}"
-    output = gate.display(result.stdout).replace(f"{WORK}/", "")
-    if len(output) > MAX_CHARS:
-        output = output[:MAX_CHARS] + "\n..."
-    lines = output.rstrip("\n").splitlines()
-    if len(lines) > MAX_LINES:
-        lines = lines[:MAX_LINES] + [f"... {len(lines) - MAX_LINES} more lines; narrow the command (head, grep)"]
-    if result.returncode != 0:
-        lines.append(f"[exit {result.returncode}]")
-    return result.returncode == 0, "\n".join(lines) if lines else f"(no output) in {shown}"
-
-
-def help_text(gate: FsGate, commands: dict[str, dict]) -> str:
-    """
-    Describe the folders and commands available.
-    Args:
-        gate: The allowed folders.
-        commands: The allowed commands (without those that are their own tools).
-    Returns:
-        str: The allowed folders with their access, then each command and its note.
-    """
-    width = max(map(len, commands))
-    lines = [gate.describe(), "", "Commands (join them with |, &&, || or ;):"]
-    lines += [f"{name:<{width}}  {entry['about']}" + (f" [needs {entry['needs']}]" if entry.get("needs") else "")
-              for name, entry in sorted(commands.items())]
-    return "\n".join(lines)
-
-
-def main(argv: Optional[list[str]] = None) -> tuple[bool, str]:
-    """
-    Read "--cwd <folder> --command <line>" (values taken verbatim, as the agents pass them) and run.
+    Parse the command line, run the command and print its output, or "Error: <reason>".
     Args:
         argv: Arguments; None reads sys.argv.
     Returns:
-        tuple[bool, str]: Whether the command succeeded, and its output.
+        int: 0 when the command exited with status 0, 1 otherwise.
     """
-    argv = list(sys.argv[1:] if argv is None else argv)
-    options = {}
-    while argv:
-        argument = argv.pop(0)
-        if argument in ("--cwd", "--command") and argv:
-            options[argument[2:]] = argv.pop(0)
-        else:
-            raise ValueError(f"Unexpected argument '{argument}'; use --cwd <folder> --command <command line>.")
-    return run(options.get("cwd", ""), options.get("command", ""))
-
-
-if __name__ == "__main__":
+    argv = sys.argv[1:] if argv is None else argv
+    if argv in (["-v"], ["--version"]):
+        print(f"shell {Shell.VERSION}")
+        return 0
     try:
-        ok, report = main()
+        options = Shell.parse(argv)
+        ok, report = Shell().run(options.get("cwd", ""), options.get("command", ""))
     except (ValueError, OSError) as e:
         ok, report = False, f"Error: {e}"
     print(report)
-    sys.exit(0 if ok else 1)
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
