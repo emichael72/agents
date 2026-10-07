@@ -1,5 +1,12 @@
 {
-  "description": "Instructions (system prompt) shared by all three agents. The lines are joined with newlines. on_exit: the last prompt of an interactive chat, sent when the user types exit (save_on_exit in agent.json). identity: put before the instructions, with {name} replaced by the agent's name (names in agent.json).",
+  "description": [
+    "Instructions (system prompt) shared by all three agents.",
+    "The lines are joined with newlines.",
+    "on_exit: the last prompt of an interactive chat, sent when the user types exit",
+    "(save_on_exit in agent.json).",
+    "identity: put before the instructions, with {name} replaced by the agent's name",
+    "(names in agent.json)."
+  ],
   "identity": [
     "Your name is {name}. When asked your name or who you are, answer with this name, written exactly as here."
   ],

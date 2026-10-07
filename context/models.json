@@ -1,5 +1,13 @@
 {
-  "description": "Model profiles shared by all three agents. 'default' names the profile used when no --profile (or --local / --openai) flag picks one. Precedence: --model / --base-url, then the environment variables named by model_env / base_url_env, then (with model_auto) the model loaded on the server (LM Studio), then the values here. The key comes from the variable named by api_key_env; api_key is only a fallback for servers that need no real key.",
+  "description": [
+    "Model profiles shared by all three agents.",
+    "'default' names the profile used when no --profile (or --local / --openai) flag picks one.",
+    "Precedence: --model / --base-url, then the environment variables named by model_env /",
+    "base_url_env, then (with model_auto) the model loaded on the server (LM Studio), then the",
+    "values here.",
+    "The key comes from the variable named by api_key_env; api_key is only a fallback for",
+    "servers that need no real key."
+  ],
   "default": "local",
   "profiles": {
     "local": {

@@ -50,7 +50,7 @@ def control(action: str, port: int = 8000) -> str:
         action: "start", "stop" or "restart".
         port: The service port, to wait until it answers after a start.
     Returns:
-        str: What was done, and the service's state afterwards.
+        str: What was done, and the resulting service state.
     Raises:
         ValueError: If the action is unknown, the unit is not installed, or systemctl fails.
     """

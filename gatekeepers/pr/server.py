@@ -74,8 +74,9 @@ class Poller:
 
     def start(self) -> None:
         """Start polling in a background thread."""
-        self._thread = threading.Thread(target=self._run, name="pr-gate-poller", daemon=True)
-        self._thread.start()
+        thread = threading.Thread(target=self._run, name="pr-gate-poller", daemon=True)
+        self._thread = thread
+        thread.start()
 
     def stop(self) -> None:
         """Ask the poller to stop; a generation in progress finishes first."""

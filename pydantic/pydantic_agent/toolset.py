@@ -20,7 +20,7 @@ from jsonschema import ValidationError, validate
 from pydantic_ai import ModelRetry, Tool, ToolFailed
 from pydantic_ai.toolsets import FunctionToolset
 
-TOOLS_DIR = Path(__file__).resolve().parent.parent / "tools"
+TOOLS_DIR = Path(__file__).resolve().parents[2] / "tools"
 SCRIPT_TIMEOUT = 30
 AGENT_NAME = "Pydantic Agent"  # Lets tools such as mr and pr_gate say which agent ran them
 
@@ -126,17 +126,17 @@ def manifest_tool(name: str, manifest: dict) -> Tool:
 
 def load_toolset(tools_dir: Path = TOOLS_DIR) -> FunctionToolset:
     """
-    Load one tool per <tool>/tool.json under a tools folder.
+    Load each <tool>/tool.json manifest as a callable tool.
     Args:
         tools_dir: The folder to scan (default: agents/tools).
     Returns:
         FunctionToolset: The tools, named after their folders, in alphabetical order.
     """
-    toolset = FunctionToolset()
+    loaded_toolset = FunctionToolset()
     for manifest_path in sorted(tools_dir.glob("*/tool.json")):
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        toolset.add_tool(manifest_tool(manifest_path.parent.name, manifest))
-    return toolset
+        loaded_toolset.add_tool(manifest_tool(manifest_path.parent.name, manifest))
+    return loaded_toolset
 
 
 toolset = load_toolset()

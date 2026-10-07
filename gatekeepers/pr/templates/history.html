@@ -29,7 +29,7 @@
             <tr>
               <td>{{ local_time(row.created) }}</td>
               <td>
-                <a href="/history?pr={{ row.pr }}">#{{ row.pr }}</a>
+                <a href="{{ request.url_for('history_page').path }}?pr={{ row.pr }}">#{{ row.pr }}</a>
                 {% if row.pr_title == not_found %}
                   <span class="muted">{{ row.pr_title }}</span>
                 {% else %}

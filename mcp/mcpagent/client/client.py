@@ -28,28 +28,31 @@ import contextlib
 import logging
 import time
 from pathlib import Path
-from typing import (Any, Optional, Union)
-
-import json5
-# Third-party
-from jsonschema import validate, ValidationError
+from typing import Any, Optional, Union
 
 # Local imports
-from .connection import MCPClientConnection
-from .logger import MCPAgentLogger
-from .types import (MCPTransportType, ResponseCallbackType, EventCallbackType, RequestReturnType,
-                                  ListenEventsReturnType, ConfigType, HTTPConfigType, STDIOConfigType, DebugGuru)
+from mcpagent import (
+    ConfigType,
+    DebugGuru,
+    EventCallbackType,
+    HTTPConfigType,
+    ListenEventsReturnType,
+    MCPAgentLogger,
+    MCPClientConnection,
+    MCPTransportType,
+    RequestReturnType,
+    ResponseCallbackType,
+    STDIOConfigType,
+    __version__,  # Sent to servers in the initialize handshake
+)
+from mcpagent.config import JSONS_DIR, load_config
 
-from .. import __version__ as CLIENT_VERSION  # Sent to servers in the initialize handshake
-
-# Defaults that live next to this module
-DEFAULT_CONFIG = Path(__file__).resolve().parent / "client.jsonc"
-SCHEMA_DIR = Path(__file__).resolve().parent / "schema"
+DEFAULT_CONFIG = JSONS_DIR / "client.jsonc"
 
 
 class MCPClient:
     """
-    Multi-server MCP client for managing multiple connections.
+    MCP client for managing connections to multiple servers.
     """
 
     def __init__(self, config_file: Union[Path, str]):
@@ -90,7 +93,8 @@ class MCPClient:
         # Load service from configuration
         self._load_servers_from_config()
 
-    def _load_config(self, config_file: Union[Path, str]) -> dict[str, Any]:
+    @staticmethod
+    def _load_config(config_file: Union[Path, str]) -> dict[str, Any]:
         """
         Load an MCP client configuration file written in JSONC/JSON5 format.
         Args:
@@ -100,38 +104,7 @@ class MCPClient:
         Raises:
             RuntimeError: If the file is missing or fails schema validation.
         """
-        path = Path(config_file)
-
-        if not path.is_file():
-            raise RuntimeError(f"Configuration file not found: {str(path)}")
-
-        try:
-            with path.open("r", encoding="utf-8") as f:
-                config_data: dict[str, Any] = json5.load(f)  # json5 supports comments and trailing commas
-
-            # Check if we have specific schema specified in the configuration
-            schema_version: str = config_data.get("schema_version", "1.0")
-            # Construct the schema path
-            schema_path: Path = SCHEMA_DIR / schema_version
-
-            # Verify schema path exists and get the first .json file if available
-            if schema_path.exists() and schema_path.is_dir():
-                json_files = list(schema_path.glob("*.json*"))
-                if json_files:
-                    schema_file = json_files[0]
-                    try:
-                        with schema_file.open("r", encoding="utf-8") as s:
-                            schema = json5.load(s)
-                        validate(instance=config_data, schema=schema)
-                        self._logger.debug(f"Configuration validated against schema {schema_file.name}")
-                    except ValidationError as ve:
-                        raise RuntimeError(f"Schema validation failed: {ve.message}") from ve
-                    except Exception as ve:
-                        raise RuntimeError(f"Error loading schema {schema_file}: {ve}") from ve
-
-            return config_data
-        except Exception as config_error:
-            raise config_error
+        return load_config(config_file)
 
     def _load_servers_from_config(self) -> None:
         """
@@ -183,7 +156,7 @@ class MCPClient:
                     health_check_interval=health_check_interval)
 
                 self._logger.info(
-                    f"Server '{server_id}' ({transport_enum.value}), "
+                    f"Server '{server_id}' ({transport_str}), "
                     f"health_check_interval={health_check_interval} added."
                 )
 
@@ -254,11 +227,11 @@ class MCPClient:
 
     def _get_connection(self, server_id: str) -> Optional[MCPClientConnection]:
         """
-        Retrieve the MCPServerConnection object for a given server ID.
+        Retrieve the MCPClientConnection object for a given server ID.
         Args:
             server_id: The ID of the server whose connection is requested.
         Returns:
-            The MCPServerConnection instance if found, else None.
+            The MCPClientConnection instance if found, else None.
         """
         server = self._servers[server_id.lower()]
         conn = server.get("conn") if isinstance(server, dict) else None
@@ -343,7 +316,7 @@ class MCPClient:
                     response = await conn.request("initialize", {
                         "protocolVersion": "2025-06-18",
                         "capabilities": {},
-                        "clientInfo": {"name": "mcpagent", "version": CLIENT_VERSION},
+                        "clientInfo": {"name": "mcpagent", "version": __version__},
                     })
                     if "error" in response or "result" not in response:
                         raise RuntimeError(f"MCP initialization failed for {_sid}")
@@ -429,7 +402,7 @@ class MCPClient:
             params (dict[str, Any]):
                 Parameters for the RPC call.
             server_id (Optional[str]):
-                If provided, target only this server. Otherwise broadcast to all
+                If provided, target only this server. Otherwise, broadcast to all
                 connected servers.
             timeout (float):
                 Timeout in seconds (default 5.0).
@@ -439,12 +412,12 @@ class MCPClient:
                   - If omitted → you must await the coroutine(s).
         Returns:
             - Single-server: coroutine or Task (depending on callback)
-            - Multi-server: dict[server_id, coroutine|Task]
+            - Multiple servers: dict[server_id, coroutine|Task]
         Raises:
             ConnectionError:
                 If the target server is known to be disconnected.
-            TypeError:
-                If a server entry is not an MCPServerConnection.
+            RuntimeError:
+                If a server entry does not contain an MCPClientConnection.
         """
 
         # Single-server mode
@@ -459,14 +432,14 @@ class MCPClient:
                     callback(None, ConnectionError(f"Server '{server_id}' not connected"))
                     loop = asyncio.get_running_loop()
 
-                    async def _dummy() -> dict[str, Any]:
+                    async def _disconnected_server_result() -> dict[str, Any]:
                         return {"error": f"Server '{server_id}' not connected"}
 
-                    return loop.create_task(_dummy())
+                    return loop.create_task(_disconnected_server_result())
                 raise ConnectionError(f"Server '{server_id}' not connected")
             return conn.request(method=method, params=params, timeout=timeout, callback=callback)
 
-        # Multi-server broadcast mode
+        # Broadcast to all servers
         results: dict[str, RequestReturnType] = {}
         for sid, server_data in self._servers.items():
             conn = self._get_connection(server_id=sid)
@@ -479,10 +452,10 @@ class MCPClient:
                     loop = asyncio.get_running_loop()
 
                     # Bind this server's id now: the task runs after the loop has moved on
-                    async def _dummy(sid: str = sid) -> dict[str, Any]:
-                        return {"error": f"Server '{sid}' not connected"}
+                    async def _disconnected_broadcast_result(_server_id: str = sid) -> dict[str, Any]:
+                        return {"error": f"Server '{_server_id}' not connected"}
 
-                    results[sid] = loop.create_task(_dummy())
+                    results[sid] = loop.create_task(_disconnected_broadcast_result())
                 else:
                     raise ConnectionError(f"Server '{sid}' not connected")
                 continue
@@ -540,7 +513,7 @@ class MCPClient:
 
         conn = self._get_connection(server_id=server_id)
         if not isinstance(conn, MCPClientConnection):
-            raise TypeError(f"Bad MCPServerConnectin for server {server_id}")
+            raise TypeError(f"Invalid MCPClientConnection for server {server_id}")
 
         return conn.listen(callback=callback)
 

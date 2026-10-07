@@ -10,14 +10,15 @@ Description:
 import sys
 from pathlib import Path
 
-# Run from any folder: the repository root holds the mcpagent package.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+# Run from any folder: the MCP project directory holds the mcpagent package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import json
 import re
 import os
 import tempfile
 import unittest
+from collections.abc import Awaitable, Callable
 from unittest.mock import Mock, patch
 
 import io
@@ -64,6 +65,8 @@ def call(name, arguments, call_id="call-1"):
 
 class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
     """Agent-loop tests against a real MCP server, with scripted model responses."""
+    model_handler: Callable[[web.Request], Awaitable[web.StreamResponse]]
+
     async def asyncSetUp(self):
         """
         Start an MCP server on the shared tools, write a client config for it, and connect an
@@ -94,18 +97,11 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.status = 200
         self.error_code = None
 
-        self.model_handler = None  # A test can replace how the model server answers
+        # A test can replace how the model server answers.
+        self.model_handler = self._model_response
 
-        async def responses(request):
-            if self.model_handler:
-                return await self.model_handler(request)
-            self.assertEqual(request.path, '/v1/responses')
-            self.assertEqual(request.headers['Authorization'], 'Bearer test-key-not-real')
-            self.requests.append(await request.json())
-            if self.status != 200:
-                return web.json_response({"error": {"message": "test-key-not-real", "code": self.error_code}},
-                                         status=self.status)
-            return web.json_response({"status": "completed", "output": self.outputs.pop(0)})
+        async def responses(request: web.Request) -> web.StreamResponse:
+            return await self.model_handler(request)
 
         model_app = web.Application()
         model_app.router.add_post('/v1/responses', responses)
@@ -119,6 +115,16 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.agent.close)
         await self.agent.connect()
         self.aliases = {name: alias for alias, (_, name, _) in self.agent.routes.items()}
+
+    async def _model_response(self, request: web.Request) -> web.StreamResponse:
+        """Answer a model request using the test's scripted output."""
+        self.assertEqual(request.path, '/v1/responses')
+        self.assertEqual(request.headers['Authorization'], 'Bearer test-key-not-real')
+        self.requests.append(await request.json())
+        if self.status != 200:
+            return web.json_response({"error": {"message": "test-key-not-real", "code": self.error_code}},
+                                     status=self.status)
+        return web.json_response({"status": "completed", "output": self.outputs.pop(0)})
 
     async def test_shared_scenario(self):
         # The scripted turn every agent's tests replay: all calls in one response, the real tools run
@@ -291,15 +297,16 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
 
     def shipped_models(self):
         """
-        Load the shared model profiles through the shipped client/client.jsonc.
+        Load the shared model profiles through the shipped jsons/client.jsonc.
         Returns:
             dict: The parsed models file.
         """
         return load_models(self.shipped_config(), CLIENT_CONFIG)
 
-    def shipped_config(self):
+    @staticmethod
+    def shipped_config():
         """
-        Load the client config the package ships (client/client.jsonc).
+        Load the client config the package ships (jsons/client.jsonc).
         Returns:
             dict: The parsed config.
         """
@@ -380,6 +387,8 @@ class OutputTests(unittest.TestCase):
         settings = load_output_settings(json5.loads(CLIENT_CONFIG.read_text()), CLIENT_CONFIG)
         self.assertEqual((settings['width'], settings['show_time']), (120, True))
 
+    # The agents keep independent tests for their shared terminal behavior.
+    # noinspection DuplicatedCode
     def test_by_default_only_the_answer_and_timing_print_and_tools_show_on_the_spinner(self):
         printed = io.StringIO()
         output = Output(Console(file=printed, force_terminal=True, width=120), {"width": 120, "show_time": True},
@@ -403,6 +412,7 @@ class OutputTests(unittest.TestCase):
         plain = re.sub(r"\x1b\[[0-9;]*m", "", printed.getvalue())
         self.assertEqual(plain.splitlines()[1:], ["Two files.", "Response time: 0.0s", "", "History cleared."])
 
+    # noinspection DuplicatedCode
     def test_text_around_hidden_tool_calls_has_one_blank_line_between(self):
         for more_text in (True, False):
             printed = io.StringIO()

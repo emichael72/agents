@@ -1,4 +1,3 @@
-# noinspection SpellCheckingInspection
 """
 Module: service.py
 
@@ -39,11 +38,11 @@ from jsonschema import validate, ValidationError
 from colorama import Fore, Style
 
 # Local imports
+from mcpagent.config import JSONS_DIR
 from .logger import MCPAgentLogger
 from .types import MCPServiceConfigType, MCPServiceToolType
 
-# The default config lives next to this module
-DEFAULT_CONFIG = Path(__file__).resolve().parent / "server.jsonc"
+DEFAULT_CONFIG = JSONS_DIR / "server.jsonc"
 
 MAX_BATCH_MCP_COMMANDS = 64
 BUSY_CODE = -32004
@@ -94,7 +93,7 @@ class MCPService:
         self._tools_data: dict[str, Any] = self._project_data.get("tools", {})
 
         # Optional shared tools folder: one sub-folder per tool, each with a tool.json manifest
-        tools_dir = self._project_data.get("tools_dir")
+        tools_dir: Optional[str] = self._project_data.get("tools_dir")
         if tools_dir:
             discovered = self._discover_tools(tools_dir, self._project_data.get("tools_env", {}))
             self._tools_data = {**discovered, **self._tools_data}
@@ -271,7 +270,7 @@ class MCPService:
         Supports:
           - Single requests and batches per JSON-RPC 2.0.
           - Methods: initialize, ping, help, tools/list, tools/call, resources/list, resources/read.
-          - Notifications (no "id"): answered with 202 and no body.
+          - Notifications (no "id"): answered with 202 and an empty response body.
         Error behavior:
           - Always HTTP 200 with a JSON-RPC error envelope (-32700, -32600, -32602, -32603).
           - Never lets exceptions reach aiohttp (no HTTP 500).
@@ -408,16 +407,17 @@ class MCPService:
                 elif method == "resources/read":
 
                     uri = params.get("uri")
-                    if not uri or not uri.startswith("file://"):
+                    if not isinstance(uri, str) or not uri.startswith("file://"):
                         return make_error(-32602, f"Invalid or missing URI: {uri}")
 
                     parsed = urlparse(uri)
                     path = unquote(parsed.path)
                     query_params = dict(parse_qsl(parsed.query))
-                    allowed_paths = {
-                        (Path(self._project_base_path) / t.resource).resolve()
-                        for t in self._tools_registry.values() if t.resource
-                    }
+                    allowed_paths: set[Path] = set()
+                    for tool in self._tools_registry.values():
+                        resource = tool.resource
+                        if resource:
+                            allowed_paths.add((Path(self._project_base_path) / resource).resolve())
                     if parsed.netloc or Path(path).resolve() not in allowed_paths:
                         return make_error(-32602, "Resource is not registered")
 
@@ -850,7 +850,7 @@ class MCPService:
         try:
             await self._shutdown_event.wait()  # Block until told to exit
         except asyncio.CancelledError:
-            # Handles task.cancel() if loop is being cancelled
+            # Handles task.cancel() when the event loop shuts down
             pass
         finally:
             await runner.cleanup()
@@ -889,6 +889,8 @@ class MCPService:
             with config_path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
 
+            # Generated URLs match this service's HTTP listener.
+            # noinspection HttpUrlsUsage
             url_to_remove = f"http://{host}:{port}"
             servers = data.get("servers", {})
 
@@ -941,22 +943,20 @@ class MCPService:
         if create_parents:
             vscode_dir.mkdir(parents=True, exist_ok=True)
 
-        data: Optional[dict] = None
+        data: dict[str, Any] = {}
 
         if config_path.exists():
             try:
-                data = json.loads(config_path.read_text(encoding="utf-8"))
-                if not isinstance(data, dict):
-                    data = {}
+                loaded_data = json.loads(config_path.read_text(encoding="utf-8"))
+                if isinstance(loaded_data, dict):
+                    data = loaded_data
             except (JSONDecodeError, UnicodeDecodeError):
                 with contextlib.suppress(Exception):
                     config_path.rename(config_path.with_suffix(".json.bak"))
                 data = {}
 
-        if data is None:
-            data = {}
-
         servers = data.setdefault("servers", {})
+        # noinspection HttpUrlsUsage
         new_entry = {"type": "http", "url": f"http://{host}:{port}"}
 
         if server_name not in servers or overwrite_existing or servers[server_name] != new_entry:
@@ -989,6 +989,7 @@ class MCPService:
             host_bind_address (optional str): Bind address to bind to the MCP server.
         """
 
+        # noinspection HttpUrlsUsage
         base = f"http://{host}:{port}"
         # Muted, like the agents: dark gray for labels and hints, plain text for what to read or copy
         gray, reset = Fore.LIGHTBLACK_EX, Style.RESET_ALL
@@ -1062,19 +1063,19 @@ class MCPService:
 
         try:
 
-            self._mcp_config.host = self._mcp_server_bind_address or "127.0.0.1"
-            self._mcp_config.advertise_ip = (
-                "127.0.0.1" if self._mcp_config.host == "0.0.0.0" else self._mcp_config.host
-            )
+            host = self._mcp_server_bind_address or "127.0.0.1"
+            advertise_ip = "127.0.0.1" if host == "0.0.0.0" else host
+            self._mcp_config.host = host
+            self._mcp_config.advertise_ip = advertise_ip
 
             # Create VSCode 'mcp.json' file in the solution workspace
             if self._patch_vscode_config:
-                self._generate_vscode_config(base_path=None, host=self._mcp_config.advertise_ip,
+                self._generate_vscode_config(base_path=None, host=advertise_ip,
                                              port=self._mcp_config.port, server_name=self._mcp_server_name,
                                              overwrite_existing=True, create_parents=True)
 
             # Show welcome message and usage examples
-            self._greetings(host=self._mcp_config.advertise_ip, port=self._mcp_config.port,
+            self._greetings(host=advertise_ip, port=self._mcp_config.port,
                             server_name=self._mcp_server_name, show_examples=self._show_usage_examples,
                             host_bind_address=self._mcp_server_bind_address)
 

@@ -8,8 +8,8 @@ Description:
 import sys
 from pathlib import Path
 
-# Run from any folder: the repository root holds the mcpagent package.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+# Run from any folder: the MCP project directory holds the mcpagent package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import json
 import os
@@ -22,14 +22,17 @@ from unittest.mock import patch
 
 import json5
 from aiohttp.test_utils import TestClient, TestServer
-from mcpagent import MCPService
+from mcpagent import MCPClient, MCPService
+from mcpagent.config import JSONS_DIR, SCHEMA_DIR, load_config
+from mcpagent.client.client import DEFAULT_CONFIG as CLIENT_CONFIG
+from mcpagent.server.__main__ import start_mcp_server
 from mcpagent.server.service import DEFAULT_CONFIG as SERVER_CONFIG
 
 
 class ServiceTests(unittest.IsolatedAsyncioTestCase):
     """Server tests: a real MCPService on the shared tools, called through an aiohttp test client."""
     async def asyncSetUp(self):
-        """Start the server from server/server.jsonc on a test port and open a client to it."""
+        """Start the server from jsons/server.jsonc on a test port and open a client to it."""
         config = SERVER_CONFIG
         old = Path.cwd()
         try:
@@ -139,10 +142,11 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                 'docs': {'path': str(Path(folder) / 'ro'), 'access': 'r'},
                 'tools': {'path': tools, 'access': 'r'}}}))
 
-            async def shell(cwd, command):
+            async def shell(working_dir, shell_command):
                 with patch.dict(os.environ, {'FS_GATE_PATHS': str(allowed)}):
-                    result = (await self.rpc('tools/call', {'name': 'shell', 'arguments': {'cwd': cwd, 'command': command}}))['result']
-                return result['isError'], result['content'][0]['text']
+                    tool_result = (await self.rpc('tools/call', {'name': 'shell', 'arguments': {
+                        'cwd': working_dir, 'command': shell_command}}))['result']
+                return tool_result['isError'], tool_result['content'][0]['text']
 
             proj = Path(folder) / 'rw'
             for args in (['init', '-q'], ['add', 'hello.c'], ['-c', 'user.name=T', '-c', 'user.email=t@x', 'commit', '-qm', 'first']):
@@ -293,9 +297,9 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             allowed.write_text(json.dumps({'paths': {'sample': {'path': folder, 'access': 'rw'},
                                                     'tools': str(Path(__file__).resolve().parents[2] / 'tools')}}))
 
-            async def ed(args):
+            async def ed(arguments):
                 with patch.dict(os.environ, {'FS_GATE_PATHS': str(allowed)}):
-                    result = (await self.rpc('tools/call', {'name': 'ed', 'arguments': args}))['result']
+                    result = (await self.rpc('tools/call', {'name': 'ed', 'arguments': arguments}))['result']
                 return result['isError'], result['content'][0]['text']
 
             error, text = await ed({'path': 'sample/a.c', 'old': 'int a;', 'new': 'int alpha;'})
@@ -364,6 +368,12 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         result = await self.rpc('resources/read', {'uri': Path(__file__).resolve().as_uri()})
         self.assertEqual(result['error']['code'], -32602)
 
+    async def test_resource_uri_validation(self):
+        for uri in (None, '', 123, ['file:///tmp/resource.md'], {'uri': 'file:///tmp/resource.md'}, 'https://example.com'):
+            with self.subTest(uri=uri):
+                result = await self.rpc('resources/read', {'uri': uri})
+                self.assertEqual(result['error']['code'], -32602)
+
     async def test_transport_and_origin(self):
         response = await self.client.post('/', json={'jsonrpc': '2.0', 'method': 'notifications/initialized'})
         self.assertEqual(response.status, 202)
@@ -376,6 +386,97 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 200)
         response = await self.client.post('/', json={})
         self.assertEqual((await response.json())['error']['code'], -32600)
+
+
+class ConfigLoadingTests(unittest.TestCase):
+    """Config filenames select an optional schema for both entry points."""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.config_dir = Path(folder.name)
+        self.schema_dir = self.config_dir / 'schemas'
+        self.schema_dir.mkdir()
+        schema_patch = patch('mcpagent.config.SCHEMA_DIR', self.schema_dir)
+        schema_patch.start()
+        self.addCleanup(schema_patch.stop)
+
+    def test_shipped_configs_and_relative_paths(self):
+        self.assertEqual(JSONS_DIR.parent, Path(__file__).resolve().parents[1] / 'mcpagent')
+        self.assertEqual(CLIENT_CONFIG, JSONS_DIR / 'client.jsonc')
+        self.assertEqual(SERVER_CONFIG, JSONS_DIR / 'server.jsonc')
+        with patch('mcpagent.config.SCHEMA_DIR', SCHEMA_DIR):
+            client_config = load_config(CLIENT_CONFIG)
+            server_config = load_config(SERVER_CONFIG)
+        for key in ('instructions_file', 'models_file', 'output_file', 'agent_file'):
+            self.assertTrue((CLIENT_CONFIG.parent / client_config[key]).is_file())
+        tools_dir = (SERVER_CONFIG.parent / server_config['tools_dir']).resolve()
+        self.assertEqual(tools_dir, Path(__file__).resolve().parents[2] / 'tools')
+
+    def test_same_name_schema_validates_json_and_jsonc(self):
+        (self.schema_dir / 'custom.schema').write_text(json.dumps({
+            'type': 'object', 'required': ['name'], 'properties': {'name': {'type': 'string'}}
+        }))
+        for extension in ('.json', '.jsonc'):
+            with self.subTest(extension=extension):
+                config_file = self.config_dir / f'custom{extension}'
+                config_file.write_text('// A JSONC comment\n{"name": "test",}')
+                self.assertEqual(load_config(config_file), {'name': 'test'})
+                config_file.write_text('{"name": 123, "schema_version": "missing"}')
+                with self.assertRaisesRegex(RuntimeError, 'Schema validation failed.*custom.schema'):
+                    load_config(config_file)
+
+    def test_missing_schema_does_not_use_an_unrelated_schema(self):
+        (self.schema_dir / 'other.schema').write_text('false')
+        config_file = self.config_dir / 'custom.jsonc'
+        config_file.write_text('{"anything": true}')
+        self.assertEqual(load_config(config_file), {'anything': True})
+
+    def test_broken_or_invalid_schema_stops_loading(self):
+        config_file = self.config_dir / 'custom.jsonc'
+        config_file.write_text('{}')
+        for schema in ('{broken', '{"type": "unknown"}'):
+            with self.subTest(schema=schema):
+                (self.schema_dir / 'custom.schema').write_text(schema)
+                with self.assertRaisesRegex(RuntimeError, 'Error loading schema.*custom.schema'):
+                    load_config(config_file)
+
+    def test_missing_or_non_object_config_is_rejected(self):
+        config_file = self.config_dir / 'custom.jsonc'
+        with self.assertRaisesRegex(RuntimeError, 'Configuration file not found'):
+            load_config(config_file)
+        config_file.write_text('[]')
+        with self.assertRaisesRegex(RuntimeError, 'Configuration must be a JSON object'):
+            load_config(config_file)
+
+    def test_client_uses_its_matching_schema(self):
+        (self.schema_dir / 'client.schema').write_text((SCHEMA_DIR / 'client.schema').read_text())
+        config_file = self.config_dir / 'client.jsonc'
+        config_file.write_text('{"log_level": "ERROR", "servers": []}')
+        self.assertEqual(MCPClient(config_file).config_data['servers'], [])
+        config_file.write_text('{"log_level": "invalid", "servers": [], "schema_version": "missing"}')
+        with self.assertRaisesRegex(RuntimeError, 'Schema validation failed'):
+            MCPClient(config_file)
+
+    def test_server_validates_before_starting_and_restores_cwd(self):
+        (self.schema_dir / 'server.schema').write_text(json.dumps({
+            'type': 'object', 'required': ['mcp_server_port'],
+            'properties': {'mcp_server_port': {'type': 'integer'}}
+        }))
+        config_file = self.config_dir / 'server.jsonc'
+        old_cwd = Path.cwd()
+        with patch('mcpagent.server.__main__.MCPService') as service_class:
+            service_class.return_value.start.return_value = 0
+            config_file.write_text('{"mcp_server_port": 6275}')
+            self.assertEqual(start_mcp_server(config_file), 0)
+            service_class.assert_called_once_with(project_data={'mcp_server_port': 6275})
+            self.assertEqual(Path.cwd(), old_cwd)
+            service_class.reset_mock()
+            config_file.write_text('{"mcp_server_port": "invalid"}')
+            with self.assertRaisesRegex(RuntimeError, 'Schema validation failed'):
+                start_mcp_server(config_file)
+            service_class.assert_not_called()
+            self.assertEqual(Path.cwd(), old_cwd)
 
 
 if __name__ == '__main__':

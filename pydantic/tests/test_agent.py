@@ -20,28 +20,30 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from rich.console import Console  # noqa: E402
-from pydantic_ai import ModelRetry  # noqa: E402
-from pydantic_ai.messages import (ModelRequest, ModelResponse, TextPart, ToolCallPart, ToolReturnPart,  # noqa: E402
+from rich.console import Console
+import pydantic as pydantic_dependency
+from pydantic_ai import ModelRetry
+from pydantic_ai.messages import (ModelRequest, ModelResponse, TextPart, ToolCallPart, ToolReturnPart,
                                   UserPromptPart)
-from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel  # noqa: E402
+from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
-import agent  # noqa: E402
-import toolset as tools_module  # noqa: E402
+from pydantic_agent import agent
+from pydantic_agent import toolset as tools_module
+from pydantic_agent import build_agent
 
 # The scripted turn every agent's tests replay (tests/scenario.json)
 SCENARIO = json.loads((Path(__file__).resolve().parents[2] / "tests" / "scenario.json").read_text())
 CALLS = [(step["tool"], step["arguments"]) for step in SCENARIO["calls"]]
 
 
-async def scripted_model(messages, info: AgentInfo):
+async def scripted_model(messages, _info: AgentInfo):
     """
     A stand-in model, scripted for two requests.
     The first request is answered with a call to every tool in CALLS, in one response; the
     next is answered with the text of the tool results it received.
     Args:
         messages: The conversation so far.
-        info: pydantic-ai's information about the run (unused).
+        _info: pydantic-ai's information about the run (unused).
     Yields:
         Tool-call deltas for the first request, then the answer text.
     """
@@ -67,7 +69,17 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         console_patch.start()
         self.addCleanup(console_patch.stop)
 
-    async def run_tracked(self, parallel):
+    def test_package_namespace_and_dependency_do_not_conflict(self):
+        project_dir = Path(__file__).resolve().parents[1]
+        self.assertIs(build_agent, agent.build_agent)
+        dependency_file = pydantic_dependency.__file__
+        assert dependency_file is not None
+        self.assertFalse(Path(dependency_file).resolve().is_relative_to(project_dir))
+        self.assertEqual(agent.CONTEXT_DIR, project_dir.parent / 'context')
+        self.assertEqual(tools_module.TOOLS_DIR, project_dir.parent / 'tools')
+
+    @staticmethod
+    async def run_tracked(parallel: bool):
         """
         Run the scripted turn, recording how many scripts were running as each one started.
         Args:
@@ -159,8 +171,8 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Nothing to save", agent.load_instructions(key="on_exit"))
         self.assertTrue(json.loads(agent.AGENT_FILE.read_text())["save_on_exit"])
         ask = ModelRequest(parts=[UserPromptPart("hi")])
-        answer = ModelResponse(parts=[TextPart("hello")])
-        call = ModelResponse(parts=[ToolCallPart("time", {})])
+        answer = ModelResponse(parts=[TextPart("hello")], provider_details=None, provider_response_id=None)
+        call = ModelResponse(parts=[ToolCallPart("time", {})], provider_details=None, provider_response_id=None)
         self.assertFalse(agent.worth_saving([]))
         self.assertFalse(agent.worth_saving([ask, answer]))
         self.assertTrue(agent.worth_saving([ask, answer, ask, answer]))
@@ -194,7 +206,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(clock(timezone=None)[:4], clock()[:4])  # null means omitted: local time
 
     async def test_history_carries_across_turns(self):
-        async def remember(messages, info):
+        async def remember(messages, _info):
             yield f"{len(messages)} messages so far"
         bot = agent.build_agent(FunctionModel(stream_function=remember))
         history = await agent.ask(bot, "one", [], trace=False)
@@ -209,6 +221,8 @@ class OutputTests(unittest.TestCase):
         self.printed = io.StringIO()
         self.output = agent.Output(Console(file=self.printed), {"width": 30, "show_time": True})
 
+    # Each agent keeps independent tests for the shared terminal behavior.
+    # noinspection DuplicatedCode
     def test_by_default_only_the_answer_and_timing_print_and_tools_show_on_the_spinner(self):
         printed = io.StringIO()
         output = agent.Output(Console(file=printed, force_terminal=True, width=120), {"width": 120, "show_time": True},
@@ -232,6 +246,7 @@ class OutputTests(unittest.TestCase):
         plain = re.sub(r"\x1b\[[0-9;]*m", "", printed.getvalue())
         self.assertEqual(plain.splitlines()[1:], ["Two files.", "Response time: 0.0s", "", "History cleared."])
 
+    # noinspection DuplicatedCode
     def test_text_around_hidden_tool_calls_has_one_blank_line_between(self):
         for more_text in (True, False):
             printed = io.StringIO()

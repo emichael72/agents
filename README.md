@@ -5,11 +5,11 @@ configured once in [`context/models.json`](context/models.json) (by default an L
 running `qwen/qwen3-coder-30b`), and run the same tools, which they discover in the shared
 [`tools/`](tools/README.md) folder, and remember between runs in the same [memory](#memory).
 
-| Agent | Built with | Who runs the agent loop | README |
-| --- | --- | --- | --- |
-| `mcpagent` | Python, no framework (MCPAgent) | hand-written code | [mcpagent/README.md](mcpagent/README.md) |
-| `pydantic` | Python, [pydantic-ai](https://pydantic.dev/docs/ai/) | the framework | [pydantic/README.md](pydantic/README.md) |
-| `vercel` | TypeScript, [AI SDK](https://ai-sdk.dev) | the framework | [vercel/README.md](vercel/README.md) |
+| Agent      | Built with                                           | Who runs the agent loop | README                                   |
+|------------|------------------------------------------------------|-------------------------|------------------------------------------|
+| `mcp`      | Python, no framework (MCPAgent)                      | hand-written code       | [mcp/README.md](mcp/README.md) |
+| `pydantic` | Python, [pydantic-ai](https://pydantic.dev/docs/ai/) | the framework           | [pydantic/README.md](pydantic/README.md) |
+| `vercel`   | TypeScript, [AI SDK](https://ai-sdk.dev)             | the framework           | [vercel/README.md](vercel/README.md)     |
 
 The commands below are a quick tour. Every option and troubleshooting are in each agent's own
 README. Run every command from the repository root; paths are relative to it.
@@ -19,7 +19,7 @@ README. Run every command from the repository root; paths are relative to it.
 `install.sh` prepares everything the three agents need:
 
 - `.venv/`: one Python environment shared by MCPAgent and the Pydantic Agent, with both agents'
-  pinned requirements (`mcpagent/requirements.txt`, `pydantic/requirements.txt`). Neither agent is
+  pinned requirements (`mcp/requirements.txt`, `pydantic/requirements.txt`). Neither agent is
   installed as a package; both run from the source tree.
 - `vercel/node_modules/`: the Vercel Agent's packages, installed exactly as
   `vercel/package-lock.json` records (`npm ci`).
@@ -31,7 +31,9 @@ README. Run every command from the repository root; paths are relative to it.
 It also installs the pinned development tools in `requirements-dev.txt`: Ruff, the Python linter.
 `.venv/bin/ruff check` checks the repository for likely bugs, with the rules in `ruff.toml`.
 
-Requirements: Python 3.10+, and Node.js 22.18+ with npm 10+ for the Vercel Agent (Node 22.18+ runs
+Requirements: a Red Hat family system that uses dnf (RHEL, Fedora, Rocky, AlmaLinux and the like),
+Python 3.10+ (`python3` if new enough, otherwise the newest `python3.N` in `PATH`;
+`--python` picks one), and Node.js 22.18+ with npm 10+ for the Vercel Agent (Node 22.18+ runs
 the `.ts` files directly, so there is no build step). Neither `.venv/` nor `node_modules/` is
 committed.
 
@@ -85,7 +87,8 @@ change on its next start. None of this is hard-coded in the agents.
   unsafe patterns, not style); Fedora's clang-tidy enables none on its own. A project's own
   `.clang-tidy` wins.
 - `context/paths.json`: the folders the tools may use and their access (`r` read, `w` write,
-  `x` execute): `core_dump` is `rwx`, `tools` is `r`, `memory` (`.memory/`) is `rw`. Every tool that takes a path checks it with
+  `x` execute): `core_dump` is `rwx`, `tools` is `r`, `memory` (`.memory/`) is `rw`. Every tool that takes a path checks
+  it with
   the file-system gate, `gatekeepers/fs/fs_gate.py`, and `shell` mounts exactly these folders in its
   sandbox; see
   [tools/README.md](tools/README.md). Unlike the rest of `context/`, it is read on every tool call,
@@ -98,26 +101,35 @@ change on its next start. None of this is hard-coded in the agents.
 ```json
 "profiles": {
   "local": {
-    "name": "Local model server",
-    "base_url": "http://boba:1234/v1",  "base_url_env": "LOCAL_LLM_BASE_URL",
-    "model": "qwen/qwen3-coder-30b",     "model_env": "LOCAL_LLM_MODEL",
-    "api_key_env": "LOCAL_LLM_API_KEY",  "api_key": "lm-studio",
-    "timeout": 300
+	"name": "Local model server",
+	"base_url": "http://boba:1234/v1",
+	"base_url_env": "LOCAL_LLM_BASE_URL",
+	"model": "qwen/qwen3-coder-30b",
+	"model_env": "LOCAL_LLM_MODEL",
+	"api_key_env": "LOCAL_LLM_API_KEY",
+	"api_key": "lm-studio",
+	"timeout": 300
   },
-  "openai": { "name": "OpenAI", "base_url": "https://api.openai.com/v1", "model": "gpt-4.1-mini",
-              "model_env": "OPENAI_MODEL", "api_key_env": "OPENAI_API_KEY", "timeout": 60 }
+  "openai": {
+	"name": "OpenAI",
+	"base_url": "https://api.openai.com/v1",
+	"model": "gpt-4.1-mini",
+	"model_env": "OPENAI_MODEL",
+	"api_key_env": "OPENAI_API_KEY",
+	"timeout": 60
+  }
 }
 ```
 
-| Field | Meaning |
-| --- | --- |
-| `base_url`, `model` | Required. An OpenAI-compatible server and a model id it serves (MCPAgent also needs the server to support `/v1/responses`) |
-| `base_url_env`, `model_env` | Optional environment variables that override `base_url` and `model` |
-| `api_key_env` | Environment variable holding the key; a profile never reads another profile's key |
-| `api_key` | Fallback when `api_key_env` is unset, for servers that need no real key; never put a secret here |
-| `timeout` | Request timeout in seconds; 300 leaves time for LM Studio to load a model |
-| `model_auto` | Ask the server which model is loaded (LM Studio's `/api/v0/models`) and use it; `model` is the fallback when none is loaded. `--model` and `model_env` still win |
-| `name` | Display name in the chat banner and error messages |
+| Field                       | Meaning                                                                                                                                                          |
+|-----------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `base_url`, `model`         | Required. An OpenAI-compatible server and a model id it serves (MCPAgent also needs the server to support `/v1/responses`)                                       |
+| `base_url_env`, `model_env` | Optional environment variables that override `base_url` and `model`                                                                                              |
+| `api_key_env`               | Environment variable holding the key; a profile never reads another profile's key                                                                                |
+| `api_key`                   | Fallback when `api_key_env` is unset, for servers that need no real key; never put a secret here                                                                 |
+| `timeout`                   | Request timeout in seconds; 300 leaves time for LM Studio to load a model                                                                                        |
+| `model_auto`                | Ask the server which model is loaded (LM Studio's `/api/v0/models`) and use it; `model` is the fallback when none is loaded. `--model` and `model_env` still win |
+| `name`                      | Display name in the chat banner and error messages                                                                                                               |
 
 All three agents take the same options: `--profile NAME` (or the shortcuts `--local` and
 `--openai`) picks a profile, and `--model` / `--base-url` override it for one run. Precedence is
@@ -194,19 +206,19 @@ Response time: 6.3s · tokens: 4,313 in, 53 out · 2 model calls
    `"show_time": false` and `"show_tokens": false` turn them off; `tokens: not reported` means
    the server sent no counts.
 
-Each agent implements this in an `Output` class (`mcpagent/client/agent.py`, `pydantic/agent.py`,
+Each agent implements this in an `Output` class (`mcp/mcpagent/client/agent.py`, `pydantic/pydantic_agent/agent.py`,
 `vercel/agent.ts`), with tests that check the wrapping and the timing line.
 
 ## MCPAgent
 
 An MCP server that exposes shell scripts as tools, plus a terminal client that drives the model.
-See [mcpagent/README.md](mcpagent/README.md).
+See [mcp/README.md](mcp/README.md).
 
 ```bash
-.venv/bin/python -m mcpagent.server                      # terminal 1: MCP server on 127.0.0.1:6275
-.venv/bin/python -m mcpagent.client                      # terminal 2: chat, default model profile
-.venv/bin/python -m mcpagent.client --prompt "Time now"  # one prompt and exit
-.venv/bin/python -m unittest discover -s mcpagent/tests  # offline tests
+.venv/bin/python mcp/server.py                          # terminal 1: MCP server on 127.0.0.1:6275
+.venv/bin/python mcp/client.py                          # terminal 2: chat, default model profile
+.venv/bin/python mcp/client.py --prompt "Time now"      # one prompt and exit
+.venv/bin/python -m unittest discover -s mcp/tests      # offline tests
 ```
 
 ## Pydantic
@@ -245,7 +257,7 @@ in one response (a shell command, one that must fail, the time), and each must e
 says. Change a call there and all three agents are tested on it.
 
 ```bash
-.venv/bin/python -m unittest discover -s mcpagent/tests
+.venv/bin/python -m unittest discover -s mcp/tests
 .venv/bin/python -m unittest discover -s pydantic/tests
 npm --prefix vercel test
 ```
@@ -255,11 +267,11 @@ npm --prefix vercel test
 The model settings live in `context/models.json` (see "Context" above). With the default `local`
 profile, these environment variables override it in all three agents:
 
-| Variable | Default |
-| --- | --- |
-| `LOCAL_LLM_BASE_URL` | `http://boba:1234/v1` |
-| `LOCAL_LLM_MODEL` | `qwen/qwen3-coder-30b` |
-| `LOCAL_LLM_API_KEY` | `lm-studio` |
+| Variable             | Default                |
+|----------------------|------------------------|
+| `LOCAL_LLM_BASE_URL` | `http://boba:1234/v1`  |
+| `LOCAL_LLM_MODEL`    | `qwen/qwen3-coder-30b` |
+| `LOCAL_LLM_API_KEY`  | `lm-studio`            |
 
 To check that the model server is up, request its model list, e.g. `curl -s http://boba:1234/v1/models`
 for the default `local` profile.

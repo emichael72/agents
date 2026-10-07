@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{% block title %}Pull Request Gate{% endblock %}</title>
+  {# Shared selectors are used by child templates, which this inspection cannot see. #}
+  <!--suppress CssUnusedSymbol -->
   <style>
     /* Intel palette: Classic Blue, Energy Blue, carbon text on light gray; flat, square corners */
     :root {
@@ -81,15 +83,15 @@
     }
     fieldset legend { padding: 0 10px; font-weight: 700; color: var(--classic-blue-dark); }
 
-    label {
-      display: block;
+    label { display: block; }
+    fieldset label {
       padding: 14px;
       margin: 10px 0;
       background: var(--option);
       border-left: 3px solid transparent;
       cursor: pointer;
     }
-    label:hover { background: var(--option-hover); border-left-color: var(--classic-blue); }
+    fieldset label:hover { background: var(--option-hover); border-left-color: var(--classic-blue); }
     input { accent-color: var(--classic-blue); margin-right: 12px; }
     .field {
       font: inherit;

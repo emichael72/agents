@@ -1,5 +1,14 @@
 {
-  "description": "Terminal layout shared by all three agents (README.md, 'Terminal output'). width: the column at which output wraps (the terminal's width is used if narrower). show_time: print how long each response took. show_tokens: print the tokens each response used (in: sent to the model, out: generated) and how many model calls it took. links: show Markdown links and web addresses as clickable terminal links (OSC 8; only on a terminal). Everything except the model's answer prints in dark gray (ANSI 90).",
+  "description": [
+    "Terminal layout shared by all three agents (README.md, 'Terminal output').",
+    "width: the column at which output wraps (the terminal's width is used if narrower).",
+    "show_time: print how long each response took.",
+    "show_tokens: print the tokens each response used (in: sent to the model, out: generated)",
+    "and how many model calls it took.",
+    "links: show Markdown links and web addresses as clickable terminal links",
+    "(OSC 8; only on a terminal).",
+    "Everything except the model's answer prints in dark gray (ANSI 90)."
+  ],
   "width": 120,
   "show_time": true,
   "show_tokens": true,

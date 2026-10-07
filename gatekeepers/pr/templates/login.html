@@ -14,8 +14,14 @@
 
   <form method="post" class="card">
     <input type="hidden" name="next" value="{{ next }}">
-    <p>User<br><input class="field" name="user" value="{{ user }}" autocomplete="username" required></p>
-    <p>Password<br><input class="field" name="password" type="password" autocomplete="current-password" required></p>
+    <p>
+      <label for="user">User</label>
+      <input class="field" id="user" name="user" value="{{ user }}" autocomplete="username" required>
+    </p>
+    <p>
+      <label for="password">Password</label>
+      <input class="field" id="password" name="password" type="password" autocomplete="current-password" required>
+    </p>
     <button type="submit">Sign in →</button>
   </form>
 {% endblock %}

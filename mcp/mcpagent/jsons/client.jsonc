@@ -1,26 +1,25 @@
 // MCP Agent client configuration: which MCP servers to use and which model drives the chat.
-// Validated against schema/<schema_version>/config_schema.jsonc (next to this file).
+// Validated against schemas/client.schema (next to this file).
 {
   "log_level": "ERROR",
   "debug_json_box": false,
-  "schema_version": "1.0",
 
   // Instructions (system prompt) for the model, shared by all three agents. Relative to this file.
-  "instructions_file": "../../context/instructions.json",
+  "instructions_file": "../../../context/instructions.json",
 
-  // Model profiles, shared by all three agents. Relative to this file. --profile (or --local /
-  // --openai) picks one; with neither, the file's "default" is used.
-  "models_file": "../../context/models.json",
+  // Model profiles, shared by all three agents. Relative to this file.
+  // Use --profile, --local or --openai to pick one; otherwise the file's "default" is used.
+  "models_file": "../../../context/models.json",
 
   // Terminal layout (wrap width, response time), shared by all three agents. Relative to this file.
-  "output_file": "../../context/output.json",
+  "output_file": "../../../context/output.json",
 
   // Agent loop settings (max_tool_calls), shared by all three agents. Relative to this file.
-  "agent_file": "../../context/agent.json",
+  "agent_file": "../../../context/agent.json",
 
   "servers": [{
     "server_id": "tools",
-    "description": "The shared agents/tools folder, served by mcpagent/server/server.jsonc.",
+    "description": "The shared agents/tools folder, served by mcp/mcpagent/jsons/server.jsonc.",
     "enabled": true,
     "transport": "HTTP",
     "config": {"url": "http://127.0.0.1:6275/", "sse_url": "http://127.0.0.1:6275/sse"}

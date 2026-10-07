@@ -92,7 +92,10 @@ def load_allowed(path: Optional[Path] = None) -> dict[str, Folder]:
     path = path or Path(os.environ.get("FS_GATE_PATHS") or PATHS_FILE)
     folders = {}
     for name, entry in json.loads(path.read_text(encoding="utf-8"))["paths"].items():
-        entry = {"path": entry} if isinstance(entry, str) else entry
+        if isinstance(entry, str):
+            base = (REPO_DIR / Path(entry).expanduser()).resolve()
+            folders[name] = Folder(name, base)
+            continue
         base = (REPO_DIR / Path(entry["path"]).expanduser()).resolve()
         subpaths = {(base / sub).resolve(): parse_access(access, f"{name}/{sub}")
                     for sub, access in entry.get("subpaths", {}).items()}
@@ -154,8 +157,8 @@ def resolve(path: str, kind: str = "any", need: str = "r",
         raise ValueError(f"'{path}' is not a folder.")
     if kind == "file" and not target.is_file():
         raise ValueError(f"'{path}' is not a file.")
-    shown = name if target == folder.path else f"{name}/{target.relative_to(folder.path)}"
-    return target, shown
+    display_path = name if target == folder.path else f"{name}/{target.relative_to(folder.path)}"
+    return target, display_path
 
 
 def display(text: str, allowed: Optional[dict[str, Folder]] = None) -> str:

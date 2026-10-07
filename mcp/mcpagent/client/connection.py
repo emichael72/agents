@@ -16,16 +16,25 @@ import json
 import logging
 import itertools
 import time
-from typing import (Any, Optional, AsyncGenerator, Union)
+from typing import Any, AsyncGenerator, Optional, Union
 
 # Third-party
 import aiohttp
 
 # Local imports
-from .logger import MCPAgentLogger
-from .types import (MCPTransportType, ResponseCallbackType, EventCallbackType, ListenEventsReturnType,
-                                  JSONRPCResponseCoroType, JSONRPCResponseTaskType, HTTPConfigType, STDIOConfigType,
-                                  ConfigType, DebugGuru)
+from mcpagent import (
+    ConfigType,
+    DebugGuru,
+    EventCallbackType,
+    HTTPConfigType,
+    JSONRPCResponseCoroType,
+    JSONRPCResponseTaskType,
+    ListenEventsReturnType,
+    MCPAgentLogger,
+    MCPTransportType,
+    ResponseCallbackType,
+    STDIOConfigType,
+)
 
 
 class MCPClientConnection:
@@ -66,7 +75,7 @@ class MCPClientConnection:
         self._capabilities: dict = capabilities or {}
         self._request_ids = itertools.count(1)
         self.protocol_version = None
-        self._session_id: Optional[Union[str, int]] = None  # May be sent ny a service
+        self._session_id: Optional[Union[str, int]] = None  # May be sent by a service
         self._debug_guru: Optional[DebugGuru] = debug_guru
 
         # Configure logger
@@ -103,14 +112,15 @@ class MCPClientConnection:
                 raise ValueError("STDIO transport requires a 'command' in config")
 
             # Spawn subprocess with pipes
-            self._proc = await asyncio.create_subprocess_exec(
+            proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            self._reader = self._proc.stdout
-            self._writer = self._proc.stdin
+            self._proc = proc
+            self._reader = proc.stdout
+            self._writer = proc.stdin
 
             # Start a background task to read stderr for logging
             asyncio.create_task(self._log_stderr())
@@ -284,7 +294,7 @@ class MCPClientConnection:
             async def _runner() -> None:
                 async for event in events():
                     cb_result = callback(event)
-                    if inspect.isawaitable(cb_result):
+                    if cb_result is not None and inspect.isawaitable(cb_result):
                         with contextlib.suppress(Exception):
                             await cb_result
 
@@ -485,7 +495,7 @@ class MCPClientConnection:
                     await self._writer.wait_closed()
 
                 except (BrokenPipeError, ConnectionResetError, OSError):
-                    # Expected pipe closure or reset during shutdown=
+                    # Expected pipe closure or reset during shutdown
                     pass
                 self._writer = None
 

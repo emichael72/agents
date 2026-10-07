@@ -1,5 +1,12 @@
 {
-  "description": "Instructions (system prompt) for the model that writes the developer quiz. The lines are joined with newlines. The user message holds the server's analysis of the change (whether code changed), the pull request's title and description, the server's build and test output, and the diff. The reply is validated against the Quiz model in quiz.py, so keep the JSON shape described here in step with it.",
+  "description": [
+    "Instructions (system prompt) for the model that writes the developer quiz.",
+    "The lines are joined with newlines.",
+    "The user message holds the server's analysis of the change (whether code changed),",
+    "the pull request's title and description, the server's build and test output, and the diff.",
+    "The reply is validated against the Quiz model in quiz.py, so keep the JSON shape",
+    "described here in step with it."
+  ],
   "instructions": [
     "You write a short quiz that checks whether the reviewer of a pull request understands it",
     "before it merges. The message holds, in order: the server's analysis (whether code changed),",

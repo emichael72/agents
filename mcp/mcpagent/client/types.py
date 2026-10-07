@@ -132,7 +132,7 @@ class DebugGuru:
             debug_data (object): Data to render (e.g., string, dict, list).
             adjust_content (bool, optional): Truncate long strings to fit terminal width. Defaults to True.
             show_border (bool, optional): Show a border around the panel. Defaults to False.
-            paint_background (bool, optional): Apply a grey background behind the content. Defaults to False.
+            paint_background (bool, optional): Apply a gray background behind the content. Defaults to False.
         """
         console_width = self._console.width
         max_str_len = max(20, console_width - 10)

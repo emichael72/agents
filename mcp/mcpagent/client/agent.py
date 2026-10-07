@@ -25,7 +25,7 @@ import re
 import time
 import urllib.request
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 from urllib.parse import urlparse
 
 import aiohttp
@@ -42,7 +42,7 @@ from .client import MCPClient
 OPENAI_HOST = "api.openai.com"  # Only used to decide whether OpenAI-specific error hints apply
 
 
-def load_instructions(config_data: dict, config_file, key: str = "instructions") -> str:
+def load_instructions(config_data: dict[str, Any], config_file: str | Path, key: str = "instructions") -> str:
     """
     Read the model's instructions from the file the client config names.
     Args:
@@ -52,14 +52,14 @@ def load_instructions(config_data: dict, config_file, key: str = "instructions")
     Returns:
         str: The lines joined with newlines, or "" if none are configured.
     """
-    instructions_file = config_data.get("instructions_file")
+    instructions_file: Optional[str] = config_data.get("instructions_file")
     if not instructions_file:
         return ""
     path = Path(config_file).resolve().parent / instructions_file
     return "\n".join(json.loads(path.read_text(encoding="utf-8")).get(key, []))
 
 
-def load_models(config_data: dict, config_file) -> dict:
+def load_models(config_data: dict[str, Any], config_file: str | Path) -> dict:
     """
     Read the model profiles from the file the client config names.
     Args:
@@ -70,13 +70,15 @@ def load_models(config_data: dict, config_file) -> dict:
     Raises:
         ValueError: If the config does not name a models file.
     """
-    models_file = config_data.get("models_file")
+    models_file: Optional[str] = config_data.get("models_file")
     if not models_file:
         raise ValueError('The client config has no "models_file"; point it at ../context/models.json.')
     path = Path(config_file).resolve().parent / models_file
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+# Match model discovery across the independent agent implementations.
+# noinspection DuplicatedCode
 def loaded_model(base_url: str, api_key: str = "") -> Optional[str]:
     """
     Ask an LM Studio server which model is loaded (its /api/v0/models lists each model's state).
@@ -97,6 +99,8 @@ def loaded_model(base_url: str, api_key: str = "") -> Optional[str]:
     return next((m["id"] for m in models if m.get("state") == "loaded" and m.get("type") in ("llm", "vlm")), None)
 
 
+# Keep profile precedence consistent across the independent agent implementations.
+# noinspection DuplicatedCode
 def resolve_model(models: dict, profile: Optional[str] = None,
                   model: Optional[str] = None, base_url: Optional[str] = None) -> dict:
     """
@@ -209,7 +213,7 @@ class MCPAgent:
         self.instructions = "\n".join(part for part in (instructions, context) if part)
         self.history = []
         self.tools = []
-        self.routes = {}
+        self.routes: dict[str, tuple[str, str, dict[str, Any]]] = {}
         self.usage: list[tuple[int, int]] = []  # Tokens per model call of the last turn
         self.timeouts = {}  # Seconds to wait per tool alias, from the server's tools/list _meta
         # A dedicated session keeps the API key separate from MCP HTTP headers; it is opened on
@@ -258,7 +262,7 @@ class MCPAgent:
         if not self.tools:
             raise RuntimeError("No MCP tools discovered. Check the client configuration.")
 
-    async def _execute(self, call):
+    async def _execute(self, call: dict[str, Any]) -> dict[str, Any]:
         """
         Run one tool call requested by the model.
         The call is checked against the discovered tools and validated against the tool's schema
@@ -293,7 +297,7 @@ class MCPAgent:
         except Exception:
             # Retrying automatically could execute the same action twice.
             raise RuntimeError(f"Lost response from {server}/{name}; execution may have occurred. No retry was made.") from None
-        result = response.get("result") or {
+        result: dict[str, Any] = response.get("result") or {
             "isError": True, "content": [{"type": "text", "text": json.dumps(response.get("error"))}]
         }
         text = readable("\n".join(item.get("text", "") for item in result.get("content", [])
@@ -303,11 +307,13 @@ class MCPAgent:
 
     def _session(self) -> aiohttp.ClientSession:
         """The HTTP session for the model server, opened on first use."""
-        if self._api is None or self._api.closed:
+        session = self._api
+        if session is None or session.closed:
             # Connect and read timeouts, not a total one: a streamed answer may take a while
             timeout = aiohttp.ClientTimeout(total=None, sock_connect=self._timeout, sock_read=self._timeout)
-            self._api = aiohttp.ClientSession(headers={"Authorization": f"Bearer {self._api_key}"}, timeout=timeout)
-        return self._api
+            session = aiohttp.ClientSession(headers={"Authorization": f"Bearer {self._api_key}"}, timeout=timeout)
+            self._api = session
+        return session
 
     @staticmethod
     async def _body(response: aiohttp.ClientResponse) -> Optional[dict]:
@@ -317,7 +323,8 @@ class MCPAgent:
         except (ValueError, aiohttp.ContentTypeError):
             return None
 
-    async def _request_response(self, payload, on_text=None) -> Reply:
+    async def _request_response(self, payload: dict[str, Any],
+                                on_text: Optional[Callable[[str], None]] = None) -> Reply:
         """
         Send one Responses request, streaming text deltas when a callback is given.
         Args:
@@ -350,7 +357,7 @@ class MCPAgent:
                         raise RuntimeError(f"{self.provider} stream failed. Earlier tool calls may have completed; no retry was made.")
             raise RuntimeError(f"{self.provider} stream ended before completion. Earlier tool calls may have completed; no retry was made.")
 
-    async def ask(self, prompt: str, on_text=None) -> str:
+    async def ask(self, prompt: str, on_text: Optional[Callable[[str], None]] = None) -> str:
         """
         Run one user turn: call the model, run the tools it requests, repeat until it answers.
         On success the turn is added to the history; on any failure the history is cleared, so a
@@ -441,6 +448,8 @@ class MCPAgent:
                 await self._api.close()
 
 
+# Tool output is rendered consistently across the independent agent implementations.
+# noinspection DuplicatedCode
 def readable(output: str) -> str:
     """
     Make a tool's output readable for the terminal.
@@ -461,7 +470,7 @@ def readable(output: str) -> str:
     return output
 
 
-def load_output_settings(config_data: dict, config_file) -> dict:
+def load_output_settings(config_data: dict[str, Any], config_file: str | Path) -> dict:
     """
     Read the terminal layout settings from the file the client config names.
     Args:
@@ -470,13 +479,15 @@ def load_output_settings(config_data: dict, config_file) -> dict:
     Returns:
         dict: "width" (wrap column) and "show_time", or {} (the defaults) if none is configured.
     """
-    output_file = config_data.get("output_file")
+    output_file: Optional[str] = config_data.get("output_file")
     if not output_file:
         return {}
     path = Path(config_file).resolve().parent / output_file
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+# Keep the memory instructions consistent across the independent agent implementations.
+# noinspection DuplicatedCode
 def memory_text(index: Optional[Path]) -> str:
     """
     The agents' memory, to append to their instructions: the topics in the memory index (kept by
@@ -496,7 +507,7 @@ def memory_text(index: Optional[Path]) -> str:
             "and save new facts with it):\n" + "\n".join(lines))
 
 
-def identity_text(name: Optional[str], config_data: dict, config_file) -> str:
+def identity_text(name: Optional[str], config_data: dict[str, Any], config_file: str | Path) -> str:
     """
     The identity lines that open the instructions, naming the agent.
     Args:
@@ -523,7 +534,7 @@ def worth_saving(history: list) -> bool:
     return calls > 0 or prompts > 1
 
 
-def load_agent_settings(config_data: dict, config_file) -> dict:
+def load_agent_settings(config_data: dict[str, Any], config_file: str | Path) -> dict:
     """
     Read the agent loop settings from the file the client config names.
     Args:
@@ -532,7 +543,7 @@ def load_agent_settings(config_data: dict, config_file) -> dict:
     Returns:
         dict: "max_tool_calls", or {} (the defaults) if none is configured.
     """
-    agent_file = config_data.get("agent_file")
+    agent_file: Optional[str] = config_data.get("agent_file")
     if not agent_file:
         return {}
     path = Path(config_file).resolve().parent / agent_file
@@ -540,11 +551,14 @@ def load_agent_settings(config_data: dict, config_file) -> dict:
 
 
 # A Markdown link, [text](url), or a bare web address: shown as a clickable OSC 8 link, in LINK_COLOR
+# The terminal layout is intentionally consistent across the independent agent implementations.
+# noinspection DuplicatedCode
 LINK_COLOR = "bright_cyan"
-LINK = re.compile(r"\[([^\]\n]+)\]\((https?://[^\s)]+)\)|(https?://[^\s<>()\[\]\"'`]+)")
-OPEN_LINK = re.compile(r"\[[^\]\n]*$|\]\([^)\s]*$")  # A Markdown link that is not finished yet
+LINK = re.compile(r"\[([^]\n]+)]\((https?://[^\s)]+)\)|(https?://[^\s<>()\[\]\"'`]+)")
+OPEN_LINK = re.compile(r"\[[^]\n]*$|]\([^)\s]*$")  # A Markdown link that is not finished yet
 
 
+# noinspection DuplicatedCode
 def link_segments(text: str) -> list[tuple[str, Optional[str]]]:
     """
     Split text into plain parts and links, the same way in all three agents.
@@ -580,11 +594,10 @@ def wrap(text: str, width: int, indent: str = "  ") -> list[str]:
     """
     lines = []
     for raw in text.split("\n"):
-        line = None
-        for word in raw.split(" "):
-            if line is None:
-                line = word
-            elif line.strip() and len(line) + 1 + len(word) > width:
+        words = raw.split(" ")
+        line = words[0]
+        for word in words[1:]:
+            if line.strip() and len(line) + 1 + len(word) > width:
                 lines.append(line)
                 line = indent + word
             else:
@@ -593,6 +606,7 @@ def wrap(text: str, width: int, indent: str = "  ") -> list[str]:
     return lines
 
 
+# noinspection DuplicatedCode
 class Output:
     """
     The terminal layout shared by the three agents (README.md, "Terminal output"):
@@ -620,7 +634,7 @@ class Output:
         self.show_time = bool(settings.get("show_time", True))
         self.show_tokens = bool(settings.get("show_tokens", False))
         self.links = bool(settings.get("links", False))  # OSC 8 links (rich adds them only on a terminal)
-        self.usage: Optional[dict] = None  # Tokens and model calls of this response, when the server reports them
+        self.usage: Optional[dict[str, int]] = None  # Tokens and model calls of this response, when the server reports them
         self.in_text = False  # A text block is open
         self.pending = ""  # Trailing newlines held back until more text follows
         self.column = 0  # Where the streamed answer's current line ends
@@ -646,9 +660,10 @@ class Output:
         if self.debug or not self.out.is_terminal:
             return
         if self.spinner is None:
-            self.spinner = self.out.status(Text(label, style="bright_black"), spinner="dots",
-                                           spinner_style="bright_black")
-            self.spinner.start()
+            spinner = self.out.status(Text(label, style="bright_black"), spinner="dots",
+                                      spinner_style="bright_black")
+            self.spinner = spinner
+            spinner.start()
         else:
             self.spinner.update(Text(label, style="bright_black"))
 
@@ -666,10 +681,11 @@ class Output:
             output_tokens: Tokens the model generated.
             requests: How many model calls these tokens cover.
         """
-        self.usage = self.usage or {"input": 0, "output": 0, "requests": 0}
-        self.usage["input"] += input_tokens
-        self.usage["output"] += output_tokens
-        self.usage["requests"] += requests
+        usage = self.usage or {"input": 0, "output": 0, "requests": 0}
+        self.usage = usage
+        usage["input"] += input_tokens
+        usage["output"] += output_tokens
+        usage["requests"] += requests
 
     def text(self, chunk: str) -> None:
         """
@@ -817,7 +833,7 @@ class Output:
         return placed
 
 
-async def run_agent(config_file, profile=None, model=None, base_url=None, prompt=None, context="",
+async def run_agent(config_file: str | Path, profile=None, model=None, base_url=None, prompt=None, context="",
                     trace=True) -> int:
     """
     Run the agent in the terminal: one prompt, or interactively until the user exits.
@@ -838,20 +854,20 @@ async def run_agent(config_file, profile=None, model=None, base_url=None, prompt
     if trace:
         console.print()  # Blank line before the banner (hidden without debug, so the answer's own blank line is enough)
 
-    async def display_answer(prompt):
+    async def display_answer(current_agent: MCPAgent, user_prompt: str):
         """
         Ask one prompt, printing tool activity and the streamed answer.
         Args:
-            prompt: The user's message.
+            current_agent: The connected agent.
+            user_prompt: The user's message.
         """
-        assert agent is not None  # Set before the first prompt
         output.start()
         try:
-            answer = await agent.ask(prompt, on_text=output.text)
+            answer = await current_agent.ask(user_prompt, on_text=output.text)
             if not output.in_text:
                 output.text(answer)  # Nothing was streamed (e.g. a non-streaming reply)
         finally:
-            for input_tokens, output_tokens in getattr(agent, "usage", []):
+            for input_tokens, output_tokens in getattr(current_agent, "usage", []):
                 output.add_usage(input_tokens, output_tokens)
             output.finish()
 
@@ -861,23 +877,24 @@ async def run_agent(config_file, profile=None, model=None, base_url=None, prompt
         models = load_models(mcp_client.config_data, config_file)
         settings = resolve_model(models, profile=profile, model=model, base_url=base_url)
         agent_settings = load_agent_settings(mcp_client.config_data, config_file)
-        agent_file = mcp_client.config_data.get("agent_file")
-        index = agent_settings.get("memory_index")  # Relative to the repository, two levels above agent.json
+        agent_file: Optional[str] = mcp_client.config_data.get("agent_file")
+        index: Optional[str] = agent_settings.get("memory_index")  # Relative to the repository, two levels above agent.json
         memory = memory_text((Path(config_file).resolve().parent / agent_file).resolve().parent.parent / index
                              if agent_file and index else None)
-        agent = MCPAgent(mcp_client, base_url=settings["base_url"], model=settings["model"],
+        active_agent = MCPAgent(mcp_client, base_url=settings["base_url"], model=settings["model"],
                          api_key=settings["api_key"], provider=settings["name"], timeout=settings["timeout"],
                          instructions=identity_text(agent_settings.get("names", {}).get("mcpagent"),
                                                     mcp_client.config_data, config_file)
                          + load_instructions(mcp_client.config_data, config_file) + memory,
                          context=context, trace=output.line,  # Printed in debug mode, else on the spinner
                          max_tool_calls=int(agent_settings.get("max_tool_calls", 8)))
-        await agent.connect()
-        servers = len({server for server, _, _ in agent.routes.values()})
-        tools = f"{len(agent.routes)} tools" + (f" from {servers} servers" if servers > 1 else "")
-        output.line(f"{agent.provider} model: {agent.model} @ {agent.base_url}, {tools} (sequential)")
+        agent = active_agent  # Retain it for cleanup even if connecting fails.
+        await active_agent.connect()
+        servers = len({server for server, _, _ in active_agent.routes.values()})
+        tools = f"{len(active_agent.routes)} tools" + (f" from {servers} servers" if servers > 1 else "")
+        output.line(f"{active_agent.provider} model: {active_agent.model} @ {active_agent.base_url}, {tools} (sequential)")
         if prompt is not None:
-            await display_answer(prompt)
+            await display_answer(active_agent, prompt)
             return 0
         output.line("Ask me to use a tool. /history shows messages, /reset clears them, exit quits.")
         on_exit = load_instructions(mcp_client.config_data, config_file, "on_exit")
@@ -889,21 +906,21 @@ async def run_agent(config_file, profile=None, model=None, base_url=None, prompt
                 return 0
             if prompt.lower() in {"exit", "quit", "q"}:
                 # One last turn to save what is worth remembering (save_on_exit); Ctrl+C skips it
-                if agent_settings.get("save_on_exit") and on_exit and worth_saving(agent.history):
+                if agent_settings.get("save_on_exit") and on_exit and worth_saving(active_agent.history):
                     output.line("Before exiting: saving anything worth remembering (Ctrl+C skips).")
                     try:
-                        await display_answer(on_exit)
+                        await display_answer(active_agent, on_exit)
                     except Exception as error:
                         console.print(f"Error: {error}", style="red", markup=False)
                 return 0
             if prompt == "/reset":
-                agent.history = []
+                active_agent.history = []
                 output.note("History cleared.")
             elif prompt == "/history":
-                console.print(json.dumps(agent.history, indent=2, ensure_ascii=False), markup=False)
+                console.print(json.dumps(active_agent.history, indent=2, ensure_ascii=False), markup=False)
             elif prompt:
                 try:
-                    await display_answer(prompt)
+                    await display_answer(active_agent, prompt)
                 except Exception as error:
                     console.print(f"Error: {error}", style="red", markup=False)
     except (KeyboardInterrupt, asyncio.CancelledError):

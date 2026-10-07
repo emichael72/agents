@@ -47,7 +47,7 @@
 		},
 		"schema_version": {
 			"type": "string",
-			"description": "Define schema version to validate against",
+			"description": "Legacy version metadata; schema selection uses the configuration filename.",
 			"default": "1.0"
 		},
 		"server_id": {

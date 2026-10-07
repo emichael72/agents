@@ -8,7 +8,8 @@
 #       with both agents' pinned requirements and the pr_gate tool's. Both agents run from the source tree.
 #     - vercel/node_modules for the Vercel Agent, installed exactly as package-lock.json
 #       records (npm ci).
-#   Each step is checked, and the installer stops at the first failure.
+#   It runs only on Red Hat family systems that use dnf (RHEL, Fedora, Rocky, AlmaLinux, CentOS
+#   Stream and the like). Each step is checked, and the installer stops at the first failure.
 #
 #   With --gate ACTION it manages the pull request gate's service instead (gatekeepers/pr, the
 #   pr-gate systemd user unit): install, uninstall, start, stop, restart, status or logs.
@@ -19,9 +20,14 @@
 #
 # =============================================================================
 
+# Supported systems: /etc/os-release ID or ID_LIKE names one of these, and dnf is installed
+OS_RELEASE_FILE="/etc/os-release"
+OS_SUPPORTED_IDS="rhel fedora centos"
+
 PYTHON_VENV_PATH=".venv"
 PYTHON_REQUIRED_MIN_VER="3.10"
-PYTHON_REQUIREMENTS_FILES="mcpagent/requirements.txt pydantic/requirements.txt gatekeepers/pr/requirements.txt requirements-dev.txt"
+PYTHON_BIN="" # The interpreter the venv is created with, chosen by find_python
+PYTHON_REQUIREMENTS_FILES="mcp/requirements.txt pydantic/requirements.txt gatekeepers/pr/requirements.txt requirements-dev.txt"
 PYTHON_MODULES_TO_RUN="mcpagent.server mcpagent.client" # Checked with python -m <module> --version
 PYTHON_VERIFY_MODULES="mcpagent pydantic_ai jsonschema httpx httpx2 aiohttp json5 prompt_toolkit rich ruff"
 
@@ -172,10 +178,142 @@ run_logged() {
 }
 
 #
+# @brief Verify that the system is a Red Hat family distribution that uses dnf.
+# @return
+#   0 if the system is supported, nonzero otherwise.
+#
+
+check_os() {
+
+    local line key value
+    local name="" ids=""
+    local id
+
+    print_status_label "Checking for a Red Hat family system (dnf)"
+
+    if [[ ! -r "$OS_RELEASE_FILE" ]]; then
+        print_status_label_results "ERROR"
+        printf "Cannot read %s; this installer supports Red Hat family systems only.\n" \
+            "$OS_RELEASE_FILE" >&2
+        return 1
+    fi
+
+    # Lines look like KEY=value or KEY="value"
+    while IFS= read -r line; do
+        [[ "$line" =~ ^([A-Z_]+)=\"?([^\"]*)\"?$ ]] || continue
+        key="${BASH_REMATCH[1]}"
+        value="${BASH_REMATCH[2]}"
+        case "$key" in
+        ID | ID_LIKE) ids="$ids $value" ;;
+        PRETTY_NAME) name="$value" ;;
+        esac
+    done <"$OS_RELEASE_FILE"
+
+    for id in $ids; do
+        if [[ " $OS_SUPPORTED_IDS " == *" $id "* ]]; then
+            if ! command -v dnf >/dev/null 2>&1; then
+                print_status_label_results "ERROR"
+                printf "%s is a Red Hat family system, but dnf is not installed.\n" "${name:-This}" >&2
+                return 1
+            fi
+            print_status_label_results "OK"
+            return 0
+        fi
+    done
+
+    print_status_label_results "ERROR"
+    printf "%s is not supported; this installer needs a Red Hat family system that uses dnf.\n" \
+        "${name:-This system}" >&2
+    return 1
+}
+
+#
+# @brief Check whether one version is at least another.
+# @param $1  Version to test (e.g., "3.12").
+# @param $2  Minimum version (e.g., "3.10").
+# @return
+#   0 if $1 >= $2, nonzero otherwise.
+#
+
+version_at_least() {
+
+    [[ "$(printf '%s\n' "$2" "$1" | sort -V | head -n1)" == "$2" ]]
+}
+
+#
+# @brief Print a Python interpreter's major.minor version.
+# @param $1  Interpreter command or path.
+# @return
+#   0 if the interpreter ran, nonzero otherwise.
+#
+
+python_version() {
+
+    "$1" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null
+}
+
+#
+# @brief Choose the Python interpreter for the venv and store it in PYTHON_BIN.
+#
+#   With a requested interpreter, only that one is considered. Otherwise python3 is used when it
+#   is new enough, and if not, the newest python3.N found in PATH that is.
+#
+# @param $1  Minimum required version (e.g., "3.10").
+# @param $2  [optional] Requested interpreter command or path (--python).
+# @return
+#   0 if a suitable interpreter was found, nonzero otherwise.
+#
+
+find_python() {
+
+    local required="$1"
+    local requested="${2:-}"
+    local candidates=()
+    local candidate dir name version
+
+    if [[ -n "$requested" ]]; then
+        candidates=("$requested")
+    else
+        candidates=(python3)
+        # Every python3.N in PATH, newest first
+        while IFS= read -r name; do
+            candidates+=("$name")
+        done < <(
+            IFS=:
+            for dir in $PATH; do
+                for candidate in "$dir"/python3.*; do
+                    name=${candidate##*/}
+                    [[ -x "$candidate" && "$name" =~ ^python3\.[0-9]+$ ]] && printf '%s\n' "$name"
+                done
+            done | sort -urV
+        )
+    fi
+
+    for candidate in "${candidates[@]}"; do
+        command -v "$candidate" >/dev/null 2>&1 || continue
+        version=$(python_version "$candidate") || continue
+        if version_at_least "$version" "$required"; then
+            PYTHON_BIN=$(command -v "$candidate")
+            print_status_label "Checking Python >= $required ($PYTHON_BIN, $version)" "OK"
+            return 0
+        fi
+    done
+
+    print_status_label "Checking Python >= $required" "ERROR"
+    if [[ -n "$requested" ]]; then
+        printf "'%s' is not a Python >= %s interpreter.\n" "$requested" "$required" >&2
+    else
+        printf "No Python >= %s found in PATH (python3 is %s). Install one, or pass --python.\n" \
+            "$required" "$(python_version python3 || printf 'missing')" >&2
+    fi
+    return 1
+}
+
+#
 # @brief Verify that a command is installed and meets a minimum version.
-# @param $1  Command name (e.g., "python3", "node").
-# @param $2  Display name (e.g., "Python").
-# @param $3  Minimum required version (e.g., "3.10").
+# @param $1  Command name (e.g., "node").
+# @param $2  Display name (e.g., "Node.js").
+# @param $3  Minimum required version (e.g., "22.18").
 # @return
 #   0 if the command is available and its version >= required, nonzero otherwise.
 #
@@ -194,14 +332,10 @@ check_tool_version() {
     fi
 
     local version
-    if [[ "$command_name" == "python3" ]]; then
-        version=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
-    else
-        version=$("$command_name" --version 2>/dev/null)
-        version=${version#v} # node prints "v22.18.0"
-    fi
+    version=$("$command_name" --version 2>/dev/null)
+    version=${version#v} # node prints "v22.18.0"
 
-    if [ "$(printf '%s\n' "$required" "$version" | sort -V | head -n1)" != "$required" ]; then
+    if ! version_at_least "$version" "$required"; then
         print_status_label_results "ERROR"
         printf "%s >= %s required, found %s\n" "$display_name" "$required" "$version" >&2
         return 1
@@ -212,6 +346,9 @@ check_tool_version() {
 
 #
 # @brief Create (if missing) the shared Python virtual environment and upgrade its pip.
+#
+#   The venv is created with PYTHON_BIN. An existing venv is kept only if its Python is new enough.
+#
 # @param $1  Full path to the virtual environment directory.
 # @return
 #   0 on success, nonzero on failure.
@@ -220,14 +357,22 @@ check_tool_version() {
 create_python_venv() {
 
     local venv_full_path="$1"
+    local version
 
     print_status_label "Setting up virtual environment at '$(basename "$venv_full_path")'"
     if [[ ! -d "$venv_full_path" ]]; then
-        run_logged "python3 -m venv" python3 -m venv "$venv_full_path" || return 1
+        run_logged "$PYTHON_BIN -m venv" "$PYTHON_BIN" -m venv "$venv_full_path" || return 1
     fi
     if [[ ! -x "$venv_full_path/bin/python" ]]; then
         print_status_label_results "ERROR"
         printf "Virtual environment at %s is broken (missing bin/python). Rerun with --force.\n" "$venv_full_path" >&2
+        return 1
+    fi
+    version=$(python_version "$venv_full_path/bin/python")
+    if ! version_at_least "$version" "$PYTHON_REQUIRED_MIN_VER"; then
+        print_status_label_results "ERROR"
+        printf "Virtual environment at %s uses Python %s; Python >= %s is required. Rerun with --force.\n" \
+            "$venv_full_path" "${version:-unknown}" "$PYTHON_REQUIRED_MIN_VER" >&2
         return 1
     fi
     print_status_label_results "OK"
@@ -282,7 +427,7 @@ verify_python_agents() {
     print_status_label "Verifying MCPAgent and the Pydantic Agent"
 
     for module in $PYTHON_VERIFY_MODULES; do
-        if ! "$py_bin" -c "import $module" >/dev/null 2>&1; then
+        if ! (cd mcp && "$py_bin" -c "import $module") >/dev/null 2>&1; then
             print_status_label_results "ERROR"
             printf "Module '%s' is not importable with %s.\n" "$module" "$py_bin" >&2
             return 1
@@ -290,7 +435,7 @@ verify_python_agents() {
     done
 
     for module in $PYTHON_MODULES_TO_RUN; do
-        if ! "$py_bin" -m "$module" --version >/dev/null 2>&1; then
+        if ! (cd mcp && "$py_bin" -m "$module" --version) >/dev/null 2>&1; then
             print_status_label_results "ERROR"
             printf "'python -m %s --version' failed with %s.\n" "$module" "$py_bin" >&2
             return 1
@@ -365,6 +510,7 @@ main() {
 
     local force=0
     local skip_vercel=0
+    local python_request="${PYTHON:-}"
     local gate_action=""
     local full_venv_path
 
@@ -376,6 +522,8 @@ Usage: $0 [OPTIONS]
 
 Options:
   -f, --force         Recreate the shared .venv and vercel/node_modules from scratch.
+  -p, --python CMD    Create the .venv with this Python (default: python3 if >= $PYTHON_REQUIRED_MIN_VER,
+                      else the newest python3.N in PATH). The PYTHON variable sets it too.
       --skip-vercel   Skip the Vercel Agent (no Node.js needed).
   -q, --quiet         Suppress status reporting; only show errors.
       --gate ACTION   Manage the pull request gate's service (gatekeepers/pr) instead of installing:
@@ -395,6 +543,14 @@ EOF
         --skip-vercel)
             skip_vercel=1
             shift
+            ;;
+        -p | --python)
+            python_request="${2:-}"
+            [[ -z "$python_request" ]] && {
+                _show_help >&2
+                exit 1
+            }
+            shift 2
             ;;
         --gate)
             gate_action="${2:-}"
@@ -440,8 +596,9 @@ EOF
 
     ((!QUIET_MODE)) && printf "\nStarting the agents installer...\n\n"
 
-    # Check every toolchain first, so nothing is changed when a requirement is missing
-    _run_step check_tool_version python3 "Python" "$PYTHON_REQUIRED_MIN_VER" || return 1
+    # Check the system and every toolchain first, so nothing is changed when one is missing
+    _run_step check_os || return 1
+    _run_step find_python "$PYTHON_REQUIRED_MIN_VER" "$python_request" || return 1
     if ((!skip_vercel)); then
         _run_step check_tool_version node "Node.js" "$NODE_REQUIRED_MIN_VER" || return 1
         _run_step check_tool_version npm "npm" "$NPM_REQUIRED_MIN_VER" || return 1
@@ -468,8 +625,8 @@ EOF
     cat <<EOF
 
 Usage (from the repository root):
-  .venv/bin/python -m mcpagent.server          # MCPAgent: the MCP server
-  .venv/bin/python -m mcpagent.client          # MCPAgent: the agent
+  .venv/bin/python mcp/server.py              # MCPAgent: the MCP server
+  .venv/bin/python mcp/client.py              # MCPAgent: the agent
   .venv/bin/python pydantic/agent.py           # the Pydantic Agent
   node vercel/agent.ts                         # the Vercel Agent
   ./install.sh --gate install                  # the pull request gate's service (gatekeepers/pr)

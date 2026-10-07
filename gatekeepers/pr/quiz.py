@@ -165,6 +165,8 @@ def init() -> str:
         str: The key that signs the sign-in cookie and the form tokens (data/secret_key).
     """
     with connect() as db:
+        # The SQLite database is created at runtime, without a fixed IDE data source.
+        # noinspection SqlNoDataSourceInspection
         db.executescript("""
         CREATE TABLE IF NOT EXISTS quizzes (
           id TEXT PRIMARY KEY, pr INTEGER NOT NULL, sha TEXT NOT NULL,
@@ -184,6 +186,7 @@ def init() -> str:
                        "docs_ok INTEGER NOT NULL DEFAULT 1", "docs_report TEXT NOT NULL DEFAULT ''",
                        "cosmetic INTEGER NOT NULL DEFAULT 0"):
             try:
+                # noinspection SqlNoDataSourceInspection
                 db.execute("ALTER TABLE quizzes ADD COLUMN " + column)
             except sqlite3.OperationalError:
                 pass  # Already there
@@ -373,6 +376,7 @@ def publish(row: dict[str, Any], failed_attempt: bool = False) -> None:
     publish_comment(row, failed_attempt)
     publish_status(row["sha"], state, description, f"{BASE_URL}/q/{row['id']}")
     with connect() as db:
+        # noinspection SqlNoDataSourceInspection
         db.execute("UPDATE quizzes SET published=? WHERE id=?", (state, row["id"]))
 
 
@@ -387,6 +391,7 @@ def get_quiz(qid: str) -> dict[str, Any]:
         KeyError: If there is no such quiz.
     """
     with connect() as db:
+        # noinspection SqlNoDataSourceInspection
         row = db.execute("SELECT * FROM quizzes WHERE id=?", (qid,)).fetchone()
     if row is None:
         raise KeyError(qid)
@@ -404,6 +409,7 @@ def find_quiz(number: int, sha: str, base_sha: str) -> Optional[dict[str, Any]]:
         Optional[dict]: The quiz row, or None if that revision has no quiz yet.
     """
     with connect() as db:
+        # noinspection SqlNoDataSourceInspection
         row = db.execute(
             "SELECT * FROM quizzes WHERE pr=? AND sha=? AND base_sha=? AND developer=? "
             "ORDER BY created DESC LIMIT 1", (number, sha, base_sha, DEVELOPER)).fetchone()
@@ -417,6 +423,7 @@ def list_quizzes() -> list[dict[str, Any]]:
         list[dict]: id, pr, sha, passed, build_ok, docs_ok, cosmetic, published and created per quiz.
     """
     with connect() as db:
+        # noinspection SqlNoDataSourceInspection
         return [dict(r) for r in db.execute(
             "SELECT id,pr,sha,passed,skipped,build_ok,docs_ok,cosmetic,published,created FROM quizzes "
             "ORDER BY created DESC")]
@@ -438,6 +445,7 @@ def history(pr: Optional[int] = None) -> list[dict[str, Any]]:
             best and total (best score), last_attempt (time) and state / outcome (see gate_state).
     """
     with connect() as db:
+        # noinspection SqlNoDataSourceInspection
         rows = [dict(r) for r in db.execute(
             "SELECT q.id, q.pr, q.pr_title, q.sha, q.source, q.passed, q.skipped, q.build_ok, q.docs_ok, "
             "q.cosmetic, q.created, q.rowid AS position, COUNT(a.id) AS attempts, MAX(a.score) AS best, MAX(a.total) AS total, "
@@ -453,6 +461,7 @@ def history(pr: Optional[int] = None) -> list[dict[str, Any]]:
             for row in rows:
                 if row["pr"] == number and not row["pr_title"]:
                     row["pr_title"] = title if row["sha"] in commits else NOT_FOUND
+                    # noinspection SqlNoDataSourceInspection
                     db.execute("UPDATE quizzes SET pr_title=? WHERE id=?", (row["pr_title"], row["id"]))
     for row in rows:
         row["state"], row["outcome"] = gate_state(row)
@@ -470,6 +479,8 @@ def load_instructions(path: Path = INSTRUCTIONS_FILE) -> str:
     return "\n".join(json.loads(path.read_text(encoding="utf-8"))["instructions"])
 
 
+# Keep the gate independent of the agents' dependencies while matching their model discovery.
+# noinspection DuplicatedCode
 def loaded_model(base_url: str, api_key: str = "") -> Optional[str]:
     """
     Ask an LM Studio server which model is loaded (its /api/v0/models lists each model's state).
@@ -490,6 +501,8 @@ def loaded_model(base_url: str, api_key: str = "") -> Optional[str]:
     return next((m["id"] for m in models if m.get("state") == "loaded" and m.get("type") in ("llm", "vlm")), None)
 
 
+# Match the agents' profile selection without importing their implementations.
+# noinspection DuplicatedCode
 def resolve_model(profile: Optional[str] = None, path: Path = MODELS_FILE) -> dict[str, Any]:
     """
     Pick a model profile from the agents' shared models file, the same way the agents do.
@@ -665,6 +678,7 @@ def create_quiz(number: int, profile: Optional[str] = None, fixed: Optional[str]
 
     qid = secrets.token_urlsafe(16)
     with connect() as db:
+        # noinspection SqlNoDataSourceInspection
         db.execute(
             "INSERT INTO quizzes(id,pr,sha,base_sha,developer,content,source,build_ok,build_report,"
             "docs_ok,docs_report,cosmetic,pr_title) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -711,6 +725,7 @@ def skip(qid: str) -> dict[str, Any]:
     takes_quiz(row)
     check_pr(pr_info(row["pr"]), row["sha"], row["base_sha"])
     with connect() as db:  # A revision already passed by quiz stays passed, not skipped
+        # noinspection SqlNoDataSourceInspection
         db.execute("UPDATE quizzes SET skipped=1, passed=1 WHERE id=? AND passed=0", (qid,))
     row = get_quiz(qid)
     publish(row)
@@ -745,8 +760,10 @@ def submit(qid: str, answers: list[int]) -> dict[str, Any]:
 
     # Persist before publishing, so a GitHub failure can be retried
     with connect() as db:
+        # noinspection SqlNoDataSourceInspection
         db.execute("INSERT INTO attempts(quiz_id,developer,score,total,passed) VALUES(?,?,?,?,?)",
                    (qid, row["developer"], score, len(quiz.questions), passed))
+        # noinspection SqlNoDataSourceInspection
         db.execute("UPDATE quizzes SET passed=MAX(passed,?) WHERE id=?", (int(passed), qid))
     row = get_quiz(qid)
 

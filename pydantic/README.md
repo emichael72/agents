@@ -9,10 +9,12 @@ the shared [tools folder](../tools). The difference is **who runs the agent loop
 ## Layout
 
 ```
-agent.py        builds the model + Agent, and a thin terminal UI that prints the run's events
-                instructions come from the shared ../context/instructions.json
-toolset.py      loads ../tools/*/tool.json and turns each manifest into a pydantic-ai tool
-tests/          offline tests: a scripted FunctionModel replaces LM Studio, tools run for real
+agent.py                   launcher that preserves the existing command
+pydantic_agent/__init__.py  public names; avoids the installed pydantic package's name
+pydantic_agent/__main__.py  package entry point (python -m pydantic_agent from this folder)
+pydantic_agent/agent.py     model, agent loop and terminal UI; shared ../context instructions
+pydantic_agent/toolset.py   loads ../tools/*/tool.json as pydantic-ai tools
+tests/                     offline tests: scripted FunctionModel, tools run for real
 ```
 
 ## Setup
@@ -30,7 +32,12 @@ this agent shares with MCPAgent.
 ```
 
 Run these from the repository root. For `--mcp`, start the MCPAgent server first:
-`.venv/bin/python -m mcpagent.server`.
+`.venv/bin/python mcp/server.py`.
+
+The importable package is `pydantic_agent`, inside this folder. From `pydantic/`, you can also
+run `../.venv/bin/python -m pydantic_agent`. In PyCharm, mark `pydantic/` as a Sources Root so
+the package imports resolve. Keep this folder free of `__init__.py`: a package named `pydantic`
+would shadow the installed dependency.
 
 In the chat, `/history` prints the messages exchanged with the model, `/reset` clears them,
 and `exit` quits. A spinner shows what the agent is doing; with `-d` (`--debug`), tool calls are
