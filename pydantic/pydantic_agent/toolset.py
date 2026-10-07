@@ -20,10 +20,9 @@ from jsonschema import ValidationError, validate
 from pydantic_ai import ModelRetry, Tool, ToolFailed
 from pydantic_ai.toolsets import FunctionToolset
 
-from pydantic_agent import TOOLS_DIR
+from pydantic_agent import AGENT_NAME, TOOLS_DIR
 
 SCRIPT_TIMEOUT = 30
-AGENT_NAME = "Pydantic Agent"  # Lets tools such as pr and pr_gate say which agent ran them
 
 
 class LocalTools:

@@ -19,3 +19,5 @@ AGENT_FILE = CONTEXT_DIR / "agent.json"  # Agent loop settings
 OUTPUT_FILE = CONTEXT_DIR / "output.json"  # Terminal layout
 MODELS_FILE = CONTEXT_DIR / "models.json"  # Model profiles
 TOOLS_DIR = REPO_ROOT / "tools"  # One <tool>/tool.json per tool
+
+AGENT_NAME = "Pydantic Agent"  # Lets tools such as pr and pr_gate say which agent ran them
