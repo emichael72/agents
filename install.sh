@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# =============================================================================
-# install.sh
 #
-# Description:
+# install.sh
+# Purpose:
 #   Installs everything needed to run the three agents:
-#     - A shared Python virtual environment (.venv) for MCPAgent and the Pydantic Agent,
-#       with both agents' pinned requirements and the pr_gate tool's, and the repository's own
-#       packages (mcpagent, pydantic_agent, gatekeepers) installed editable from pyproject.toml.
+#     - A shared Python virtual environment (.venv) for MCPAgent and the Pydantic Agent, with
+#       every requirements*.txt in the repository (the agents' and the pr_gate tool's pinned
+#       requirements, and the development tools), and the repository's own packages (mcpagent,
+#       pydantic_agent, gatekeepers) installed editable from pyproject.toml.
 #     - vercel/node_modules for the Vercel Agent, installed exactly as package-lock.json
 #       records (npm ci).
 #   It runs only on Red Hat family systems that use dnf (RHEL, Fedora, Rocky, AlmaLinux, CentOS
@@ -15,218 +15,247 @@
 #   With --gate ACTION it manages the pull request gate's service instead (gatekeepers/pr, the
 #   pr-gate systemd user unit): install, uninstall, start, stop, restart, status or logs.
 #
-# Exit Codes:
-#   0 - Success.
-#   1 - Failure (missing requirements, unsupported versions, or install error).
+#   Exit status: 0 on success, 1 on a missing requirement, an unsupported version or a failed step.
+# Usage: ./install.sh --help
 #
-# =============================================================================
+
+set -euo pipefail # Strict mode: exit on errors, unset vars, failed pipes
+
+SCRIPT_VERSION="1.0.0"
+SCRIPT_PATH="${BASH_SOURCE[0]:-$0}" # zsh sets $0 to the script outside functions
+
+# ============================================================================
+# Globals and configuration (command-line flags override these)
+# ============================================================================
 
 # Supported systems: /etc/os-release ID or ID_LIKE names one of these, and dnf is installed
 OS_RELEASE_FILE="/etc/os-release"
-OS_SUPPORTED_IDS="rhel fedora centos"
+OS_SUPPORTED_IDS=(rhel fedora centos)
 
 PYTHON_VENV_PATH=".venv"
 PYTHON_REQUIRED_MIN_VER="3.10"
-PYTHON_BIN="" # The interpreter the venv is created with, chosen by find_python
-PYTHON_REQUIREMENTS_FILES="mcp/requirements.txt pydantic/requirements.txt gatekeepers/pr/requirements.txt requirements-dev.txt"
-PYTHON_MODULES_TO_RUN="mcpagent.server mcpagent.client" # Checked with python -m <module> --version
+# The interpreter the venv is created with, chosen by find_python
+PYTHON_BIN=""
+# -p/--python, or the PYTHON variable; empty lets find_python choose
+PYTHON_REQUEST="${PYTHON:-}"
+# Every requirements*.txt, found by find_requirements_files outside these folders
+PYTHON_REQUIREMENTS_FILES=()
+PYTHON_REQUIREMENTS_SKIP=(.venv node_modules .git)
+# Checked with python -m <module> --version
+PYTHON_MODULES_TO_RUN=(mcpagent.server mcpagent.client)
 # Checked with python -c "import <module>"
-PYTHON_VERIFY_MODULES="mcpagent pydantic_agent gatekeepers.fs.fs_gate gatekeepers.pr.changes"
-PYTHON_VERIFY_MODULES+=" pydantic_ai jsonschema httpx httpx2 aiohttp json5 prompt_toolkit rich ruff"
+PYTHON_VERIFY_MODULES=(
+    mcpagent pydantic_agent gatekeepers.fs.fs_gate gatekeepers.pr.changes
+    pydantic_ai jsonschema httpx httpx2 aiohttp json5 prompt_toolkit rich ruff
+)
 
 # Node 22.18+ runs .ts files directly (type stripping), so the Vercel Agent needs no build step
 NODE_PROJECT_PATH="vercel"
 NODE_REQUIRED_MIN_VER="22.18"
 NPM_REQUIRED_MIN_VER="10.0"
-NODE_VERIFY_PACKAGES="ai @ai-sdk/openai-compatible @ai-sdk/mcp zod"
+NODE_VERIFY_PACKAGES=(ai @ai-sdk/openai-compatible @ai-sdk/mcp zod)
 
 # The pull request gate's service (gatekeepers/pr), a systemd user unit
 GATE_PATH="gatekeepers/pr"
 GATE_UNIT="pr-gate"
 GATE_PORT=8000
-GATE_NEEDS="gh bwrap doxygen clang-format" # Commands the gate's checks use
+GATE_NEEDS=(gh bwrap doxygen clang-format) # Commands the gate's checks use
 
-# Globally control installer verbosity
-QUIET_MODE=0
+FORCE=false       # -f/--force: recreate the .venv and node_modules
+SKIP_VERCEL=false # --skip-vercel: no Node.js
+GATE_ACTION=""    # --gate: manage the gate's service instead of installing
+QUIET=false       # -q/--quiet: only errors and warnings
 
 #
-# @brief Manage the pull request gate's systemd user service.
-# @param $1  The action: install, uninstall, start, stop, restart, status or logs.
-# @return 0 on success, nonzero on failure.
+# @brief Print a message: the single path for this script's own output.
+# @param level INFO | LABEL | OK | FAIL | WARN | ERROR
+#   INFO is a line on stdout; LABEL is text on stdout without a newline, a status line that OK
+#   (green) or FAIL (red "ERROR") then ends. INFO, LABEL, OK and FAIL are silent with -q.
+#   WARN ("Warning: ...") and ERROR are lines on stderr, always shown.
+# @param ...   printf-style format and arguments, or a single literal message
 #
+log() {
+    local level="$1"
+    shift
+    local message
+    if [[ $# -gt 1 ]]; then
+        # shellcheck disable=SC2059 # The first argument is the format
+        message="$(printf -- "$@")"
+    else
+        message="${1:-}"
+    fi
 
-gate_service() {
-
-    local action="$1"
-    local unit_dir="$HOME/.config/systemd/user"
-    local unit_file="$unit_dir/$GATE_UNIT.service"
-    local command
-
-    case "$action" in
-    install)
-        if [[ ! -x "$PYTHON_VENV_PATH/bin/python" ]]; then
-            printf "The shared .venv is missing; run %s without --gate first.\n" "$0" >&2
-            return 1
-        fi
-        for command in $GATE_NEEDS; do
-            command -v "$command" >/dev/null 2>&1 || printf "Warning: %s is not installed; the gate needs it.\n" "$command" >&2
-        done
-        gh auth status >/dev/null 2>&1 || printf "Warning: gh is not logged in (gh auth login); the gate cannot reach GitHub.\n" >&2
-        print_status_label "Installing the $GATE_UNIT service"
-        mkdir -p "$unit_dir" || return 1
-        # The unit names ~/projects/agents; write it with this repository's real location
-        sed "s#%h/projects/agents#$(pwd)#g" "$GATE_PATH/$GATE_UNIT.service" >"$unit_file" || return 1
-        run_logged "systemctl enable" systemctl --user daemon-reload || return 1
-        run_logged "systemctl enable" systemctl --user enable --now "$GATE_UNIT" || return 1
-        print_status_label_results "OK"
-        # Keep it running after logout and start it at boot
-        loginctl enable-linger "$USER" >/dev/null 2>&1 || printf "Warning: could not enable lingering for %s.\n" "$USER" >&2
-        printf "The gate serves http://%s:%s (open the port in the firewall to reach it from other machines).\n" "$(hostname)" "$GATE_PORT"
-        ;;
-    uninstall)
-        print_status_label "Removing the $GATE_UNIT service"
-        systemctl --user disable --now "$GATE_UNIT" >/dev/null 2>&1
-        rm -f "$unit_file"
-        systemctl --user daemon-reload
-        print_status_label_results "OK"
-        ;;
-    start | stop | restart)
-        print_status_label "${action^} the $GATE_UNIT service"
-        run_logged "systemctl $action" systemctl --user "$action" "$GATE_UNIT" || return 1
-        print_status_label_results "OK"
-        ;;
-    status)
-        systemctl --user --no-pager status "$GATE_UNIT" | head -5
-        bash "$GATE_PATH/pr_gate.sh" status
-        ;;
-    logs)
-        journalctl --user -u "$GATE_UNIT" -n 50 --no-pager -o cat
-        ;;
+    case "${level}" in
+    WARN) printf '%s\n' "Warning: ${message}" >&2 ;;
+    ERROR) printf '%s\n' "${message}" >&2 ;;
     *)
-        printf "Unknown gate action: %s (install, uninstall, start, stop, restart, status, logs)\n" "$action" >&2
-        return 1
+        if [[ "${QUIET}" == true ]]; then
+            return 0
+        fi
+        case "${level}" in
+        LABEL) printf '%s' "${message}" ;;
+        OK) printf '\033[32m%s\033[0m\n' "OK" ;;
+        FAIL) printf '\033[31m%s\033[0m\n\n' "ERROR" ;;
+        *) printf '%s\n' "${message}" ;;
+        esac
         ;;
     esac
+    return 0
 }
 
 #
-# @brief Append the final result (OK/ERROR) to the line printed by print_status_label.
-# @param $1  Result string ("OK" or "ERROR").
+# @brief Print usage information.
 #
+print_usage() {
+    local script
+    script="$(basename "${SCRIPT_PATH}")"
 
-print_status_label_results() {
-
-    local result="$1"
-
-    ((QUIET_MODE)) && return # Skip if quiet
-
-    if [[ "$result" == "OK" ]]; then
-        printf "\033[32m%s\033[0m\n" "OK" # green
-    else
-        printf "\033[31m%s\033[0m\n\n" "ERROR" # red
-    fi
+    echo ""
+    echo "Agents installer (v${SCRIPT_VERSION})"
+    echo "Usage: ./${script} [OPTION]..."
+    echo ""
+    echo "Options"
+    echo "    -f, --force                 Recreate the shared .venv and vercel/node_modules"
+    echo "    -p, --python <cmd>          Create the .venv with this Python (default:"
+    echo "                                python3 if >= ${PYTHON_REQUIRED_MIN_VER}, else the newest"
+    echo "                                python3.N in PATH); the PYTHON variable sets it too"
+    echo "        --skip-vercel           Skip the Vercel Agent (no Node.js needed)"
+    echo "        --gate <action>         Manage the pull request gate's service (gatekeepers/pr)"
+    echo "                                instead of installing: install, uninstall, start, stop,"
+    echo "                                restart, status or logs"
+    echo "    -q, --quiet                 Show only errors and warnings"
+    echo "    -v, --version               Print the version and exit"
+    echo "    -h, --help                  This message"
+    echo ""
+    echo "Example"
+    echo "    ./${script} --skip-vercel"
+    echo ""
 }
 
 #
-# @brief Print a task label followed by dot padding, leaving space for an optional result string.
-# @param $1  Task label string (e.g., "Checking Python >= 3.10").
-# @param $2  [optional] Result string (e.g., "OK", "ERROR"). Defaults to empty.
-# @param $3  [optional] Total line width for alignment. Defaults to 60.
+# @brief Parse CLI arguments and populate the global options.
+# @return 0 on success, 1 on an unknown option or a missing value
 #
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+        -f | --force)
+            FORCE=true
+            shift
+            ;;
+        -p | --python)
+            if [[ -z "${2:-}" ]]; then
+                log ERROR "%s requires a Python interpreter (try --help)" "$1"
+                return 1
+            fi
+            PYTHON_REQUEST="$2"
+            shift 2
+            ;;
+        --skip-vercel)
+            SKIP_VERCEL=true
+            shift
+            ;;
+        --gate)
+            if [[ -z "${2:-}" ]]; then
+                log ERROR "%s requires an action (%s)" "$1" \
+                    "install, uninstall, start, stop, restart, status or logs"
+                return 1
+            fi
+            GATE_ACTION="$2"
+            shift 2
+            ;;
+        -q | --quiet)
+            QUIET=true
+            shift
+            ;;
+        -v | --version)
+            log INFO "%s %s" "$(basename "${SCRIPT_PATH}")" "${SCRIPT_VERSION}"
+            exit 0
+            ;;
+        -h | --help)
+            print_usage
+            exit 0
+            ;;
+        *)
+            log ERROR "Unknown option: %s (try --help)" "$1"
+            return 1
+            ;;
+        esac
+    done
+    return 0
+}
 
+#
+# @brief Print a task label followed by dot padding, leaving space for a result.
+# @param $1  Task label (e.g., "Checking Python >= 3.10").
+# @param $2  [optional] Result to end the line with: "OK" or "ERROR".
+# @param $3  [optional] Column the dots run to; defaults to 60.
+#
 print_status_label() {
-
     local label="$1"
-    local results_str="${2:-}"   # Default empty
-    local total_width="${3:-60}" # Default 60
-
-    ((QUIET_MODE)) && return # Skip if quiet
-
+    local result="${2:-}"
+    local total_width="${3:-60}"
     local dots=$((total_width - ${#label}))
-    ((dots < 1)) && dots=1
-
     local dot_str
-    dot_str=$(printf "%${dots}s" "")
-    dot_str=${dot_str// /"."}
 
-    printf "%s %s " "$label" "$dot_str"
-    [[ -n "$results_str" ]] && print_status_label_results "$results_str"
+    if [[ ${dots} -lt 1 ]]; then
+        dots=1
+    fi
+    dot_str="$(printf "%${dots}s" "")"
+    log LABEL "%s %s " "${label}" "${dot_str// /.}"
+    if [[ -n "${result}" ]]; then
+        print_status_label_results "${result}"
+    fi
+    return 0
+}
+
+#
+# @brief End the line print_status_label started with its result.
+# @param $1  "OK" (green), or anything else for a red "ERROR".
+#
+print_status_label_results() {
+    if [[ "$1" == "OK" ]]; then
+        log OK
+    else
+        log FAIL
+    fi
 }
 
 #
 # @brief Run a command quietly; on failure, report ERROR and show the end of its output.
 # @param $1  What failed, for the error message (e.g., "pip install").
-# @param $@  The command and its arguments.
-# @return
-#   0 if the command succeeds, nonzero otherwise.
+# @param ... The command and its arguments.
+# @return 0 if the command succeeds, 1 otherwise
 #
-
 run_logged() {
-
     local what="$1"
     shift
     local log_file
-    log_file=$(mktemp)
+    log_file="$(mktemp)"
 
-    if "$@" >"$log_file" 2>&1; then
-        rm -f "$log_file"
+    if "$@" >"${log_file}" 2>&1; then
+        rm -f "${log_file}"
         return 0
     fi
 
     print_status_label_results "ERROR"
-    printf "%s failed; last lines of its output:\n" "$what" >&2
-    tail -n 15 "$log_file" >&2
-    rm -f "$log_file"
+    log ERROR "%s failed; last lines of its output:" "${what}"
+    log ERROR "$(tail -n 15 "${log_file}")"
+    rm -f "${log_file}"
     return 1
 }
 
 #
-# @brief Verify that the system is a Red Hat family distribution that uses dnf.
-# @return
-#   0 if the system is supported, nonzero otherwise.
+# @brief Run one installer step, naming it on failure.
+# @param ... The step's function and its arguments.
+# @return The step's status
 #
-
-check_os() {
-
-    local line key value
-    local name="" ids=""
-    local id
-
-    print_status_label "Checking for a Red Hat family system (dnf)"
-
-    if [[ ! -r "$OS_RELEASE_FILE" ]]; then
-        print_status_label_results "ERROR"
-        printf "Cannot read %s; this installer supports Red Hat family systems only.\n" \
-            "$OS_RELEASE_FILE" >&2
-        return 1
+run_step() {
+    if "$@"; then
+        return 0
     fi
-
-    # Lines look like KEY=value or KEY="value"
-    while IFS= read -r line; do
-        [[ "$line" =~ ^([A-Z_]+)=\"?([^\"]*)\"?$ ]] || continue
-        key="${BASH_REMATCH[1]}"
-        value="${BASH_REMATCH[2]}"
-        case "$key" in
-        ID | ID_LIKE) ids="$ids $value" ;;
-        PRETTY_NAME) name="$value" ;;
-        esac
-    done <"$OS_RELEASE_FILE"
-
-    for id in $ids; do
-        if [[ " $OS_SUPPORTED_IDS " == *" $id "* ]]; then
-            if ! command -v dnf >/dev/null 2>&1; then
-                print_status_label_results "ERROR"
-                printf "%s is a Red Hat family system, but dnf is not installed.\n" "${name:-This}" >&2
-                return 1
-            fi
-            print_status_label_results "OK"
-            return 0
-        fi
-    done
-
-    print_status_label_results "ERROR"
-    printf "%s is not supported; this installer needs a Red Hat family system that uses dnf.\n" \
-        "${name:-This system}" >&2
+    log ERROR "Step %s failed" "$1"
+    log ERROR ""
     return 1
 }
 
@@ -234,25 +263,67 @@ check_os() {
 # @brief Check whether one version is at least another.
 # @param $1  Version to test (e.g., "3.12").
 # @param $2  Minimum version (e.g., "3.10").
-# @return
-#   0 if $1 >= $2, nonzero otherwise.
+# @return 0 if $1 >= $2, 1 otherwise
 #
-
 version_at_least() {
-
     [[ "$(printf '%s\n' "$2" "$1" | sort -V | head -n1)" == "$2" ]]
 }
 
 #
 # @brief Print a Python interpreter's major.minor version.
 # @param $1  Interpreter command or path.
-# @return
-#   0 if the interpreter ran, nonzero otherwise.
+# @return 0 if the interpreter ran, nonzero otherwise
 #
-
 python_version() {
-
     "$1" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null
+}
+
+#
+# @brief Verify that the system is a Red Hat family distribution that uses dnf.
+# @return 0 if the system is supported, 1 otherwise
+#
+check_os() {
+    local line id
+    local name="" ids=""
+    local os_release_re='^([A-Z_]+)="?([^"]*)"?$' # KEY=value or KEY="value"
+
+    print_status_label "Checking for a Red Hat family system (dnf)"
+
+    if [[ ! -r "${OS_RELEASE_FILE}" ]]; then
+        print_status_label_results "ERROR"
+        log ERROR "Cannot read %s; this installer supports Red Hat family systems only." \
+            "${OS_RELEASE_FILE}"
+        return 1
+    fi
+
+    while IFS= read -r line; do
+        if [[ ! "${line}" =~ ${os_release_re} ]]; then
+            continue
+        fi
+        case "${BASH_REMATCH[1]}" in
+        ID | ID_LIKE) ids="${ids} ${BASH_REMATCH[2]}" ;;
+        PRETTY_NAME) name="${BASH_REMATCH[2]}" ;;
+        esac
+    done <"${OS_RELEASE_FILE}"
+
+    # ID_LIKE may name several systems, separated by spaces
+    while IFS= read -r id; do
+        if [[ -z "${id}" || " ${OS_SUPPORTED_IDS[*]} " != *" ${id} "* ]]; then
+            continue
+        fi
+        if ! command -v dnf >/dev/null 2>&1; then
+            print_status_label_results "ERROR"
+            log ERROR "%s is a Red Hat family system, but dnf is not installed." "${name:-This}"
+            return 1
+        fi
+        print_status_label_results "OK"
+        return 0
+    done < <(printf '%s\n' "${ids}" | tr -s ' ' '\n')
+
+    print_status_label_results "ERROR"
+    log ERROR "%s is not supported; this installer needs a Red Hat family system that uses dnf." \
+        "${name:-This system}"
+    return 1
 }
 
 #
@@ -263,51 +334,54 @@ python_version() {
 #
 # @param $1  Minimum required version (e.g., "3.10").
 # @param $2  [optional] Requested interpreter command or path (--python).
-# @return
-#   0 if a suitable interpreter was found, nonzero otherwise.
+# @return 0 if a suitable interpreter was found, 1 otherwise
 #
-
 find_python() {
-
     local required="$1"
     local requested="${2:-}"
     local candidates=()
     local candidate dir name version
+    local python_re='^python3\.[0-9]+$'
 
-    if [[ -n "$requested" ]]; then
-        candidates=("$requested")
+    if [[ -n "${requested}" ]]; then
+        candidates=("${requested}")
     else
         candidates=(python3)
         # Every python3.N in PATH, newest first
         while IFS= read -r name; do
-            candidates+=("$name")
+            candidates+=("${name}")
         done < <(
-            IFS=:
-            for dir in $PATH; do
-                for candidate in "$dir"/python3.*; do
-                    name=${candidate##*/}
-                    [[ -x "$candidate" && "$name" =~ ^python3\.[0-9]+$ ]] && printf '%s\n' "$name"
+            while IFS= read -r dir; do
+                for candidate in "${dir}"/python3.*; do
+                    name="${candidate##*/}"
+                    if [[ -x "${candidate}" && "${name}" =~ ${python_re} ]]; then
+                        printf '%s\n' "${name}"
+                    fi
                 done
-            done | sort -urV
+            done < <(printf '%s\n' "${PATH}" | tr ':' '\n') | sort -urV
         )
     fi
 
     for candidate in "${candidates[@]}"; do
-        command -v "$candidate" >/dev/null 2>&1 || continue
-        version=$(python_version "$candidate") || continue
-        if version_at_least "$version" "$required"; then
-            PYTHON_BIN=$(command -v "$candidate")
-            print_status_label "Checking Python >= $required ($PYTHON_BIN, $version)" "OK"
+        if ! command -v "${candidate}" >/dev/null 2>&1; then
+            continue
+        fi
+        if ! version="$(python_version "${candidate}")"; then
+            continue
+        fi
+        if version_at_least "${version}" "${required}"; then
+            PYTHON_BIN="$(command -v "${candidate}")"
+            print_status_label "Checking Python >= ${required} (${PYTHON_BIN}, ${version})" "OK"
             return 0
         fi
     done
 
-    print_status_label "Checking Python >= $required" "ERROR"
-    if [[ -n "$requested" ]]; then
-        printf "'%s' is not a Python >= %s interpreter.\n" "$requested" "$required" >&2
+    print_status_label "Checking Python >= ${required}" "ERROR"
+    if [[ -n "${requested}" ]]; then
+        log ERROR "'%s' is not a Python >= %s interpreter." "${requested}" "${required}"
     else
-        printf "No Python >= %s found in PATH (python3 is %s). Install one, or pass --python.\n" \
-            "$required" "$(python_version python3 || printf 'missing')" >&2
+        log ERROR "No Python >= %s found in PATH (python3 is %s). Install one, or pass --python." \
+            "${required}" "$(python_version python3 || printf 'missing')"
     fi
     return 1
 }
@@ -317,34 +391,59 @@ find_python() {
 # @param $1  Command name (e.g., "node").
 # @param $2  Display name (e.g., "Node.js").
 # @param $3  Minimum required version (e.g., "22.18").
-# @return
-#   0 if the command is available and its version >= required, nonzero otherwise.
+# @return 0 if the command is available and new enough, 1 otherwise
 #
-
 check_tool_version() {
-
     local command_name="$1"
     local display_name="$2"
     local required="$3"
-    print_status_label "Checking $display_name >= $required"
+    local version
 
-    if ! command -v "$command_name" &>/dev/null; then
+    print_status_label "Checking ${display_name} >= ${required}"
+
+    if ! command -v "${command_name}" >/dev/null 2>&1; then
         print_status_label_results "ERROR"
-        printf "'%s' not found in PATH.\n" "$command_name" >&2
+        log ERROR "'%s' not found in PATH." "${command_name}"
         return 1
     fi
 
-    local version
-    version=$("$command_name" --version 2>/dev/null)
-    version=${version#v} # node prints "v22.18.0"
-
-    if ! version_at_least "$version" "$required"; then
+    version="$("${command_name}" --version 2>/dev/null || true)"
+    version="${version#v}" # node prints "v22.18.0"
+    if ! version_at_least "${version}" "${required}"; then
         print_status_label_results "ERROR"
-        printf "%s >= %s required, found %s\n" "$display_name" "$required" "$version" >&2
+        log ERROR "%s >= %s required, found %s" "${display_name}" "${required}" "${version:-none}"
         return 1
     fi
 
     print_status_label_results "OK"
+    return 0
+}
+
+#
+# @brief Find every requirements*.txt in the repository and store them in PYTHON_REQUIREMENTS_FILES.
+#
+#   The search skips the folders in PYTHON_REQUIREMENTS_SKIP; the files are sorted by path.
+#
+# @return 0 if at least one was found, 1 otherwise
+#
+find_requirements_files() {
+    local file skip
+    local prune=()
+    local pattern="requirements*.txt"
+
+    for skip in "${PYTHON_REQUIREMENTS_SKIP[@]}"; do
+        prune+=(-name "${skip}" -o)
+    done
+    PYTHON_REQUIREMENTS_FILES=()
+    while IFS= read -r file; do
+        PYTHON_REQUIREMENTS_FILES+=("${file#./}")
+    done < <(find . \( "${prune[@]}" -false \) -prune -o -type f -name "${pattern}" -print | sort)
+
+    if [[ ${#PYTHON_REQUIREMENTS_FILES[@]} -eq 0 ]]; then
+        log ERROR "No requirements*.txt found in %s." "$(pwd)"
+        return 1
+    fi
+    return 0
 }
 
 #
@@ -353,59 +452,53 @@ check_tool_version() {
 #   The venv is created with PYTHON_BIN. An existing venv is kept only if its Python is new enough.
 #
 # @param $1  Full path to the virtual environment directory.
-# @return
-#   0 on success, nonzero on failure.
+# @return 0 on success, 1 on failure
 #
-
 create_python_venv() {
-
     local venv_full_path="$1"
     local version
 
-    print_status_label "Setting up virtual environment at '$(basename "$venv_full_path")'"
-    if [[ ! -d "$venv_full_path" ]]; then
-        run_logged "$PYTHON_BIN -m venv" "$PYTHON_BIN" -m venv "$venv_full_path" || return 1
+    print_status_label "Setting up virtual environment at '$(basename "${venv_full_path}")'"
+    if [[ ! -d "${venv_full_path}" ]]; then
+        run_logged "${PYTHON_BIN} -m venv" "${PYTHON_BIN}" -m venv "${venv_full_path}" || return 1
     fi
-    if [[ ! -x "$venv_full_path/bin/python" ]]; then
+    if [[ ! -x "${venv_full_path}/bin/python" ]]; then
         print_status_label_results "ERROR"
-        printf "Virtual environment at %s is broken (missing bin/python). Rerun with --force.\n" "$venv_full_path" >&2
+        log ERROR "Virtual environment at %s is broken (missing bin/python). Rerun with --force." \
+            "${venv_full_path}"
         return 1
     fi
-    version=$(python_version "$venv_full_path/bin/python")
-    if ! version_at_least "$version" "$PYTHON_REQUIRED_MIN_VER"; then
+    version="$(python_version "${venv_full_path}/bin/python" || true)"
+    if ! version_at_least "${version}" "${PYTHON_REQUIRED_MIN_VER}"; then
         print_status_label_results "ERROR"
-        printf "Virtual environment at %s uses Python %s; Python >= %s is required. Rerun with --force.\n" \
-            "$venv_full_path" "${version:-unknown}" "$PYTHON_REQUIRED_MIN_VER" >&2
+        log ERROR "Virtual environment at %s uses Python %s; Python >= %s is required. %s" \
+            "${venv_full_path}" "${version:-unknown}" "${PYTHON_REQUIRED_MIN_VER}" \
+            "Rerun with --force."
         return 1
     fi
     print_status_label_results "OK"
 
     print_status_label "Upgrading pip"
-    run_logged "pip upgrade" "$venv_full_path/bin/python" -m pip install --upgrade pip || return 1
+    run_logged "pip upgrade" "${venv_full_path}/bin/python" -m pip install --upgrade pip || return 1
     print_status_label_results "OK"
+    return 0
 }
 
 #
-# @brief Install the agents' requirements, then the repository's own packages (editable).
+# @brief Install every requirements file, then the repository's own packages (editable).
 # @param $1  Full path to the virtual environment directory.
-# @return
-#   0 on success, nonzero on failure.
+# @return 0 on success, 1 on failure
 #
-
 install_python_packages() {
-
     local venv_full_path="$1"
-    local pip=("$venv_full_path/bin/python" -m pip install)
+    local pip=("${venv_full_path}/bin/python" -m pip install)
     local requirements_file
 
-    for requirements_file in $PYTHON_REQUIREMENTS_FILES; do
-        print_status_label "Installing '$requirements_file'"
-        if [[ ! -f "$requirements_file" ]]; then
-            print_status_label_results "ERROR"
-            printf "Requirements file '%s' not found.\n" "$requirements_file" >&2
-            return 1
-        fi
-        run_logged "pip install -r $requirements_file" "${pip[@]}" -r "$requirements_file" || return 1
+    find_requirements_files || return 1
+    for requirements_file in "${PYTHON_REQUIREMENTS_FILES[@]}"; do
+        print_status_label "Installing '${requirements_file}'"
+        run_logged "pip install -r ${requirements_file}" \
+            "${pip[@]}" -r "${requirements_file}" || return 1
         print_status_label_results "OK"
     done
 
@@ -415,231 +508,248 @@ install_python_packages() {
     print_status_label_results "OK"
 
     print_status_label "Checking installed packages are consistent"
-    run_logged "pip check" "$venv_full_path/bin/python" -m pip check || return 1
+    run_logged "pip check" "${venv_full_path}/bin/python" -m pip check || return 1
     print_status_label_results "OK"
+    return 0
 }
 
 #
 # @brief Verify the Python agents: modules import, and MCPAgent and the Pydantic Agent start.
 # @param $1  Full path to the virtual environment directory.
-# @return
-#   0 if verification passes, nonzero otherwise.
+# @return 0 if verification passes, 1 otherwise
 #
-
 verify_python_agents() {
-
-    local venv_full_path="$1"
-    local py_bin="$venv_full_path/bin/python"
+    local py_bin="$1/bin/python"
     local module
 
     print_status_label "Verifying MCPAgent and the Pydantic Agent"
 
-    for module in $PYTHON_VERIFY_MODULES; do
-        if ! "$py_bin" -c "import $module" >/dev/null 2>&1; then
+    for module in "${PYTHON_VERIFY_MODULES[@]}"; do
+        if ! "${py_bin}" -c "import ${module}" >/dev/null 2>&1; then
             print_status_label_results "ERROR"
-            printf "Module '%s' is not importable with %s.\n" "$module" "$py_bin" >&2
+            log ERROR "Module '%s' is not importable with %s." "${module}" "${py_bin}"
             return 1
         fi
     done
 
-    for module in $PYTHON_MODULES_TO_RUN; do
-        if ! "$py_bin" -m "$module" --version >/dev/null 2>&1; then
+    for module in "${PYTHON_MODULES_TO_RUN[@]}"; do
+        if ! "${py_bin}" -m "${module}" --version >/dev/null 2>&1; then
             print_status_label_results "ERROR"
-            printf "'python -m %s --version' failed with %s.\n" "$module" "$py_bin" >&2
+            log ERROR "'python -m %s --version' failed with %s." "${module}" "${py_bin}"
             return 1
         fi
     done
 
-    if ! "$py_bin" pydantic/agent.py --help >/dev/null 2>&1; then
+    if ! "${py_bin}" pydantic/agent.py --help >/dev/null 2>&1; then
         print_status_label_results "ERROR"
-        printf "'pydantic/agent.py --help' failed with %s.\n" "$py_bin" >&2
+        log ERROR "'pydantic/agent.py --help' failed with %s." "${py_bin}"
         return 1
     fi
 
     print_status_label_results "OK"
+    return 0
 }
 
 #
 # @brief Install the Vercel Agent's packages exactly as its package-lock.json records.
-# @return
-#   0 on success, nonzero on failure.
+# @return 0 on success, 1 on failure
 #
-
 install_node_modules() {
-
-    print_status_label "Installing '$NODE_PROJECT_PATH/package-lock.json'"
-    if [[ ! -f "$NODE_PROJECT_PATH/package-lock.json" ]]; then
+    print_status_label "Installing '${NODE_PROJECT_PATH}/package-lock.json'"
+    if [[ ! -f "${NODE_PROJECT_PATH}/package-lock.json" ]]; then
         print_status_label_results "ERROR"
-        printf "Lock file '%s/package-lock.json' not found.\n" "$NODE_PROJECT_PATH" >&2
+        log ERROR "Lock file '%s/package-lock.json' not found." "${NODE_PROJECT_PATH}"
         return 1
     fi
-    run_logged "npm ci" npm ci --prefix "$NODE_PROJECT_PATH" --no-audit --no-fund || return 1
+    run_logged "npm ci" npm ci --prefix "${NODE_PROJECT_PATH}" --no-audit --no-fund || return 1
     print_status_label_results "OK"
+    return 0
 }
 
 #
 # @brief Verify the Vercel Agent: its packages resolve and agent.ts starts.
-# @return
-#   0 if verification passes, nonzero otherwise.
+# @return 0 if verification passes, 1 otherwise
 #
-
 verify_vercel_agent() {
-
     local package
+    local import_package
 
     print_status_label "Verifying the Vercel Agent"
 
-    for package in $NODE_VERIFY_PACKAGES; do
-        if ! (cd "$NODE_PROJECT_PATH" && node --input-type=module -e "await import('$package')") >/dev/null 2>&1; then
+    for package in "${NODE_VERIFY_PACKAGES[@]}"; do
+        import_package="await import('${package}')"
+        if ! (cd "${NODE_PROJECT_PATH}" && node --input-type=module -e "${import_package}") \
+            >/dev/null 2>&1; then
             print_status_label_results "ERROR"
-            printf "Package '%s' cannot be imported.\n" "$package" >&2
+            log ERROR "Package '%s' cannot be imported." "${package}"
             return 1
         fi
     done
 
-    if ! node "$NODE_PROJECT_PATH/agent.ts" --help >/dev/null 2>&1; then
+    if ! node "${NODE_PROJECT_PATH}/agent.ts" --help >/dev/null 2>&1; then
         print_status_label_results "ERROR"
-        printf "'node %s/agent.ts --help' failed.\n" "$NODE_PROJECT_PATH" >&2
+        log ERROR "'node %s/agent.ts --help' failed." "${NODE_PROJECT_PATH}"
         return 1
     fi
 
     print_status_label_results "OK"
+    return 0
 }
 
 #
-# @brief Entry point for the installer.
-# @param
-#	Arguments
-# @return
-#   0 on success, nonzero on failure.
+# @brief Manage the pull request gate's systemd user service.
+# @param $1  The action: install, uninstall, start, stop, restart, status or logs.
+# @return 0 on success, nonzero on failure
 #
+gate_service() {
+    local action="$1"
+    local unit_dir="${HOME}/.config/systemd/user"
+    local unit_file="${unit_dir}/${GATE_UNIT}.service"
+    local user="${USER:-$(id -un)}"
+    local unit_template="${GATE_PATH}/${GATE_UNIT}.service"
+    local cmd verb
 
-main() {
-
-    local force=0
-    local skip_vercel=0
-    local python_request="${PYTHON:-}"
-    local gate_action=""
-    local full_venv_path
-
-    _show_help() {
-        cat <<EOF
-
-Agents installer
-Usage: $0 [OPTIONS]
-
-Options:
-  -f, --force         Recreate the shared .venv and vercel/node_modules from scratch.
-  -p, --python CMD    Create the .venv with this Python (default: python3 if >= $PYTHON_REQUIRED_MIN_VER,
-                      else the newest python3.N in PATH). The PYTHON variable sets it too.
-      --skip-vercel   Skip the Vercel Agent (no Node.js needed).
-  -q, --quiet         Suppress status reporting; only show errors.
-      --gate ACTION   Manage the pull request gate's service (gatekeepers/pr) instead of installing:
-                      install, uninstall, start, stop, restart, status or logs.
-  -h, --help          Show this help message and exit.
-
-EOF
-    }
-
-    # Parse args
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-        -f | --force)
-            force=1
-            shift
-            ;;
-        --skip-vercel)
-            skip_vercel=1
-            shift
-            ;;
-        -p | --python)
-            python_request="${2:-}"
-            [[ -z "$python_request" ]] && {
-                _show_help >&2
-                exit 1
-            }
-            shift 2
-            ;;
-        --gate)
-            gate_action="${2:-}"
-            [[ -z "$gate_action" ]] && {
-                _show_help >&2
-                exit 1
-            }
-            shift 2
-            ;;
-        -q | --quiet)
-            QUIET_MODE=1
-            shift
-            ;;
-        -h | --help)
-            _show_help
-            exit 0
-            ;;
-        *)
-            printf "Unknown option: %s\n\n" "$1" >&2
-            _show_help >&2
-            exit 1
-            ;;
-        esac
-    done
-
-    _run_step() {
-        # Helper to execute a step and report its status
-        "$@" || {
-            local step_name="$1"
-            printf "Step \033[1;31m%s\033[0m failed\n\n" "$step_name" >&2
+    case "${action}" in
+    install)
+        if [[ ! -x "${PYTHON_VENV_PATH}/bin/python" ]]; then
+            log ERROR "The shared .venv is missing; run %s without --gate first." \
+                "$(basename "${SCRIPT_PATH}")"
             return 1
-        }
-    }
+        fi
+        for cmd in "${GATE_NEEDS[@]}"; do
+            if ! command -v "${cmd}" >/dev/null 2>&1; then
+                log WARN "%s is not installed; the gate needs it." "${cmd}"
+            fi
+        done
+        if ! gh auth status >/dev/null 2>&1; then
+            log WARN "gh is not logged in (gh auth login); the gate cannot reach GitHub."
+        fi
+        print_status_label "Installing the ${GATE_UNIT} service"
+        run_logged "mkdir ${unit_dir}" mkdir -p "${unit_dir}" || return 1
+        # The unit names ~/projects/agents; write it with this repository's real location
+        if ! sed "s#%h/projects/agents#$(pwd)#g" "${unit_template}" >"${unit_file}"; then
+            print_status_label_results "ERROR"
+            log ERROR "Cannot write %s." "${unit_file}"
+            return 1
+        fi
+        run_logged "systemctl daemon-reload" systemctl --user daemon-reload || return 1
+        run_logged "systemctl enable" systemctl --user enable --now "${GATE_UNIT}" || return 1
+        print_status_label_results "OK"
+        # Keep it running after logout and start it at boot
+        if ! loginctl enable-linger "${user}" >/dev/null 2>&1; then
+            log WARN "could not enable lingering for %s." "${user}"
+        fi
+        log INFO "The gate serves http://%s:%s (open the port in the firewall to reach it %s)." \
+            "$(hostname)" "${GATE_PORT}" "from other machines"
+        ;;
+    uninstall)
+        print_status_label "Removing the ${GATE_UNIT} service"
+        # Already disabled or never installed is fine
+        systemctl --user disable --now "${GATE_UNIT}" >/dev/null 2>&1 || true
+        rm -f "${unit_file}"
+        run_logged "systemctl daemon-reload" systemctl --user daemon-reload || return 1
+        print_status_label_results "OK"
+        ;;
+    start | stop | restart)
+        case "${action}" in
+        start) verb="Starting" ;;
+        stop) verb="Stopping" ;;
+        restart) verb="Restarting" ;;
+        esac
+        print_status_label "${verb} the ${GATE_UNIT} service"
+        run_logged "systemctl ${action}" systemctl --user "${action}" "${GATE_UNIT}" || return 1
+        print_status_label_results "OK"
+        ;;
+    status)
+        # systemctl exits nonzero for a stopped or missing unit; the gate's own report follows
+        systemctl --user --no-pager status "${GATE_UNIT}" | head -5 || true
+        bash "${GATE_PATH}/pr_gate.sh" status
+        ;;
+    logs)
+        journalctl --user -u "${GATE_UNIT}" -n 50 --no-pager -o cat
+        ;;
+    *)
+        log ERROR "Unknown gate action: %s (%s)" "${action}" \
+            "install, uninstall, start, stop, restart, status, logs"
+        return 1
+        ;;
+    esac
+}
 
-    # Paths are relative to this script, so it can be run from any directory
-    cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" || return 1
-    full_venv_path="$(pwd)/$PYTHON_VENV_PATH"
+#
+# @brief Check the system and toolchains, then install and verify both environments.
+# @return 0 on success, 1 at the first failed step
+#
+install_all() {
+    local full_venv_path
+    full_venv_path="$(pwd)/${PYTHON_VENV_PATH}"
 
-    if [[ -n "$gate_action" ]]; then
-        gate_service "$gate_action"
-        return
-    fi
-
-    ((!QUIET_MODE)) && printf "\nStarting the agents installer...\n\n"
+    log INFO ""
+    log INFO "Starting the agents installer..."
+    log INFO ""
 
     # Check the system and every toolchain first, so nothing is changed when one is missing
-    _run_step check_os || return 1
-    _run_step find_python "$PYTHON_REQUIRED_MIN_VER" "$python_request" || return 1
-    if ((!skip_vercel)); then
-        _run_step check_tool_version node "Node.js" "$NODE_REQUIRED_MIN_VER" || return 1
-        _run_step check_tool_version npm "npm" "$NPM_REQUIRED_MIN_VER" || return 1
+    run_step check_os || return 1
+    run_step find_python "${PYTHON_REQUIRED_MIN_VER}" "${PYTHON_REQUEST}" || return 1
+    if [[ "${SKIP_VERCEL}" == false ]]; then
+        run_step check_tool_version node "Node.js" "${NODE_REQUIRED_MIN_VER}" || return 1
+        run_step check_tool_version npm "npm" "${NPM_REQUIRED_MIN_VER}" || return 1
     fi
 
-    if ((force)); then
+    if [[ "${FORCE}" == true ]]; then
         print_status_label "Removing existing environments"
-        rm -rf "$full_venv_path" "$NODE_PROJECT_PATH/node_modules" >/dev/null 2>&1 || true
+        rm -rf "${full_venv_path}" "${NODE_PROJECT_PATH}/node_modules"
         print_status_label_results "OK"
     fi
 
     # MCPAgent and the Pydantic Agent: one shared Python environment
-    _run_step create_python_venv "$full_venv_path" || return 1
-    _run_step install_python_packages "$full_venv_path" || return 1
-    _run_step verify_python_agents "$full_venv_path" || return 1
+    run_step create_python_venv "${full_venv_path}" || return 1
+    run_step install_python_packages "${full_venv_path}" || return 1
+    run_step verify_python_agents "${full_venv_path}" || return 1
 
     # The Vercel Agent: its own node_modules
-    if ((!skip_vercel)); then
-        _run_step install_node_modules || return 1
-        _run_step verify_vercel_agent || return 1
+    if [[ "${SKIP_VERCEL}" == false ]]; then
+        run_step install_node_modules || return 1
+        run_step verify_vercel_agent || return 1
     fi
 
-    ((QUIET_MODE)) && return 0 # Skip usage if quiet
-    cat <<EOF
+    log INFO ""
+    log INFO "Usage (from the repository root):"
+    log INFO "  .venv/bin/python mcp/server.py      # MCPAgent: the MCP server"
+    log INFO "  .venv/bin/python mcp/client.py      # MCPAgent: the agent"
+    log INFO "  .venv/bin/python pydantic/agent.py  # the Pydantic Agent"
+    log INFO "  node vercel/agent.ts                # the Vercel Agent"
+    log INFO "  ./install.sh --gate install         # the pull request gate's service"
+    log INFO ""
+    return 0
+}
 
-Usage (from the repository root):
-  .venv/bin/python mcp/server.py              # MCPAgent: the MCP server
-  .venv/bin/python mcp/client.py              # MCPAgent: the agent
-  .venv/bin/python pydantic/agent.py           # the Pydantic Agent
-  node vercel/agent.ts                         # the Vercel Agent
-  ./install.sh --gate install                  # the pull request gate's service (gatekeepers/pr)
+#
+# @brief Parse the arguments, move to the repository root, then install or manage the gate.
+# @return 0 on success, nonzero on failure
+#
+main() {
+    # Bash behavior when run by zsh: arrays from 0, BASH_REMATCH, unmatched globs left as they are
+    if [[ -n "${ZSH_VERSION:-}" ]]; then
+        setopt KSH_ARRAYS BASH_REMATCH NO_NOMATCH
+    fi
 
-EOF
+    parse_args "$@" || return 1
+
+    # A relative --python path is relative to where the installer was started. Symlinks are
+    # kept: a venv's or a shim's python is what was asked for, not the file it points to.
+    if [[ "${PYTHON_REQUEST}" == */* ]]; then
+        PYTHON_REQUEST="$(realpath -ms "${PYTHON_REQUEST}")"
+    fi
+
+    # Paths are relative to this script, so it can be run from any directory
+    cd "$(dirname "$(realpath "${SCRIPT_PATH}")")" || return 1
+
+    if [[ -n "${GATE_ACTION}" ]]; then
+        gate_service "${GATE_ACTION}"
+        return
+    fi
+    install_all
 }
 
 main "$@"
