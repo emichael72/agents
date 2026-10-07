@@ -8,6 +8,7 @@ block, and every function, parameter and return value is described. Read-only.
 ```bash
 bash doxy/doxy.sh ~/projects/core_dump/src
 bash doxy/doxy.sh "src/pi.c include/pi.h"   # several paths in one argument, as the agents pass them
+bash doxy/doxy.sh --help                     # usage; --version prints the script's version
 ```
 
 Each path is a file (`.c`, `.h`, `.cc`, `.cpp`, `.hpp`, `.cxx`, `.hh`) or a folder, searched
@@ -28,6 +29,7 @@ src/math.c:13: error: The following parameter of multiply(int a, int b) is not d
 
 Documentation problems are the tool's result, so it exits 0. It exits nonzero only when the check
 cannot run: Doxygen is missing, a path does not exist or is not C/C++, or Doxygen itself fails.
+The result goes to stdout; why the check could not run goes to stderr, as `Error: <reason>`.
 
 ## Settings
 

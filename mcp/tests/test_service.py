@@ -104,7 +104,8 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('All documented: 1 file(s)', result['content'][0]['text'])
             text = (await check('sample/bad.c sample/bare.h'))['content'][0]['text']
             self.assertIn('Documentation problems: 2 in 2 file(s)', text)
-            self.assertIn('sample/bad.c:4: error: Member subtract', text)
+            # Doxygen reports this as an error or, before 1.10, as a warning (whose prefix doxy drops)
+            self.assertRegex(text, r'sample/bad\.c:4: (error: )?Member subtract')
             self.assertIn('sample/bare.h:1: error: File has no @file', text)
             self.assertTrue((await check('sample/missing.c'))['isError'])
             self.assertTrue((await check(f'{folder}/good.c'))['isError'])  # Absolute paths are not allowed
