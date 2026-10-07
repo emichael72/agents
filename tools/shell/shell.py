@@ -203,11 +203,14 @@ def sandbox(allowed: dict[str, fs_gate.Folder], cwd: Path, identity: Optional[Pa
         cwd: The real folder to start in.
         identity: A folder from identity_files, mounted as /etc/passwd and /etc/group; None for none.
     Returns:
-        list[str]: bwrap and its options, ending with "--" (the command follows).
+        list[str]: bwrap (by full path) and its options, ending with "--" (the command follows).
+            Run it with an empty environment: bwrap hands the command its own environment plus
+            the --setenv variables, so the command sees only those (as --clearenv would, which
+            bubblewrap before 0.5, as in RHEL 9, does not have).
     Raises:
         ValueError: If the working folder is outside the allowed folders.
     """
-    args = ["bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--clearenv",
+    args = [shutil.which("bwrap") or "/usr/bin/bwrap", "--unshare-all", "--die-with-parent", "--new-session",
             "--ro-bind", "/usr", "/usr", "--symlink", "usr/bin", "/bin", "--symlink", "usr/sbin", "/sbin",
             "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib64", "/lib64",
             "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/tmp/home"]
@@ -218,7 +221,8 @@ def sandbox(allowed: dict[str, fs_gate.Folder], cwd: Path, identity: Optional[Pa
         args += ["--ro-bind", str(identity / "passwd"), "/etc/passwd", "--ro-bind", str(identity / "group"), "/etc/group"]
     for name, folder in allowed.items():
         mount = str(WORK / name)
-        if "r" not in folder.access:
+        # A folder that does not exist yet (.memory before the first note) has nothing to show
+        if "r" not in folder.access or not folder.path.is_dir():
             continue
         args += ["--bind" if "w" in folder.access else "--ro-bind", str(folder.path), mount]
         for sub, access in sorted(folder.subpaths.items(), key=lambda item: len(item[0].parts)):
@@ -286,7 +290,7 @@ def run(cwd: str, command: str) -> tuple[bool, str]:
             result = subprocess.run([*sandbox(allowed, folder, identity_files(Path(identity))),
                                      "/usr/bin/bash", "--noprofile", "--norc", "-c", command],
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
-                                    timeout=TIMEOUT)
+                                    env={}, timeout=TIMEOUT)  # Nothing of the caller's environment
     except subprocess.TimeoutExpired:
         return False, f"Stopped after {TIMEOUT}s: {command}"
     output = fs_gate.display(result.stdout, allowed).replace(f"{WORK}/", "")
