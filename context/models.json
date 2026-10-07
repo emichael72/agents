@@ -6,7 +6,9 @@
     "base_url_env, then (with model_auto) the model loaded on the server (LM Studio), then the",
     "values here.",
     "The key comes from the variable named by api_key_env; api_key is only a fallback for",
-    "servers that need no real key."
+    "servers that need no real key.",
+    "error_hints: \"openai\" gives OpenAI-specific advice (key, quota, billing) when a request",
+    "fails; without it, errors point at the server and the model instead."
   ],
   "default": "local",
   "profiles": {
@@ -27,6 +29,7 @@
       "model": "gpt-4.1-mini",
       "model_env": "OPENAI_MODEL",
       "api_key_env": "OPENAI_API_KEY",
+      "error_hints": "openai",
       "timeout": 60
     }
   }

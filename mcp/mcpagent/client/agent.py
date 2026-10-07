@@ -26,7 +26,6 @@ import time
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Optional
-from urllib.parse import urlparse
 
 import aiohttp
 from jsonschema import ValidationError, validate
@@ -39,8 +38,6 @@ from rich.text import Text
 
 from mcpagent.config import repo_path
 from .client import MCPClient
-
-OPENAI_HOST = "api.openai.com"  # Only used to decide whether OpenAI-specific error hints apply
 
 
 def load_instructions(config_data: dict[str, Any], key: str = "instructions") -> str:
@@ -115,7 +112,7 @@ def resolve_model(models: dict, profile: Optional[str] = None,
         model: Overrides the profile's model.
         base_url: Overrides the profile's base URL.
     Returns:
-        dict: name, base_url, model, api_key and timeout, as `MCPAgent` expects.
+        dict: name, base_url, model, api_key, timeout and error_hints, as `MCPAgent` expects.
     Raises:
         ValueError: If the profile does not exist, lacks base_url or model, or its API key is not set.
     """
@@ -140,6 +137,7 @@ def resolve_model(models: dict, profile: Optional[str] = None,
         "model": model,
         "api_key": api_key,
         "timeout": float(settings.get("timeout", 60)),
+        "error_hints": settings.get("error_hints"),
     }
 
 
@@ -183,7 +181,8 @@ class MCPAgent:
     """
 
     def __init__(self, mcp_client: MCPClient, *, base_url: str, model: str, api_key: str,
-                 provider: str = "OpenAI", timeout: float = 60.0, instructions: str = "",
+                 provider: str = "OpenAI", timeout: float = 60.0, error_hints: Optional[str] = None,
+                 instructions: str = "",
                  trace: Optional[Callable[[str], None]] = None,
                  max_tool_calls: int = 8, context: str = ""):
         """
@@ -195,6 +194,8 @@ class MCPAgent:
             api_key: API key for that server only.
             provider: Display name used in messages, e.g. "OpenAI" or "Local model server".
             timeout: Request timeout in seconds.
+            error_hints: "openai" for OpenAI's error advice (key, quota, billing); None for the
+                generic advice that points at the server and the model.
             instructions: The model's instructions (see `load_instructions`).
             trace: Called with a line for each tool call ("→ tool(args)"), result ("← tool: output")
                 and failure ("✗ tool: message").
@@ -202,7 +203,7 @@ class MCPAgent:
             context: Extra instructions appended to `instructions`.
         """
         base_url = base_url.rstrip("/")
-        self.local = urlparse(base_url).hostname != OPENAI_HOST
+        self.local = error_hints != "openai"
         self.base_url = base_url
         self.provider = provider
         self.mcp = mcp_client
@@ -877,6 +878,7 @@ async def run_agent(config_file: str | Path, profile=None, model=None, base_url=
         memory = memory_text(repo_path(index) if index else None)
         active_agent = MCPAgent(mcp_client, base_url=settings["base_url"], model=settings["model"],
                          api_key=settings["api_key"], provider=settings["name"], timeout=settings["timeout"],
+                         error_hints=settings["error_hints"],
                          instructions=identity_text(agent_settings.get("names", {}).get("mcpagent"),
                                                     mcp_client.config_data)
                          + load_instructions(mcp_client.config_data) + memory,

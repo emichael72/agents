@@ -117,6 +117,7 @@ change on its next start. None of this is hard-coded in the agents.
 	"model": "gpt-4.1-mini",
 	"model_env": "OPENAI_MODEL",
 	"api_key_env": "OPENAI_API_KEY",
+	"error_hints": "openai",
 	"timeout": 60
   }
 }
@@ -131,6 +132,7 @@ change on its next start. None of this is hard-coded in the agents.
 | `timeout`                   | Request timeout in seconds; 300 leaves time for LM Studio to load a model                                                                                        |
 | `model_auto`                | Ask the server which model is loaded (LM Studio's `/api/v0/models`) and use it; `model` is the fallback when none is loaded. `--model` and `model_env` still win |
 | `name`                      | Display name in the chat banner and error messages                                                                                                               |
+| `error_hints`               | `"openai"`: on a failed request, MCPAgent gives OpenAI's advice (key, quota, billing); otherwise it points at the server and the model                          |
 
 All three agents take the same options: `--profile NAME` (or the shortcuts `--local` and
 `--openai`) picks a profile, and `--model` / `--base-url` override it for one run. Precedence is

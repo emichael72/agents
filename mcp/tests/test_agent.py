@@ -106,9 +106,10 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         await self.model_server.start_server()
         self.addAsyncCleanup(self.model_server.close)
         self.model_url = str(self.model_server.make_url('/v1'))
+        # OpenAI's error hints, as the openai profile sets, though the stand-in server is local
         self.agent = MCPAgent(MCPClient(self.config), base_url=self.model_url, model='gpt-4.1-mini',
-                               api_key='test-key-not-real', trace=self.traces.append, max_tool_calls=2)
-        self.agent.local = False  # Behave as with OpenAI (its error hints), though the stand-in is local
+                               api_key='test-key-not-real', error_hints='openai', trace=self.traces.append,
+                               max_tool_calls=2)
         self.addAsyncCleanup(self.agent.close)
         await self.agent.connect()
         self.aliases = {name: alias for alias, (_, name, _) in self.agent.routes.items()}
@@ -326,6 +327,8 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(resolve_model(config, 'local')['model'], 'from-env')
             self.assertEqual(resolve_model(config, 'local', model='from-cli')['model'], 'from-cli')
             self.assertEqual(resolve_model(config, 'openai')['api_key'], 'test-key-not-real')
+            self.assertEqual(resolve_model(config, 'openai')['error_hints'], 'openai')
+            self.assertIsNone(local['error_hints'])  # A local server gets the generic error advice
 
     async def test_instructions_come_from_the_shared_context_file(self):
         instructions = load_instructions(self.shipped_config())
