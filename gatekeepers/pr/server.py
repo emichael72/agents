@@ -262,7 +262,7 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
         try:
             row = quiz.get_quiz(qid)
         except KeyError:
-            raise HTTPException(404, "Quiz not found")
+            raise HTTPException(404, "Quiz not found") from None
         content = quiz.Quiz.model_validate_json(row["content"])
         # Only public fields enter the rendered form
         questions = [{"question": q.question, "options": q.options} for q in content.questions]
@@ -282,14 +282,14 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
             try:
                 answers = [int(str(form[f"q{i}"])) for i in range(count)]
             except (KeyError, ValueError):
-                raise ValueError("Please answer every question.")
+                raise ValueError("Please answer every question.") from None
             result = await run_in_threadpool(locked_submit, qid, answers)
         except KeyError:
-            raise HTTPException(404, "Quiz not found")
+            raise HTTPException(404, "Quiz not found") from None
         except ValueError as exc:
-            raise HTTPException(409, str(exc))
+            raise HTTPException(409, str(exc)) from None
         except (RuntimeError, TimeoutError):
-            raise HTTPException(502, "GitHub could not confirm the result. Retry this submission.")
+            raise HTTPException(502, "GitHub could not confirm the result. Retry this submission.") from None
         return templates.TemplateResponse(request=request, name="result.html",
                                           context={"result": result, "row": row, "repo": quiz.REPO})
 
@@ -302,11 +302,11 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
             row = quiz.get_quiz(qid)
             result = await run_in_threadpool(locked_skip, qid)
         except KeyError:
-            raise HTTPException(404, "Quiz not found")
+            raise HTTPException(404, "Quiz not found") from None
         except ValueError as exc:
-            raise HTTPException(409, str(exc))
+            raise HTTPException(409, str(exc)) from None
         except (RuntimeError, TimeoutError):
-            raise HTTPException(502, "GitHub could not confirm the result. Retry.")
+            raise HTTPException(502, "GitHub could not confirm the result. Retry.") from None
         return templates.TemplateResponse(request=request, name="result.html",
                                           context={"result": result, "row": row, "repo": quiz.REPO})
 

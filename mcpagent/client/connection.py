@@ -167,7 +167,7 @@ class MCPClientConnection:
             try:
                 line = await asyncio.wait_for(self._reader.readline(), timeout=timeout)
             except asyncio.TimeoutError:
-                raise TimeoutError(f"No message received within {timeout:.1f}s")
+                raise TimeoutError(f"No message received within {timeout:.1f}s") from None
 
             if not line:
                 raise EOFError("STDIO process closed")
@@ -224,7 +224,7 @@ class MCPClientConnection:
                                     # Blank line -> end of one SSE event
                                     if buffer:
                                         try:
-                                            data_lines = [l[5:].strip() for l in buffer if l.startswith("data:")]
+                                            data_lines = [line[5:].strip() for line in buffer if line.startswith("data:")]
                                             payload_str = "\n".join(data_lines)
                                             payload = json.loads(payload_str)
                                             yield payload
@@ -392,7 +392,7 @@ class MCPClientConnection:
                     try:
                         line = await asyncio.wait_for(self._reader.readline(), timeout=timeout)
                     except asyncio.TimeoutError:
-                        raise TimeoutError(f"Request {request_id} timed out after {timeout:.1f}s")
+                        raise TimeoutError(f"Request {request_id} timed out after {timeout:.1f}s") from None
 
                     if not line:
                         raise EOFError("STDIO server closed the connection")

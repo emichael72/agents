@@ -371,7 +371,7 @@ class MCPService:
                             "resources": {}
                         },
                     }
-                    self._log_line(msg=f"Handled 'initialize'", level="debug")
+                    self._log_line(msg="Handled 'initialize'", level="debug")
                     return ok(info)
 
                 # -----------------------------------------------------------------
@@ -625,7 +625,7 @@ class MCPService:
                 stderr=asyncio.subprocess.STDOUT,
             )
         except Exception as execute_error:
-            raise RuntimeError(f"Failed to launch {argv!r}: {execute_error}")
+            raise RuntimeError(f"Failed to launch {argv!r}: {execute_error}") from execute_error
 
         # Stream logs
         assert proc.stdout is not None
@@ -1046,7 +1046,7 @@ class MCPService:
         """
 
         def _handle_term_signal():
-            self._log_line(msg=f"Interrupted by user, shutting down", level="warning")
+            self._log_line(msg="Interrupted by user, shutting down", level="warning")
 
             self._shutting_down = True
             self._shutdown_event.set()
@@ -1105,7 +1105,7 @@ class MCPService:
             return 0
         except Exception as e:
             if self._shutting_down:
-                self._log_line(msg=f"MCP server terminated", level="debug")
+                self._log_line(msg="MCP server terminated", level="debug")
                 print()
                 return 0
             self._log_line(msg=f"MCP Error: {e}", level="error")

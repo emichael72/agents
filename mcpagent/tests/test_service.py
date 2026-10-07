@@ -190,7 +190,8 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                 '"description": "Complete the developer quiz", "target_url": "http://gate:8000/q/abc"}]}\' ;;\n'
                 'esac\n')
             (bin_dir / 'gh').chmod(0o755)
-            run = lambda *args, cwd=root: subprocess.run(args, cwd=cwd, check=True, capture_output=True)
+            def run(*args, cwd=root):
+                return subprocess.run(args, cwd=cwd, check=True, capture_output=True)
             run('git', 'init', '-q', '--bare', '-b', 'main', str(remote))
             run('git', 'clone', '-q', str(remote), str(repo))
             (repo / 'a.c').write_text('int a;\n')

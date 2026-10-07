@@ -109,12 +109,12 @@ def cpu() -> list[tuple[str, str]]:
                  platform.processor() or "unknown")
     cores = {(p, c) for p, c in zip(
         [line.split(":")[1].strip() for line in info.splitlines() if line.startswith("physical id")],
-        [line.split(":")[1].strip() for line in info.splitlines() if line.startswith("core id")])}
+        [line.split(":")[1].strip() for line in info.splitlines() if line.startswith("core id")], strict=False)}
     speeds = [float(line.split(":")[1]) for line in info.splitlines() if line.startswith("cpu MHz")]
     first = cpu_times()
     time.sleep(SAMPLE_SECONDS)
     second = cpu_times()
-    delta = [b - a for a, b in zip(first, second)]
+    delta = [b - a for a, b in zip(first, second, strict=True)]
     idle = delta[3] + (delta[4] if len(delta) > 4 else 0)  # idle + iowait
     busy = 100 * (1 - idle / sum(delta)) if sum(delta) else 0
     iowait = 100 * delta[4] / sum(delta) if len(delta) > 4 and sum(delta) else 0

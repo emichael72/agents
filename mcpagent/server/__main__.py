@@ -69,7 +69,7 @@ class ExceptionGuru:
         Captures the filename and line number of the innermost frame where the most recent
         exception occurred. If no exception context is found, defaults to '<unknown>' and -1.
         """
-        exc_type, exc_obj, exc_tb = sys.exc_info()
+        _exc_type, _exc_obj, exc_tb = sys.exc_info()
 
         if exc_tb is None:
             return

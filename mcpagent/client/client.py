@@ -125,9 +125,9 @@ class MCPClient:
                         validate(instance=config_data, schema=schema)
                         self._logger.debug(f"Configuration validated against schema {schema_file.name}")
                     except ValidationError as ve:
-                        raise RuntimeError(f"Schema validation failed: {ve.message}")
+                        raise RuntimeError(f"Schema validation failed: {ve.message}") from ve
                     except Exception as ve:
-                        raise RuntimeError(f"Error loading schema {schema_file}: {ve}")
+                        raise RuntimeError(f"Error loading schema {schema_file}: {ve}") from ve
 
             return config_data
         except Exception as config_error:
@@ -398,10 +398,10 @@ class MCPClient:
                     await self._health_check_task
                 self._health_check_task = None
 
-            for server_id, server_data in self._servers.items():
-                conn = self._get_connection(server_id=server_id)
+            for sid in self._servers:
+                conn = self._get_connection(server_id=sid)
                 if not isinstance(conn, MCPClientConnection):
-                    raise RuntimeError(f"Invalid connection object for server {server_id}")
+                    raise RuntimeError(f"Invalid connection object for server {sid}")
                 await conn.close()
 
         else:
@@ -468,25 +468,26 @@ class MCPClient:
 
         # Multi-server broadcast mode
         results: dict[str, RequestReturnType] = {}
-        for server_id, server_data in self._servers.items():
-            conn = self._get_connection(server_id=server_id)
+        for sid, server_data in self._servers.items():
+            conn = self._get_connection(server_id=sid)
             if not isinstance(conn, MCPClientConnection):
-                raise RuntimeError(f"Invalid connection object for server {server_id}")
+                raise RuntimeError(f"Invalid connection object for server {sid}")
 
             if not server_data.get("connected", True):
                 if callback:
-                    callback(None, ConnectionError(f"Server '{server_id}' not connected"))
+                    callback(None, ConnectionError(f"Server '{sid}' not connected"))
                     loop = asyncio.get_running_loop()
 
-                    async def _dummy() -> dict[str, Any]:
-                        return {"error": f"Server '{server_id}' not connected"}
+                    # Bind this server's id now: the task runs after the loop has moved on
+                    async def _dummy(sid: str = sid) -> dict[str, Any]:
+                        return {"error": f"Server '{sid}' not connected"}
 
-                    results[server_id] = loop.create_task(_dummy())
+                    results[sid] = loop.create_task(_dummy())
                 else:
-                    raise ConnectionError(f"Server '{server_id}' not connected")
+                    raise ConnectionError(f"Server '{sid}' not connected")
                 continue
 
-            results[server_id] = conn.request(method=method, params=params, timeout=timeout, callback=callback)
+            results[sid] = conn.request(method=method, params=params, timeout=timeout, callback=callback)
         return results
 
     async def call(self,

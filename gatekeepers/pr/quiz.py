@@ -740,7 +740,7 @@ def submit(qid: str, answers: list[int]) -> dict[str, Any]:
     quiz = Quiz.model_validate_json(row["content"])
     if len(answers) != len(quiz.questions) or any(type(a) is not int or a not in range(4) for a in answers):
         raise ValueError("Answer every question with one of its four choices.")
-    score = sum(a == q.correct for a, q in zip(answers, quiz.questions))
+    score = sum(a == q.correct for a, q in zip(answers, quiz.questions, strict=True))
     passed = score == len(quiz.questions)
 
     # Persist before publishing, so a GitHub failure can be retried
