@@ -2,11 +2,18 @@
 Module: __init__.py
 
 Description:
-    Public names for the Pydantic Agent. The package is named pydantic_agent to keep it
-    separate from the installed pydantic dependency.
+    The Pydantic Agent's package root. It is named pydantic_agent to keep it separate from the
+    installed pydantic dependency.
+
+    It holds the locations the package's modules share: the repository root and the shared
+    context files. The classes live in their modules (context, output, profiles, session,
+    toolset); import them from there, e.g. `from pydantic_agent.session import AgentSession`.
 """
+from pathlib import Path
 
-from pydantic_agent import agent, toolset
-from pydantic_agent.agent import Output, ask, build_agent, build_model, chat, main
-
-__all__ = ["agent", "toolset", "Output", "ask", "build_agent", "build_model", "chat", "main"]
+# The repository root: the nearest folder above holding pyproject.toml
+REPO_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file())
+CONTEXT_DIR = REPO_ROOT / "context"  # Shared by all three agents
+INSTRUCTIONS_FILE = CONTEXT_DIR / "instructions.json"
+AGENT_FILE = CONTEXT_DIR / "agent.json"  # Agent loop settings
+OUTPUT_FILE = CONTEXT_DIR / "output.json"  # Terminal layout

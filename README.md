@@ -300,7 +300,7 @@ Response time: 6.3s · tokens: 4,313 in, 53 out · 2 model calls
    `"show_time": false` and `"show_tokens": false` turn them off; `tokens: not reported` means
    the server sent no counts.
 
-Each agent implements this in an `Output` class (`mcp/mcpagent/client/output.py`, `pydantic/pydantic_agent/agent.py`,
+Each agent implements this in an `Output` class (`mcp/mcpagent/client/output.py`, `pydantic/pydantic_agent/output.py`,
 `vercel/vercelagent/agent.ts`), with tests that check the wrapping and the timing line.
 
 ## MCPAgent
@@ -317,8 +317,8 @@ See [mcp/README.md](mcp/README.md).
 
 ## Pydantic
 
-The same agent with pydantic-ai running the loop; tools run in-process, or from the
-MCPAgent server with `--mcp`. See [pydantic/README.md](pydantic/README.md).
+The same agent with pydantic-ai running the loop; the tools run in-process. See
+[pydantic/README.md](pydantic/README.md).
 
 ```bash
 .venv/bin/python pydantic/agent.py                                # interactive chat

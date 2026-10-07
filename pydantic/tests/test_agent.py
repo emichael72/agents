@@ -24,12 +24,15 @@ from pydantic_ai.messages import (ModelRequest, ModelResponse, TextPart, ToolCal
                                   UserPromptPart)
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
-from pydantic_agent import agent
-from pydantic_agent import toolset as tools_module
-from pydantic_agent import build_agent
+from pydantic_agent import AGENT_FILE, CONTEXT_DIR, REPO_ROOT
+from pydantic_agent.context import AgentContext
+from pydantic_agent.output import Output
+from pydantic_agent.profiles import ModelProfiles
+from pydantic_agent.session import AgentSession
+from pydantic_agent.toolset import TOOLS_DIR, LocalTools
 
 # The scripted turn every agent's tests replay (tests/scenario.json)
-SCENARIO = json.loads((tools_module.REPO_ROOT / "tests" / "scenario.json").read_text())
+SCENARIO = json.loads((REPO_ROOT / "tests" / "scenario.json").read_text())
 CALLS = [(step["tool"], step["arguments"]) for step in SCENARIO["calls"]]
 
 
@@ -62,21 +65,27 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         """Send the agent's terminal output to a buffer so the test output stays clean."""
         self.output = io.StringIO()
-        console_patch = patch.object(agent, "console", Console(file=self.output))
-        console_patch.start()
-        self.addCleanup(console_patch.stop)
+
+    def session(self, trace: bool = False, parallel: bool = False) -> AgentSession:
+        """
+        A session that prints to the test's buffer.
+        Args:
+            trace: Print tool calls and results as gray lines.
+            parallel: Run a response's tool calls concurrently.
+        Returns:
+            AgentSession: The session.
+        """
+        return AgentSession(trace=trace, parallel=parallel, console=Console(file=self.output))
 
     def test_package_namespace_and_dependency_do_not_conflict(self):
         project_dir = Path(__file__).resolve().parents[1]
-        self.assertIs(build_agent, agent.build_agent)
         dependency_file = pydantic_dependency.__file__
         assert dependency_file is not None
         self.assertFalse(Path(dependency_file).resolve().is_relative_to(project_dir))
-        self.assertEqual(agent.CONTEXT_DIR, project_dir.parent / 'context')
-        self.assertEqual(tools_module.TOOLS_DIR, project_dir.parent / 'tools')
+        self.assertEqual(CONTEXT_DIR, project_dir.parent / 'context')
+        self.assertEqual(TOOLS_DIR, project_dir.parent / 'tools')
 
-    @staticmethod
-    async def run_tracked(parallel: bool):
+    async def run_tracked(self, parallel: bool):
         """
         Run the scripted turn, recording how many scripts were running as each one started.
         Args:
@@ -85,7 +94,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             tuple: The message history and the list of concurrent-script counts.
         """
         running, overlaps, lock = [0], [], threading.Lock()
-        real_run_script = tools_module.run_script
+        real_run_script = LocalTools.run_script
 
         def tracked(*args, **kwargs):
             with lock:
@@ -98,9 +107,10 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 with lock:
                     running[0] -= 1
 
-        bot = agent.build_agent(FunctionModel(stream_function=scripted_model))
-        with patch.object(tools_module, "run_script", tracked):
-            history = await agent.ask(bot, SCENARIO["prompt"], [], trace=False, parallel=parallel)
+        session = self.session(parallel=parallel)
+        bot = session.build_agent(FunctionModel(stream_function=scripted_model))
+        with patch.object(LocalTools, "run_script", tracked):
+            history = await session.ask(bot, SCENARIO["prompt"], [])
         return history, overlaps
 
     async def test_parallel_flag_runs_tools_concurrently(self):
@@ -124,7 +134,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 "description": "Say hello", "command": "echo", "args": ["hello"],
                 "params": [{"name": "who", "type": "string", "style": "positional"}],
             }))
-            toolset = tools_module.load_toolset(Path(folder))
+            toolset = LocalTools.load(Path(folder))
             self.assertEqual(list(toolset.tools), ["hello"])
             hello = tool_function(toolset, "hello")
             self.assertEqual(hello(who="world"), "hello world")
@@ -132,62 +142,65 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 hello(who=1)  # validated against the manifest's schema
 
     def test_model_profiles_come_from_the_shared_models_file(self):
-        models = agent.load_models()
+        profiles = ModelProfiles.load()
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key-not-real"}):
             for name in ("LOCAL_LLM_BASE_URL", "LOCAL_LLM_MODEL", "LOCAL_LLM_API_KEY"):
                 os.environ.pop(name, None)
-            with patch.object(agent, "loaded_model", return_value=None):  # The server reports no loaded model
-                local = agent.resolve_model(models)  # "default": "local"
-            fallback = models["profiles"]["local"]  # Whatever the file names, so editing it never breaks this test
+            with patch.object(ModelProfiles, "loaded_model", return_value=None):  # The server reports no loaded model
+                local = profiles.resolve()  # "default": "local"
+            fallback = profiles.models["profiles"]["local"]  # Whatever the file names, so editing it never breaks this test
             self.assertEqual((local["base_url"], local["model"]), (fallback["base_url"], fallback["model"]))
-            with patch.object(agent, "loaded_model", return_value="qwen/loaded-now") as asked:
-                self.assertEqual(agent.resolve_model(models)["model"], "qwen/loaded-now")  # model_auto
-                self.assertEqual(agent.resolve_model(models, model="explicit")["model"], "explicit")
+            with patch.object(ModelProfiles, "loaded_model", return_value="qwen/loaded-now") as asked:
+                self.assertEqual(profiles.resolve()["model"], "qwen/loaded-now")  # model_auto
+                self.assertEqual(profiles.resolve(model="explicit")["model"], "explicit")
             asked.assert_called_once_with("http://boba:1234/v1", "lm-studio")
             self.assertEqual(local["api_key"], "lm-studio")  # the OpenAI key is never used for another server
             os.environ["LOCAL_LLM_MODEL"] = "from-env"
-            self.assertEqual(agent.resolve_model(models, "local")["model"], "from-env")
-            self.assertEqual(agent.resolve_model(models, "local", model="from-cli")["model"], "from-cli")
-            self.assertEqual(agent.resolve_model(models, "openai")["api_key"], "test-key-not-real")
+            self.assertEqual(profiles.resolve("local")["model"], "from-env")
+            self.assertEqual(profiles.resolve("local", model="from-cli")["model"], "from-cli")
+            self.assertEqual(profiles.resolve("openai")["api_key"], "test-key-not-real")
         with patch.dict(os.environ, {"OPENAI_API_KEY": ""}):
             with self.assertRaisesRegex(ValueError, "OPENAI_API_KEY"):
-                agent.resolve_model(models, "openai")
+                profiles.resolve("openai")
         with self.assertRaisesRegex(ValueError, "Unknown model profile 'nope'"):
-            agent.resolve_model(models, "nope")
+            profiles.resolve("nope")
 
     def test_the_memory_index_joins_the_instructions(self):
         with tempfile.TemporaryDirectory() as folder:
             index = Path(folder) / "index.md"
-            self.assertIn("memory is empty", agent.memory_text(index))
+            self.assertIn("memory is empty", AgentContext.memory_text(index))
             index.write_text("# Memory index\n\n- **preferences**: Prefers short answers (updated 2026-10-07)\n")
-            text = agent.memory_text(index)
+            text = AgentContext.memory_text(index)
             self.assertIn("- preferences: Prefers short answers", text)
-            self.assertEqual(agent.memory_text(None), "")
+            self.assertEqual(AgentContext.memory_text(None), "")
 
     def test_exit_saves_only_after_a_tool_call_or_several_exchanges(self):
-        self.assertIn("Nothing to save", agent.load_instructions(key="on_exit"))
-        self.assertTrue(json.loads(agent.AGENT_FILE.read_text())["save_on_exit"])
+        self.assertIn("Nothing to save", AgentContext().instructions("on_exit"))
+        self.assertTrue(json.loads(AGENT_FILE.read_text())["save_on_exit"])
         ask = ModelRequest(parts=[UserPromptPart("hi")])
         answer = ModelResponse(parts=[TextPart("hello")], provider_details=None, provider_response_id=None)
         call = ModelResponse(parts=[ToolCallPart("time", {})], provider_details=None, provider_response_id=None)
-        self.assertFalse(agent.worth_saving([]))
-        self.assertFalse(agent.worth_saving([ask, answer]))
-        self.assertTrue(agent.worth_saving([ask, answer, ask, answer]))
-        self.assertTrue(agent.worth_saving([ask, call, answer]))
+        self.assertFalse(AgentContext.worth_saving([]))
+        self.assertFalse(AgentContext.worth_saving([ask, answer]))
+        self.assertTrue(AgentContext.worth_saving([ask, answer, ask, answer]))
+        self.assertTrue(AgentContext.worth_saving([ask, call, answer]))
 
     def test_the_agent_is_named_dantic(self):
-        self.assertEqual(json.loads(agent.AGENT_FILE.read_text())["names"]["pydantic"], "dantic")
-        self.assertTrue(agent.identity_text("dantic").startswith("Your name is dantic."))
-        self.assertEqual(agent.identity_text(None), "")
+        self.assertEqual(json.loads(AGENT_FILE.read_text())["names"][AgentContext.NAME_KEY], "dantic")
+        context = AgentContext()
+        self.assertTrue(context.identity("dantic").startswith("Your name is dantic."))
+        self.assertEqual(context.identity(None), "")
+        self.assertTrue(context.system_prompt(context.agent_settings()).startswith("Your name is dantic."))
 
     def test_instructions_come_from_the_shared_context_file(self):
-        instructions = agent.load_instructions()
+        instructions = AgentContext().instructions()
         self.assertTrue(instructions.startswith("You are an agent"))
         self.assertIn("allowed folder", instructions)
 
     async def test_each_tool_call_prints_next_to_its_result(self):
-        bot = agent.build_agent(FunctionModel(stream_function=scripted_model))
-        await agent.ask(bot, SCENARIO["prompt"], [], trace=True)
+        session = self.session(trace=True)
+        bot = session.build_agent(FunctionModel(stream_function=scripted_model))
+        await session.ask(bot, SCENARIO["prompt"], [])
         lines = [line[:1] + " " + line[2:].split("(")[0].split(":")[0]
                  for line in self.output.getvalue().splitlines() if line[:1] in "→←✗" and line]
         expected = [line for step in SCENARIO["calls"]
@@ -195,19 +208,20 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(lines, expected)
 
     def test_tools_are_told_which_agent_runs_them(self):
-        self.assertEqual(tools_module.run_script("printenv", "AGENT_NAME"), "Pydantic Agent")
+        self.assertEqual(LocalTools.run_script("printenv", "AGENT_NAME"), "Pydantic Agent")
 
     def test_an_omitted_optional_argument_may_be_null(self):
-        clock = tool_function(tools_module.toolset, "time")
+        clock = tool_function(LocalTools.load(), "time")
         self.assertIn("(UTC+00:00)", clock(timezone="UTC"))
         self.assertEqual(clock(timezone=None)[:4], clock()[:4])  # null means omitted: local time
 
     async def test_history_carries_across_turns(self):
         async def remember(messages, _info):
             yield f"{len(messages)} messages so far"
-        bot = agent.build_agent(FunctionModel(stream_function=remember))
-        history = await agent.ask(bot, "one", [], trace=False)
-        history = await agent.ask(bot, "two", history, trace=False)
+        session = self.session()
+        bot = session.build_agent(FunctionModel(stream_function=remember))
+        history = await session.ask(bot, "one", [])
+        history = await session.ask(bot, "two", history)
         self.assertEqual(history[-1].parts[0].content, "3 messages so far")
 
 
@@ -216,13 +230,13 @@ class OutputTests(unittest.TestCase):
 
     def setUp(self):
         self.printed = io.StringIO()
-        self.output = agent.Output(Console(file=self.printed), {"width": 30, "show_time": True})
+        self.output = Output(Console(file=self.printed), {"width": 30, "show_time": True})
 
     # Each agent keeps independent tests for the shared terminal behavior.
     # noinspection DuplicatedCode
     def test_by_default_only_the_answer_and_timing_print_and_tools_show_on_the_spinner(self):
         printed = io.StringIO()
-        output = agent.Output(Console(file=printed, force_terminal=True, width=120), {"width": 120, "show_time": True},
+        output = Output(Console(file=printed, force_terminal=True, width=120), {"width": 120, "show_time": True},
                         debug=False)
         spinner = Mock()
         output.out.status = Mock(return_value=spinner)  # rich's spinner, without drawing it
@@ -247,7 +261,7 @@ class OutputTests(unittest.TestCase):
     def test_text_around_hidden_tool_calls_has_one_blank_line_between(self):
         for more_text in (True, False):
             printed = io.StringIO()
-            output = agent.Output(Console(file=printed), {"width": 120, "show_time": True}, debug=False)
+            output = Output(Console(file=printed), {"width": 120, "show_time": True}, debug=False)
             output.start()
             output.text("Let me check the build.")
             output.line('→ shell({"command":"make"})')
@@ -260,11 +274,11 @@ class OutputTests(unittest.TestCase):
 
     def test_lines_wrap_with_an_indent_and_keep_long_words_whole(self):
         url = "http://minion:8000/q/" + "x" * 40
-        lines = agent.wrap("← pr_gate: the quiz is waiting and the merge is blocked " + url, 30)
+        lines = Output.wrap("← pr_gate: the quiz is waiting and the merge is blocked " + url, 30)
         self.assertTrue(all(len(line) <= 30 for line in lines if line.strip() != url))
         self.assertTrue(all(line.startswith("  ") for line in lines[1:]))
         self.assertEqual(lines[-1], "  " + url)
-        self.assertEqual(agent.wrap("short\nlines", 30), ["short", "lines"])
+        self.assertEqual(Output.wrap("short\nlines", 30), ["short", "lines"])
 
     def test_streamed_answer_wraps_between_words_and_is_timed(self):
         answer = "The quiz service is running and pull request number one is still waiting for its quiz."
@@ -280,7 +294,7 @@ class OutputTests(unittest.TestCase):
 
     def test_token_counts_follow_the_response_time(self):
         printed = io.StringIO()
-        output = agent.Output(Console(file=printed), {"width": 120, "show_time": True, "show_tokens": True})
+        output = Output(Console(file=printed), {"width": 120, "show_time": True, "show_tokens": True})
         output.add_usage(1200, 34)
         output.add_usage(1300, 56, requests=2)
         output.finish()
@@ -291,11 +305,11 @@ class OutputTests(unittest.TestCase):
         self.assertIn("tokens: not reported", printed.getvalue())
 
     def test_links_become_clickable_and_stay_whole_while_streaming(self):
-        self.assertEqual(agent.link_segments("see [PR #5](https://x/y) and http://a.b/c."),
+        self.assertEqual(Output.link_segments("see [PR #5](https://x/y) and http://a.b/c."),
                          [("see ", None), ("PR #5", "https://x/y"), (" and ", None),
                           ("http://a.b/c", "http://a.b/c"), (".", None)])
         printed = io.StringIO()
-        output = agent.Output(Console(file=printed, force_terminal=True, width=120), {"width": 40, "links": True})
+        output = Output(Console(file=printed, force_terminal=True, width=120), {"width": 40, "links": True})
         answer = "Open [the pending quiz](http://minion:8000/q/abc) now."
         for i in range(0, len(answer), 4):
             output.text(answer[i:i + 4])
@@ -307,7 +321,7 @@ class OutputTests(unittest.TestCase):
 
     def test_a_link_in_a_gray_line_is_bright_cyan_and_the_rest_stays_gray(self):
         printed = io.StringIO()
-        output = agent.Output(Console(file=printed, force_terminal=True, width=120), {"width": 120, "links": True})
+        output = Output(Console(file=printed, force_terminal=True, width=120), {"width": 120, "links": True})
         output.line("← pr: quiz at http://minion:8000/q/abc for PR #12")
         raw = printed.getvalue()
         self.assertRegex(raw, r"\x1b\[90m← pr: quiz at ")  # Gray before the link
@@ -316,7 +330,7 @@ class OutputTests(unittest.TestCase):
         self.assertRegex(raw, r"\x1b\[90m for PR #12")  # Gray again after it
 
     def test_layout_settings_come_from_the_shared_context_file(self):
-        settings = agent.load_output_settings()
+        settings = AgentContext().output_settings()
         self.assertEqual(settings["width"], 120)
         self.assertTrue(settings["show_time"])
 

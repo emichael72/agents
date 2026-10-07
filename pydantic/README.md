@@ -9,12 +9,16 @@ the shared [tools folder](../tools). The difference is **who runs the agent loop
 ## Layout
 
 ```
-agent.py                   launcher that preserves the existing command
-pydantic_agent/__init__.py  public names; avoids the installed pydantic package's name
-pydantic_agent/__main__.py  package entry point (python -m pydantic_agent from this folder)
-pydantic_agent/agent.py     model, agent loop and terminal UI; shared ../context instructions
-pydantic_agent/toolset.py   loads ../tools/*/tool.json as pydantic-ai tools
-tests/                     offline tests: scripted FunctionModel, tools run for real
+agent.py                    launcher that preserves the existing command
+pydantic_agent/__init__.py  package root: REPO_ROOT and the shared context files' paths; its
+                            name avoids the installed pydantic package's
+pydantic_agent/__main__.py  command line (python -m pydantic_agent): argparse, then AgentSession
+pydantic_agent/session.py   AgentSession: builds the Agent, runs turns, renders events, the chat
+pydantic_agent/context.py   AgentContext: shared instructions, identity, memory, settings, limits
+pydantic_agent/profiles.py  ModelProfiles: the shared model profiles and the pydantic-ai model
+pydantic_agent/output.py    Output: the terminal layout shared by the three agents
+pydantic_agent/toolset.py   LocalTools: loads ../tools/*/tool.json as pydantic-ai tools
+tests/                      offline tests: scripted FunctionModel, tools run for real
 ```
 
 ## Setup
@@ -27,12 +31,10 @@ this agent shares with MCPAgent.
 ```bash
 .venv/bin/python pydantic/agent.py                                # interactive chat, local Python tools
 .venv/bin/python pydantic/agent.py --prompt "Time now" --history  # one prompt + raw message dump
-.venv/bin/python pydantic/agent.py --mcp                          # same tools, served by MCPAgent's server over MCP
 .venv/bin/python -m unittest discover -s pydantic/tests           # offline tests
 ```
 
-Run these from the repository root. For `--mcp`, start the MCPAgent server first:
-`.venv/bin/python mcp/server.py`.
+Run these from the repository root.
 
 The importable package is `pydantic_agent`, inside this folder; `install.sh` installs it into the
 `.venv` in editable mode, so `.venv/bin/python -m pydantic_agent` also works from any folder, and
@@ -47,7 +49,6 @@ shown as `→ tool(args)` and results as `← tool: output` instead.
 | --- | --- |
 | `--profile NAME`, `--local`, `--openai` | Model profile from `../context/models.json`; default: its `"default"` (`local`) |
 | `--model`, `--base-url` | Override the profile's model or server for this run |
-| `--mcp [URL]` | Use an MCP server's tools; default URL `http://127.0.0.1:6275/` |
 | `--parallel` | Run the tool calls from one model response concurrently |
 
 ## How it maps to the other two
@@ -55,13 +56,13 @@ shown as `→ tool(args)` and results as `← tool: output` instead.
 | Concern | mcpagent | pydantic | vercel |
 | --- | --- | --- | --- |
 | Agent loop | `MCPAgent.ask()`, hand-written | `Agent.run_stream_events()` | `ToolLoopAgent.stream()` |
-| Instructions | `../context/instructions.json`, named by `instructions_file` in `mcpagent.json` | `../context/instructions.json` → `load_instructions()` | `../context/instructions.json` → `loadInstructions()` |
+| Instructions | `../context/instructions.json`, named by `instructions_file` in `mcpagent.json` | `../context/instructions.json` → `AgentContext.instructions()` | `../context/instructions.json` → `loadInstructions()` |
 | Model provider | raw `httpx`, `/v1/responses` | `OpenAIChatModel` | `@ai-sdk/openai-compatible` |
 | Tools | `../tools/*/tool.json`, loaded by the server (`tools_dir`) | `../tools/*/tool.json` → `Tool.from_schema` | `../tools/*/tool.json` → `z.fromJSONSchema` |
 | Argument validation | `jsonschema.validate` | `jsonschema.validate` | zod, from the same JSON schema |
 | Tool failure | `isError` result | `ToolFailed` | thrown `Error` → `tool-error` |
 | Running a script | the server, `asyncio.create_subprocess_exec` | `subprocess.run` in a worker thread | async `execFile`, no threads |
-| MCP client | its own | `MCPToolset` | `@ai-sdk/mcp` `createMCPClient` |
+| MCP client | its own | none | `@ai-sdk/mcp` `createMCPClient` |
 | Conversation history | list of Responses items | `result.all_messages()` | `response.messages` |
 | Loop cap | `max_tool_calls=8` | `UsageLimits(tool_calls_limit=8)` | `stopWhen: isStepCount(9)` |
 | One tool at a time | always | `parallel_tool_call_execution_mode` | `oneAtATime()` wrapper in `vercelagent/tools.ts` |
@@ -73,7 +74,4 @@ contains several tool calls, they run one at a time by default
 (`parallel_tool_call_execution_mode("sequential")`). Asking for parallelism in the prompt does not
 change this; `--parallel` does.
 
-Locally, `--parallel` is safe because the tools' scripts share no state. With `--mcp --parallel`,
-the MCPAgent server rejects overlapping calls with `Busy: another tool is currently running in
-this workspace`. Depending on timing, the model either reports the tool as unavailable or retries
-it, and the turn fails once pydantic-ai's retry limit is reached.
+`--parallel` is safe because the tools' scripts share no state.
