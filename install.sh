@@ -8,7 +8,8 @@
 #       requirements, and the development tools), and the repository's own packages (mcpagent,
 #       pydantic_agent, gatekeepers) installed editable from pyproject.toml.
 #     - vercel/node_modules for the Vercel Agent, installed exactly as package-lock.json
-#       records (npm ci).
+#       records (npm ci). When the system's Node.js is missing or older than 22.18, a pinned
+#       Node.js release is fetched from nodejs.org into .node/ (checksum-verified, no root needed).
 #   It runs only on Red Hat family systems that use dnf (RHEL, Fedora, Rocky, AlmaLinux, CentOS
 #   Stream and the like). Each step is checked, and the installer stops at the first failure.
 #
@@ -28,40 +29,48 @@ SCRIPT_PATH="${BASH_SOURCE[0]:-$0}" # zsh sets $0 to the script outside function
 # Globals and configuration (command-line flags override these)
 # ============================================================================
 
-# Supported systems: /etc/os-release ID or ID_LIKE names one of these, and dnf is installed
-OS_RELEASE_FILE="/etc/os-release"
-OS_SUPPORTED_IDS=(rhel fedora centos)
+# Supported systems
+OS_RELEASE_FILE="/etc/os-release"     # Its ID or ID_LIKE must name a supported system
+OS_SUPPORTED_IDS=(rhel fedora centos) # Red Hat family systems, which use dnf
 
-PYTHON_VENV_PATH=".venv"
-PYTHON_REQUIRED_MIN_VER="3.10"
-# The interpreter the venv is created with, chosen by find_python
-PYTHON_BIN=""
-# -p/--python, or the PYTHON variable; empty lets find_python choose
-PYTHON_REQUEST="${PYTHON:-}"
-# Every requirements*.txt, found by find_requirements_files outside these folders
-PYTHON_REQUIREMENTS_FILES=()
-PYTHON_REQUIREMENTS_SKIP=(.venv node_modules .git)
-# Checked with python -m <module> --version
-PYTHON_MODULES_TO_RUN=(mcpagent.server mcpagent.client)
-# Checked with python -c "import <module>"
-PYTHON_VERIFY_MODULES=(
+# The shared Python environment of MCPAgent and the Pydantic Agent
+PYTHON_VENV_PATH=".venv"                           # Created by create_python_venv
+PYTHON_REQUIRED_MIN_VER="3.10"                     # Oldest Python the agents run on
+PYTHON_BIN=""                                      # The venv's interpreter, chosen by find_python
+PYTHON_REQUEST="${PYTHON:-}"                       # -p/--python or PYTHON; empty: find_python picks
+PYTHON_REQUIREMENTS_FILES=()                       # Set by find_requirements_files
+PYTHON_REQUIREMENTS_SKIP=(.venv node_modules .git) # Folders not searched for requirements*.txt
+
+# Checked by verify_python_agents
+PYTHON_MODULES_TO_RUN=(mcpagent.server mcpagent.client) # Run with --version
+PYTHON_VERIFY_MODULES=( # Imported
     mcpagent pydantic_agent gatekeepers.fs.fs_gate gatekeepers.pr.changes
     pydantic_ai jsonschema httpx httpx2 aiohttp json5 prompt_toolkit rich ruff
 )
 
-# Node 22.18+ runs .ts files directly (type stripping), so the Vercel Agent needs no build step
-NODE_PROJECT_PATH="vercel"
-NODE_REQUIRED_MIN_VER="22.18"
-NPM_REQUIRED_MIN_VER="10.0"
-NODE_VERIFY_PACKAGES=(ai @ai-sdk/openai-compatible @ai-sdk/mcp zod)
+# The Vercel Agent's Node.js
+NODE_PROJECT_PATH="vercel"                                          # Holds package-lock.json
+NODE_REQUIRED_MIN_VER="22.18"                                       # Runs .ts files: no build step
+NPM_REQUIRED_MIN_VER="10.0"                                         # For a system Node.js
+NODE_VERIFY_PACKAGES=(ai @ai-sdk/openai-compatible @ai-sdk/mcp zod) # Must import after npm ci
 
-# The pull request gate's service (gatekeepers/pr), a systemd user unit
-GATE_PATH="gatekeepers/pr"
-GATE_UNIT="pr-gate"
-GATE_PORT=8000
+# Node.js fetched by install_local_node when the system's is missing or too old
+NODE_LOCAL_VERSION="22.23.3"             # The release fetched
+NODE_LOCAL_PATH=".node"                  # Where it is unpacked
+NODE_DIST_URL="https://nodejs.org/dist"  # Releases and their SHASUMS256.txt
+NODE_LOCAL_MIN_GLIBC="2.28"              # The official Linux builds need it
+NODE_FETCH_NEEDS=(curl tar xz sha256sum) # Commands that fetch and check it
+NODE_PLATFORM=""                         # Set by check_node: linux-x64 or linux-arm64
+NODE_FETCH=false                         # Set by check_node: whether to fetch
+
+# The pull request gate's service (gatekeepers/pr)
+GATE_PATH="gatekeepers/pr"                 # Holds the unit template and pr_gate.sh
+GATE_UNIT="pr-gate"                        # The systemd user unit
+GATE_PORT=8000                             # Where the gate serves its pages
 GATE_NEEDS=(gh bwrap doxygen clang-format) # Commands the gate's checks use
 
-FORCE=false       # -f/--force: recreate the .venv and node_modules
+# Command-line flags
+FORCE=false       # -f/--force: recreate the .venv, node_modules and a fetched .node
 SKIP_VERCEL=false # --skip-vercel: no Node.js
 GATE_ACTION=""    # --gate: manage the gate's service instead of installing
 QUIET=false       # -q/--quiet: only errors and warnings
@@ -115,7 +124,8 @@ print_usage() {
     echo "Usage: ./${script} [OPTION]..."
     echo ""
     echo "Options"
-    echo "    -f, --force                 Recreate the shared .venv and vercel/node_modules"
+    echo "    -f, --force                 Recreate the shared .venv, vercel/node_modules and a"
+    echo "                                fetched .node"
     echo "    -p, --python <cmd>          Create the .venv with this Python (default:"
     echo "                                python3 if >= ${PYTHON_REQUIRED_MIN_VER}, else the newest"
     echo "                                python3.N in PATH); the PYTHON variable sets it too"
@@ -551,6 +561,152 @@ verify_python_agents() {
 }
 
 #
+# @brief Print the official Node.js build's platform name for this machine.
+# @return 0 for linux-x64 or linux-arm64, 1 for any other system
+#
+node_platform() {
+    case "$(uname -s)-$(uname -m)" in
+    Linux-x86_64) printf '%s\n' "linux-x64" ;;
+    Linux-aarch64 | Linux-arm64) printf '%s\n' "linux-arm64" ;;
+    *) return 1 ;;
+    esac
+}
+
+#
+# @brief Print the C library's version (glibc), or nothing when it is not glibc.
+#
+glibc_version() {
+    local glibc_re='([0-9]+\.[0-9]+)$'
+    local line
+    line="$(ldd --version 2>/dev/null | head -n1 || true)"
+    if [[ "${line}" != *GLIBC* && "${line}" != *"GNU libc"* ]]; then
+        return 0 # Not glibc (musl, for instance): print nothing
+    fi
+    if [[ "${line}" =~ ${glibc_re} ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+    fi
+}
+
+#
+# @brief Choose the Node.js for the Vercel Agent and set NODE_FETCH.
+#
+#   The system's node is used when it is new enough (its npm is then checked too). Otherwise
+#   install_local_node will fetch NODE_LOCAL_VERSION, so this checks that it can: a supported
+#   platform, glibc new enough for the official build, and the commands that fetch it.
+#
+# @return 0 if a usable Node.js is installed or can be fetched, 1 otherwise
+#
+check_node() {
+    local version="" glibc cmd label
+    local missing=()
+
+    if command -v node >/dev/null 2>&1; then
+        version="$(node --version 2>/dev/null || true)"
+        version="${version#v}"
+        if version_at_least "${version}" "${NODE_REQUIRED_MIN_VER}"; then
+            print_status_label "Checking Node.js >= ${NODE_REQUIRED_MIN_VER} (${version})" "OK"
+            NODE_FETCH=false
+            check_tool_version npm "npm" "${NPM_REQUIRED_MIN_VER}"
+            return
+        fi
+    fi
+
+    label="Checking Node.js >= ${NODE_REQUIRED_MIN_VER} (${version:-none}"
+    print_status_label "${label}; fetch ${NODE_LOCAL_VERSION})"
+    if ! NODE_PLATFORM="$(node_platform)"; then
+        print_status_label_results "ERROR"
+        log ERROR "No official Node.js build for %s; install Node.js >= %s, or use --skip-vercel." \
+            "$(uname -sm)" "${NODE_REQUIRED_MIN_VER}"
+        return 1
+    fi
+    glibc="$(glibc_version)"
+    if ! version_at_least "${glibc}" "${NODE_LOCAL_MIN_GLIBC}"; then
+        print_status_label_results "ERROR"
+        log ERROR "The official Node.js build needs glibc >= %s (found %s); %s" \
+            "${NODE_LOCAL_MIN_GLIBC}" "${glibc:-none}" \
+            "install Node.js >= ${NODE_REQUIRED_MIN_VER}."
+        return 1
+    fi
+    for cmd in "${NODE_FETCH_NEEDS[@]}"; do
+        if ! command -v "${cmd}" >/dev/null 2>&1; then
+            missing+=("${cmd}")
+        fi
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        print_status_label_results "ERROR"
+        log ERROR "Fetching Node.js needs: %s" "${missing[*]}"
+        return 1
+    fi
+    print_status_label_results "OK"
+    NODE_FETCH=true
+    return 0
+}
+
+#
+# @brief Check a downloaded file against its line in a SHASUMS256.txt.
+# @param $1  Folder holding the file and SHASUMS256.txt.
+# @param $2  The file's name.
+# @return 0 if the checksum is listed and matches, 1 otherwise
+#
+verify_node_checksum() {
+    local sums
+    if ! sums="$(grep " $2\$" "$1/SHASUMS256.txt")"; then
+        printf '%s is not listed in SHASUMS256.txt\n' "$2"
+        return 1
+    fi
+    (cd "$1" && sha256sum -c - <<<"${sums}")
+}
+
+#
+# @brief Put NODE_LOCAL_VERSION in NODE_LOCAL_PATH (unless it is there) and first in PATH.
+#
+#   The release comes from NODE_DIST_URL and is checked against the release's SHASUMS256.txt
+#   before it replaces NODE_LOCAL_PATH.
+#
+# @return 0 on success, 1 on failure
+#
+install_local_node() {
+    local name="node-v${NODE_LOCAL_VERSION}-${NODE_PLATFORM}"
+    local tarball="${name}.tar.xz"
+    local url="${NODE_DIST_URL}/v${NODE_LOCAL_VERSION}"
+    local node="${NODE_LOCAL_PATH}/bin/node"
+    local work installed=""
+
+    if [[ -x "${node}" ]]; then
+        installed="$("${node}" --version 2>/dev/null || true)"
+    fi
+    if [[ "${installed}" == "v${NODE_LOCAL_VERSION}" ]]; then
+        print_status_label "Using Node.js ${NODE_LOCAL_VERSION} in '${NODE_LOCAL_PATH}'" "OK"
+    else
+        print_status_label "Fetching Node.js ${NODE_LOCAL_VERSION} into '${NODE_LOCAL_PATH}'"
+        work="$(mktemp -d)"
+        if ! run_logged "download ${tarball}" \
+            curl -fsSL -o "${work}/${tarball}" "${url}/${tarball}" ||
+            ! run_logged "download SHASUMS256.txt" \
+                curl -fsSL -o "${work}/SHASUMS256.txt" "${url}/SHASUMS256.txt" ||
+            ! run_logged "checksum of ${tarball}" verify_node_checksum "${work}" "${tarball}" ||
+            ! run_logged "unpack ${tarball}" tar -xJf "${work}/${tarball}" -C "${work}"; then
+            rm -rf "${work}"
+            return 1
+        fi
+        rm -rf "${NODE_LOCAL_PATH}"
+        if ! mv "${work}/${name}" "${NODE_LOCAL_PATH}"; then
+            print_status_label_results "ERROR"
+            log ERROR "Cannot move Node.js into %s." "${NODE_LOCAL_PATH}"
+            rm -rf "${work}"
+            return 1
+        fi
+        rm -rf "${work}"
+        print_status_label_results "OK"
+    fi
+
+    # npm and the checks below run this node (npm's own script starts with env node)
+    PATH="$(pwd)/${NODE_LOCAL_PATH}/bin:${PATH}"
+    export PATH
+    return 0
+}
+
+#
 # @brief Install the Vercel Agent's packages exactly as its package-lock.json records.
 # @return 0 on success, 1 on failure
 #
@@ -692,13 +848,12 @@ install_all() {
     run_step check_os || return 1
     run_step find_python "${PYTHON_REQUIRED_MIN_VER}" "${PYTHON_REQUEST}" || return 1
     if [[ "${SKIP_VERCEL}" == false ]]; then
-        run_step check_tool_version node "Node.js" "${NODE_REQUIRED_MIN_VER}" || return 1
-        run_step check_tool_version npm "npm" "${NPM_REQUIRED_MIN_VER}" || return 1
+        run_step check_node || return 1
     fi
 
     if [[ "${FORCE}" == true ]]; then
         print_status_label "Removing existing environments"
-        rm -rf "${full_venv_path}" "${NODE_PROJECT_PATH}/node_modules"
+        rm -rf "${full_venv_path}" "${NODE_PROJECT_PATH}/node_modules" "${NODE_LOCAL_PATH}"
         print_status_label_results "OK"
     fi
 
@@ -709,6 +864,9 @@ install_all() {
 
     # The Vercel Agent: its own node_modules
     if [[ "${SKIP_VERCEL}" == false ]]; then
+        if [[ "${NODE_FETCH}" == true ]]; then
+            run_step install_local_node || return 1
+        fi
         run_step install_node_modules || return 1
         run_step verify_vercel_agent || return 1
     fi
@@ -718,7 +876,12 @@ install_all() {
     log INFO "  .venv/bin/python mcp/server.py      # MCPAgent: the MCP server"
     log INFO "  .venv/bin/python mcp/client.py      # MCPAgent: the agent"
     log INFO "  .venv/bin/python pydantic/agent.py  # the Pydantic Agent"
-    log INFO "  node vercel/agent.ts                # the Vercel Agent"
+    if [[ "${NODE_FETCH}" == true ]]; then
+        log INFO "  .node/bin/node vercel/agent.ts      # the Vercel Agent (Node.js %s in .node/)" \
+            "${NODE_LOCAL_VERSION}"
+    else
+        log INFO "  node vercel/agent.ts                # the Vercel Agent"
+    fi
     log INFO "  ./install.sh --gate install         # the pull request gate's service"
     log INFO ""
     return 0

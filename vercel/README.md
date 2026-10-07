@@ -20,7 +20,10 @@ Node 22.18+ runs the TypeScript files directly (type stripping), so there is no 
 ## Setup
 
 The repository's [`install.sh`](../install.sh) checks Node.js (>= 22.18) and npm, then runs
-`npm ci` here to install exactly what `package-lock.json` records into `node_modules/`.
+`npm ci` here to install exactly what `package-lock.json` records into `node_modules/`. When the
+system's Node.js is missing or older, it fetches a pinned Node.js 22 release from nodejs.org
+into the repository's `.node/` (checked against the release's SHA-256) and uses that; run the
+commands below with `.node/bin/node`, or with `.node/bin` first in `PATH`.
 
 ## Run
 

@@ -8,8 +8,9 @@ __pycache__/
 build/
 dist/
 
-# Node (rebuilt from package-lock.json with `npm ci`)
+# Node (rebuilt from package-lock.json with `npm ci`; .node/ is fetched by install.sh)
 node_modules/
+.node/
 
 # Tool caches
 .pytest_cache/

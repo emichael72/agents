@@ -24,6 +24,9 @@ README. Run every command from the repository root; paths are relative to it.
   `pyproject.toml`, so they import from anywhere and run from this checkout.
 - `vercel/node_modules/`: the Vercel Agent's packages, installed exactly as
   `vercel/package-lock.json` records (`npm ci`).
+- `.node/`, only when the system's Node.js is missing or older than 22.18: a pinned Node.js 22
+  release from nodejs.org, checked against its published SHA-256 and unpacked here, so no root
+  access or system upgrade is needed (any x86_64 or arm64 Linux with glibc 2.28+).
 
 ```bash
 ./install.sh  # -f recreates both, --skip-vercel skips Node, -h help
@@ -34,9 +37,9 @@ It also installs the pinned development tools in `requirements-dev.txt`: Ruff, t
 
 Requirements: a Red Hat family system that uses dnf (RHEL, Fedora, Rocky, AlmaLinux and the like),
 Python 3.10+ (`python3` if new enough, otherwise the newest `python3.N` in `PATH`;
-`--python` picks one), and Node.js 22.18+ with npm 10+ for the Vercel Agent (Node 22.18+ runs
-the `.ts` files directly, so there is no build step). Neither `.venv/` nor `node_modules/` is
-committed.
+`--python` picks one), and for the Vercel Agent Node.js 22.18+ with npm 10+, or else `curl`,
+`tar`, `xz` and `sha256sum` to fetch it into `.node/` (Node 22.18+ runs the `.ts` files directly,
+so there is no build step). None of `.venv/`, `node_modules/` and `.node/` is committed.
 
 ## Choosing a model
 
@@ -306,6 +309,10 @@ node vercel/agent.ts --prompt "Time now" --history  # one prompt + raw message d
 node vercel/agent.ts --parallel                     # run a response's tool calls concurrently
 npm --prefix vercel test                            # offline tests
 ```
+
+If `install.sh` fetched Node.js into `.node/`, use it for these commands: `.node/bin/node
+vercel/agent.ts`, or put it first in `PATH` (`export PATH="$PWD/.node/bin:$PATH"`), which npm also
+needs.
 
 `--mcp` is also available, but it does not yet work against the MCPAgent server (an MCP protocol
 version mismatch); the vercel README explains why.
