@@ -795,7 +795,9 @@ class MCPService:
         if tool.args:
             argv.extend(tool.args)
 
-        # Add dynamic params from JSON -> CLI
+        # Add dynamic params from JSON -> CLI: each flag as one --name=value argument, then "--" and
+        # the positional values (tools/README.md, "Parameters")
+        positional: list[str] = []
         for p in tool.params:
             pname = p["name"]
             if pname not in arguments:
@@ -805,11 +807,13 @@ class MCPService:
             style = p.get("style", "flag")  # default to "flag"
 
             if style == "positional":
-                argv.append(str(val))
+                positional.append(str(val))
             elif style == "flag":
-                argv.extend([f"--{pname}", str(val)])
+                argv.append(f"--{pname}={val}")
             else:
                 raise ValueError(f"Unknown param style '{style}' for {pname}")
+        if positional:
+            argv += ["--", *positional]
 
         # Merge environment (base + tool-specific overrides)
         env = {**os.environ, **tool.env}

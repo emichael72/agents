@@ -18,7 +18,7 @@ about a second, mostly measuring CPU utilization.
 
 ```bash
 python3 sysinfo/sysinfo.py                     # everything
-python3 sysinfo/sysinfo.py --section memory    # one section
+python3 sysinfo/sysinfo.py --section=memory    # one section
 ```
 
 Uses only the Python standard library: it reads `/proc`, `/sys` and `/etc/os-release`, and runs

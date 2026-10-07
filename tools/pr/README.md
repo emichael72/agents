@@ -18,8 +18,8 @@ The pull request gate's service also keeps `core_dump` current on its own (`QUIZ
 **Usage Example:**
 
 ```bash
-python3 pr/pr.py core_dump --action sync     # update main from GitHub first
-python3 pr/pr.py core_dump --title "Add an e module" --body "Prints Euler's number; make builds cleanly."
+python3 pr/pr.py --action=sync -- core_dump     # update main from GitHub first
+python3 pr/pr.py --title="Add an e module" --body="Prints Euler's number; make builds cleanly." -- core_dump
 ```
 
 What it does, every time:

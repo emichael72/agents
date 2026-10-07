@@ -25,6 +25,7 @@ Description:
         works on any readable file, of any size.
 """
 
+import argparse
 import os
 import sys
 import tempfile
@@ -37,6 +38,7 @@ sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents
                             if (p / "pyproject.toml").is_file())))
 from gatekeepers import CONTEXT_DIR, GATEKEEPERS_DIR, TOOLS_DIR
 from gatekeepers.fs.fs_gate import FsGate
+from tools.common.cli import ToolArgumentParser
 
 
 class Editor:
@@ -46,7 +48,6 @@ class Editor:
 
     VERSION = "1.0.0"
     ACTIONS = ("replace", "lines", "insert", "write", "hex")
-    OPTIONS = ("action", "old", "new", "all", "start", "end", "line", "offset", "length")
     MAX_BYTES = 2_000_000
     CONTEXT = 3  # Lines shown around a change
     HEX_LENGTH = 256  # Bytes hex shows by default
@@ -285,55 +286,40 @@ class Editor:
         return f"{shown}: {summary}\n{self.snippet(result, first, last)}"
 
     @classmethod
-    def parse(cls, argv: list[str]) -> dict:
+    def build_parser(cls) -> ToolArgumentParser:
         """
-        Read "<path> [--option value ...]". Values are taken verbatim, even when they start with "-" or
-        span several lines, as the agents pass them.
-        Args:
-            argv: The arguments.
+        The command line: "[--action=...] [--old=...] [--new=...] ... -- <path>".
         Returns:
-            dict: path and the given options.
-        Raises:
-            ValueError: If the path is missing or an option is unknown or has no value.
+            ToolArgumentParser: The parser.
         """
-        options: dict = {}
-        rest = list(argv)
-        while rest:
-            argument = rest.pop(0)
-            name = argument[2:] if argument.startswith("--") else None
-            if name in cls.OPTIONS:
-                if not rest:
-                    raise ValueError(f"--{name} needs a value.")
-                options[name] = rest.pop(0)
-            elif "path" not in options:
-                options["path"] = argument
-            else:
-                raise ValueError(f"Unexpected argument '{argument}'. Options: {', '.join('--' + o for o in cls.OPTIONS)}.")
-        if "path" not in options:
-            raise ValueError("Give the file to edit, e.g. core_dump/src/main.c.")
-        return options
+        parser = ToolArgumentParser("ed", cls.VERSION, "Edit a text file in the allowed folders, or show any file as hex.")
+        parser.add_argument("path", nargs="?", help="<allowed name>/<file>, e.g. core_dump/src/main.c")
+        parser.add_argument("--action", default="replace", help=f"One of: {', '.join(cls.ACTIONS)} (default replace)")
+        parser.add_argument("--old", help="replace: the exact text to replace")
+        parser.add_argument("--new", help="The new text: the replacement, the lines to put in, or the whole file")
+        parser.add_argument("--all", type=ToolArgumentParser.boolean, default=False,
+                            help="replace: change every occurrence of old (true or false)")
+        for name, about in (("start", "lines: the first line to replace"), ("end", "lines: the last line (default start)"),
+                            ("line", "insert: the line to insert after; 0 for the top"),
+                            ("offset", "hex: the first byte; negative counts from the end"),
+                            ("length", f"hex: how many bytes (default {cls.HEX_LENGTH})")):
+            parser.add_argument(f"--{name}", type=int, help=about)
+        return parser
 
-    def run(self, argv: list[str]) -> str:
+    def run(self, args: argparse.Namespace) -> str:
         """
         Apply the edit a command line asks for.
         Args:
-            argv: The arguments, as `parse` reads them.
+            args: The command line, from `build_parser`.
         Returns:
             str: The edit's description.
         Raises:
-            ValueError: If the arguments are invalid, or the edit is refused.
+            ValueError: If the path is missing, or the edit is refused.
         """
-        o = self.parse(argv)
-
-        def number(name: str) -> Optional[int]:
-            try:
-                return int(o[name]) if name in o else None
-            except ValueError:
-                raise ValueError(f"{name} must be a whole number.") from None
-
-        return self.edit(o["path"], o.get("action", "replace"), o.get("old"), o.get("new"),
-                         o.get("all", "").lower() in ("true", "1", "yes"), number("start"), number("end"),
-                         number("line"), number("offset"), number("length"))
+        if not args.path:
+            raise ValueError("Give the file to edit, e.g. core_dump/src/main.c.")
+        return self.edit(args.path, args.action, args.old, args.new, args.all, args.start, args.end, args.line,
+                         args.offset, args.length)
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -344,12 +330,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     Returns:
         int: 0 on success, 1 on an error.
     """
-    argv = sys.argv[1:] if argv is None else argv
-    if argv in (["-v"], ["--version"]):
-        print(f"ed {Editor.VERSION}")
-        return 0
     try:
-        print(Editor().run(argv))
+        args = Editor.build_parser().parse_args(argv)
+        print(Editor().run(args))
     except (ValueError, OSError) as e:
         print(f"Error: {e}")
         return 1

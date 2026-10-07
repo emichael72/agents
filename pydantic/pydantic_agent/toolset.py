@@ -82,19 +82,21 @@ class LocalTools:
             manifest: A parsed tool.json.
             arguments: The model's arguments for this call.
         Returns:
-            list[str]: The command, its fixed args, then each given param as `--name value` (flag) or
-            a bare value (positional). Omitted optional params are left out.
+            list[str]: The command, its fixed args, each given flag param as one `--name=value`
+            argument, then "--" and the positional params' values, in `params` order (tools/README.md,
+            "Parameters"). Omitted optional params are left out.
         """
         argv = [manifest["command"], *manifest.get("args", [])]
+        positional = []
         for param in manifest.get("params", []):
             value = arguments.get(param["name"])
             if value is None:
                 continue  # Optional and omitted: the script uses its own default
             if param.get("style", "flag") == "positional":
-                argv.append(str(value))
+                positional.append(str(value))
             else:
-                argv += [f"--{param['name']}", str(value)]
-        return argv
+                argv.append(f"--{param['name']}={value}")
+        return argv + (["--", *positional] if positional else [])
 
     @staticmethod
     def tool(name: str, manifest: dict) -> Tool:

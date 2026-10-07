@@ -102,7 +102,7 @@ test('a tool added to the tools folder is discovered and validated', async () =>
   assert.deepEqual(Object.keys(tools), ['hello']);
   const options = { toolCallId: 'call-0', messages: [] };
   const execute = tools.hello.execute as unknown as (input: unknown, opts: typeof options) => Promise<string>;
-  assert.equal(await execute({ who: 'world' }, options), 'hello world');
+  assert.equal(await execute({ who: 'world' }, options), 'hello -- world'); // Positionals follow "--"
   const schema = tools.hello.inputSchema as z.ZodType;
   assert.equal(schema.safeParse({ who: 1 }).success, false);
   assert.equal(schema.safeParse({}).success, false);

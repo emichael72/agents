@@ -22,6 +22,7 @@ Description:
     the people (and gates) of the repository.
 """
 
+import argparse
 import json
 import os
 import re
@@ -38,6 +39,7 @@ sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents
                             if (p / "pyproject.toml").is_file())))
 from gatekeepers import CONTEXT_DIR
 from gatekeepers.fs.fs_gate import FsGate
+from tools.common.cli import ToolArgumentParser
 
 
 class PullRequests:
@@ -46,7 +48,6 @@ class PullRequests:
     """
 
     VERSION = "1.0.0"
-    OPTIONS = ("action", "title", "body", "branch")
     CLANG_FORMAT = CONTEXT_DIR / "clang-format.yaml"  # The default style
     FORMATTED = {".c", ".h", ".cc", ".cpp", ".hpp", ".cxx", ".hh"}
     POLL_SECONDS = 3
@@ -266,50 +267,40 @@ class PullRequests:
         return f"Opened {url}\nbranch {name} (commit {commit}) into {base}:\n{changed}{note}" + (f"\n\n{check}" if check else "")
 
     @classmethod
-    def parse(cls, argv: list[str]) -> dict:
+    def build_parser(cls) -> ToolArgumentParser:
         """
-        Read "<path> [--action open|sync] [--title <text>] [--body <text>] [--branch <name>]". Values
-        are taken verbatim, as the agents pass them.
-        Args:
-            argv: The arguments.
+        The command line: "[--action=open|sync] [--title=...] [--body=...] [--branch=...] -- <path>".
         Returns:
-            dict: path and the given options.
-        Raises:
-            ValueError: If the path is missing or an argument is unexpected.
+            ToolArgumentParser: The parser.
         """
-        rest = list(argv)
-        options: dict = {}
-        while rest:
-            argument = rest.pop(0)
-            if argument.startswith("--") and argument[2:] in cls.OPTIONS and rest:
-                options[argument[2:]] = rest.pop(0)
-            elif "path" not in options:
-                options["path"] = argument
-            else:
-                raise ValueError(f"Unexpected argument '{argument}'.")
-        if "path" not in options:
-            raise ValueError("Give the repository folder, e.g. core_dump.")
-        return options
+        parser = ToolArgumentParser("pr", cls.VERSION, "Open a pull request from a repository's changes, or sync it.")
+        parser.add_argument("path", nargs="?", help="<allowed name>/<folder> in the repository, e.g. core_dump")
+        parser.add_argument("--action", default="open", help="open (default): open a pull request; sync: update "
+                                                             "the default branch from GitHub")
+        parser.add_argument("--title", help="open: the title, also the commit message's first line")
+        parser.add_argument("--body", default="", help="open: the description, also the rest of the commit message")
+        parser.add_argument("--branch", help="open: the branch to create; omit it to derive one from the title")
+        return parser
 
-    def run(self, argv: list[str]) -> str:
+    def run(self, args: argparse.Namespace) -> str:
         """
         Run the action a command line asks for: open a pull request (the default), or sync.
         Args:
-            argv: The arguments, as `parse` reads them.
+            args: The command line, from `build_parser`.
         Returns:
             str: The result.
         Raises:
-            ValueError: If the arguments are invalid, or a step fails.
+            ValueError: If the arguments are incomplete, or a step fails.
         """
-        options = self.parse(argv)
-        action = options.get("action", "open")
-        if action == "sync":
-            return self.sync(options["path"])
-        if action != "open":
-            raise ValueError(f"Unknown action '{action}'; use open (the default) or sync.")
-        if "title" not in options:
+        if not args.path:
+            raise ValueError("Give the repository folder, e.g. core_dump.")
+        if args.action == "sync":
+            return self.sync(args.path)
+        if args.action != "open":
+            raise ValueError(f"Unknown action '{args.action}'; use open (the default) or sync.")
+        if args.title is None:
             raise ValueError("Give a title for the pull request.")
-        return self.open_pr(options["path"], options["title"], options.get("body", ""), options.get("branch"))
+        return self.open_pr(args.path, args.title, args.body, args.branch)
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -320,14 +311,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     Returns:
         int: 0 on success, 1 on an error.
     """
-    argv = sys.argv[1:] if argv is None else argv
-    if argv in (["-v"], ["--version"]):
-        print(f"pr {PullRequests.VERSION}")
-        return 0
     try:
+        args = PullRequests.build_parser().parse_args(argv)
         tool = PullRequests(wait_check=os.environ.get("PR_WAIT_CHECK", ""),
                             wait_seconds=float(os.environ.get("PR_WAIT_SECONDS") or 0))
-        print(tool.run(argv))
+        print(tool.run(args))
     except (ValueError, OSError, subprocess.TimeoutExpired) as e:
         print(f"Error: {e}")
         return 1

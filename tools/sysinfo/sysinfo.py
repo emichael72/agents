@@ -6,7 +6,7 @@ Description:
     network, GPU, busiest processes and the versions of the development software.
 
     Key design points:
-      - Read-only, standard library only: reads /proc, /sys and /etc/os-release, and runs a few
+      - Read-only, standard library only (and the tools' shared command line): reads /proc, /sys and /etc/os-release, and runs a few
         system commands when present (ip, ps, nvidia-smi, the tools' --version). Anything missing
         is left out rather than failing.
       - CPU utilization is measured over SAMPLE_SECONDS (two readings of /proc/stat).
@@ -14,7 +14,6 @@ Description:
       - It runs under the system's python3 (3.9 on RHEL 9), outside the agents' .venv.
 """
 
-import argparse
 import getpass
 import os
 import platform
@@ -25,6 +24,12 @@ import sys
 import time
 from pathlib import Path
 from typing import Optional
+
+# Import the tools' shared command line from the repository root (the nearest folder above
+# holding pyproject.toml).
+sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents
+                            if (p / "pyproject.toml").is_file())))
+from tools.common.cli import ToolArgumentParser
 
 
 class SystemReport:
@@ -238,6 +243,17 @@ class SystemReport:
                 rows.append((name, version[0]))
         return rows
 
+    @classmethod
+    def build_parser(cls) -> ToolArgumentParser:
+        """
+        The command line: "[--section=<name>]".
+        Returns:
+            ToolArgumentParser: The parser.
+        """
+        parser = ToolArgumentParser("sysinfo", cls.VERSION, "Report on the machine running the tools.")
+        parser.add_argument("--section", help=f"One of: all (default), {', '.join(cls.SECTIONS)}")
+        return parser
+
     def report(self, section: Optional[str] = None) -> str:
         """
         Build the report.
@@ -268,13 +284,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     Args:
         argv: Arguments; None reads sys.argv.
     Returns:
-        int: 0 on success, 1 for an unknown section.
+        int: 0 on success, 1 for an unknown section or argument.
     """
-    parser = argparse.ArgumentParser(description="Report on the machine running the tools.")
-    parser.add_argument("--section", help=f"One of: all (default), {', '.join(SystemReport.SECTIONS)}")
-    parser.add_argument("-v", "--version", action="version", version=f"sysinfo {SystemReport.VERSION}")
-    args = parser.parse_args(argv)
     try:
+        args = SystemReport.build_parser().parse_args(argv)
         print(SystemReport().report(args.section))
     except ValueError as e:
         print(f"Error: {e}")

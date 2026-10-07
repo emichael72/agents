@@ -55,6 +55,7 @@ print_usage() {
     echo ""
     echo "Options"
     echo "    -t, --timezone <zone>       IANA time zone, e.g. Europe/London or Asia/Tokyo"
+    echo "                                (also --timezone=<zone>, as the agents pass it)"
     echo "                                (default: the machine's local time)"
     echo "    -v, --version               Print the version and exit"
     echo "    -h, --help                  This message"
@@ -78,6 +79,13 @@ parse_args() {
             fi
             TIMEZONE="$2"
             shift 2
+            ;;
+        --timezone=*)
+            TIMEZONE="${1#*=}"
+            shift
+            ;;
+        --)
+            shift
             ;;
         -v | --version)
             log OUT "%s %s" "$(basename "${SCRIPT_PATH}")" "${SCRIPT_VERSION}"

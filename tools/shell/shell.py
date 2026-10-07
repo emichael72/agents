@@ -26,6 +26,7 @@ Description:
     shows /work/<name> as <name>; it stops after TIMEOUT seconds and MAX_LINES lines.
 """
 
+import argparse
 import grp
 import json
 import os
@@ -45,6 +46,7 @@ sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents
                             if (p / "pyproject.toml").is_file())))
 from gatekeepers import CONTEXT_DIR, TOOLS_DIR
 from gatekeepers.fs.fs_gate import FsGate
+from tools.common.cli import ToolArgumentParser
 
 
 class Shell:
@@ -326,26 +328,18 @@ class Shell:
                   for name, entry in sorted(commands.items())]
         return "\n".join(lines)
 
-    @staticmethod
-    def parse(argv: list[str]) -> dict[str, str]:
+    @classmethod
+    def build_parser(cls) -> ToolArgumentParser:
         """
-        Read "--cwd <folder> --command <line>". Values are taken verbatim, as the agents pass them.
-        Args:
-            argv: The arguments.
+        The command line: "[--cwd=<folder>] --command=<command line>".
         Returns:
-            dict[str, str]: cwd and command, when given.
-        Raises:
-            ValueError: If an argument is not one of the two options with a value.
+            ToolArgumentParser: The parser.
         """
-        rest = list(argv)
-        options = {}
-        while rest:
-            argument = rest.pop(0)
-            if argument in ("--cwd", "--command") and rest:
-                options[argument[2:]] = rest.pop(0)
-            else:
-                raise ValueError(f"Unexpected argument '{argument}'; use --cwd <folder> --command <command line>.")
-        return options
+        parser = ToolArgumentParser("shell", cls.VERSION, "Run a command line in the sandbox.")
+        parser.add_argument("--cwd", default="", help="<allowed name>/<folder> to run in; omit it for the first "
+                                                      "allowed folder")
+        parser.add_argument("--command", default="", help="The command line; help lists the commands")
+        return parser
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -356,13 +350,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     Returns:
         int: 0 when the command exited with status 0, 1 otherwise.
     """
-    argv = sys.argv[1:] if argv is None else argv
-    if argv in (["-v"], ["--version"]):
-        print(f"shell {Shell.VERSION}")
-        return 0
     try:
-        options = Shell.parse(argv)
-        ok, report = Shell().run(options.get("cwd", ""), options.get("command", ""))
+        args: argparse.Namespace = Shell.build_parser().parse_args(argv)
+        ok, report = Shell().run(args.cwd, args.command)
     except (ValueError, OSError) as e:
         ok, report = False, f"Error: {e}"
     print(report)

@@ -142,7 +142,7 @@ Tools that take a path only reach the folders named in
 [`context/paths.json`](context/paths.json).
 
 ```bash
-bash tools/time/time.sh --timezone UTC  # run a tool's script by hand
+bash tools/time/time.sh --timezone=UTC  # run a tool's script by hand
 ```
 
 ## Gatekeepers

@@ -7,8 +7,8 @@ block, and every function, parameter and return value is described. Read-only.
 
 ```bash
 bash doxy/doxy.sh ~/projects/core_dump/src
-bash doxy/doxy.sh "src/pi.c include/pi.h"   # several paths in one argument, as the agents pass them
-bash doxy/doxy.sh --help                     # usage; --version prints the script's version
+bash doxy/doxy.sh -- "src/pi.c include/pi.h"   # several paths in one argument, as the agents pass them
+bash doxy/doxy.sh --help                        # usage; --version prints the script's version
 ```
 
 Each path is a file (`.c`, `.h`, `.cc`, `.cpp`, `.hpp`, `.cxx`, `.hh`) or a folder, searched

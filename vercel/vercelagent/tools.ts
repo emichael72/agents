@@ -66,15 +66,21 @@ export function inputSchema(manifest: Manifest) {
   };
 }
 
-/** Command line for one call: command, fixed args, then each given param as a flag or positional. */
+/**
+ * Command line for one call: command, fixed args, each given flag param as one `--name=value`
+ * argument, then "--" and the positional params' values, in `params` order (tools/README.md,
+ * "Parameters").
+ */
 export function buildArgv(manifest: Manifest, input: Record<string, unknown>): string[] {
   const argv = [manifest.command, ...(manifest.args ?? [])];
+  const positional: string[] = [];
   for (const param of manifest.params ?? []) {
     const value = input[param.name];
     if (value === undefined || value === null) continue; // Optional and omitted: the script uses its own default
-    argv.push(...(param.style === 'positional' ? [String(value)] : [`--${param.name}`, String(value)]));
+    if (param.style === 'positional') positional.push(String(value));
+    else argv.push(`--${param.name}=${String(value)}`);
   }
-  return argv;
+  return positional.length ? [...argv, '--', ...positional] : argv;
 }
 
 /** One tool per <tool>/tool.json under toolsDir; the folder name is the tool name. */

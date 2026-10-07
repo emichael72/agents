@@ -15,10 +15,10 @@ then shows the changed lines, numbered, with three lines of context so the edit 
 **Usage Example:**
 
 ```bash
-python3 ed/ed.py core_dump/src/modules/pi.c --old "acos(-1.0)" --new "4.0 * atan(1.0)"
-python3 ed/ed.py core_dump/src/main.c --action lines --start 12 --end 14 --new "..."
-python3 ed/ed.py core_dump/src/modules/e.c --action write --new "$(cat e.c)"
-python3 ed/ed.py core_dump/core_dump --action hex --offset 0 --length 64
+python3 ed/ed.py --old="acos(-1.0)" --new="4.0 * atan(1.0)" -- core_dump/src/modules/pi.c
+python3 ed/ed.py --action=lines --start=12 --end=14 --new="..." -- core_dump/src/main.c
+python3 ed/ed.py --action=write --new="$(cat e.c)" -- core_dump/src/modules/e.c
+python3 ed/ed.py --action=hex --offset=0 --length=64 -- core_dump/core_dump
 ```
 
 `hex` output, a header with the range and the file's size, then 16 bytes a row:

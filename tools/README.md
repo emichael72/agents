@@ -46,11 +46,37 @@ below. Most file and build work goes through `shell`; see [shell/README.md](shel
 | `description` | What the model reads to decide when to use the tool. |
 | `command`, `args` | The program and its fixed arguments, e.g. `bash time/time.sh`. |
 | `params` | Arguments the model supplies. Each has `name`, `type` (`string`, `integer`, `number`, `boolean`), `description`, `style` and optionally `required`. |
-| `style` | `flag` passes `--<name> <value>`; `positional` passes the bare value, in `params` order. Default `flag`. |
+| `style` | `flag` passes `--<name>=<value>`; `positional` passes the bare value after `--` (see "Parameters"). Default `flag`. |
 | `required` | Defaults to `true`. An optional parameter the model omits is not passed at all, so the script's own default applies. |
 | `env` | Optional environment variables for the command. |
 | `timeout` | Optional seconds the agents wait for the tool (default 30), for tools that wait on something, such as `pr`. |
 | `resource` | Optional documentation file, served by MCPAgent as an MCP resource. |
+
+## Parameters
+
+Every agent calls a tool the same way: its `command` and `args`, then each flag parameter the model
+gave as one argument, `--<name>=<value>`, then `--` and the positional parameters' values, in
+`params` order:
+
+```bash
+python3 ed/ed.py --old=-Wall --new='-Wall -Wextra' -- core_dump/Makefile
+```
+
+With the value in the same argument as its option, a value may start with `-` or span lines and
+still reach the tool unchanged, and nothing after `--` is taken for an option. An optional
+parameter the model omits is not passed. A boolean arrives as `true` or `True`.
+
+The tools read this with their usual parsers, which also accept `--<name> <value>` by hand:
+
+- **Python** (`ed`, `memory`, `pr`, `shell`, `sysinfo`): argparse, through
+  [`common/cli.py`](common/cli.py)'s `ToolArgumentParser`, which prints a command-line mistake as
+  `Error: <reason>` with exit status 1, like any other failure, and adds `-v`/`--version`. Each
+  tool is one class with a `main()` that prints the result and returns the exit status. They run
+  under the system's `python3`, which may be outside the `.venv` and as old as 3.9 (RHEL 9), so
+  they use only the standard library, the gatekeepers and `common/`.
+- **Bash** (`doxy`, `time`): a `parse_args()` loop that accepts `--<name>=<value>` and `--`, with
+  `-v`/`--version` and `-h`/`--help`. `pr_gate` runs `gatekeepers/pr/pr_gate.sh`, which passes its
+  parameters on to the gate's argparse command line.
 
 **Paths:** every path in a manifest (`args`, `resource`) is relative to this `tools/` folder, and
 this folder is also the working directory when a tool runs.
@@ -112,12 +138,8 @@ spaces before sending the description to the model.
 5. Restart the agents (and the MCPAgent server). Each agent lists the tools it loaded; ask one to use
    the new tool.
 
-The Python tools (`ed`, `memory`, `pr`, `shell`, `sysinfo`) run under the system's `python3`, which
-may be outside the `.venv` and as old as 3.9 (RHEL 9), so they use only the standard library and the
-gatekeepers. Each is one class with a `main()` that prints the result, or `Error: <reason>`, and
-returns the exit status; `-v` prints its version. The agents pass each value as one argument,
-verbatim, even when it starts with `-` or spans lines, so these tools read their options themselves
-rather than with argparse.
+A new tool reads its parameters as "Parameters" describes; a Python tool builds its parser with
+`ToolArgumentParser`.
 
 A tool that takes a path must check it with the file-system gate (`gatekeepers/fs/fs_gate.py`, see
 "Allowed paths"), with the access it needs. A tool named like a command in

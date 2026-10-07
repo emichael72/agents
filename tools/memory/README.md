@@ -15,9 +15,9 @@ remembers without being asked; this tool saves, reads and forgets the notes behi
 **Usage Example:**
 
 ```bash
-python3 memory/memory.py --action save --topic preferences --text "Prefers short answers"
-python3 memory/memory.py --action read --topic preferences
-python3 memory/memory.py --action forget --topic preferences
+python3 memory/memory.py --action=save --topic=preferences --text="Prefers short answers"
+python3 memory/memory.py --action=read --topic=preferences
+python3 memory/memory.py --action=forget --topic=preferences
 ```
 
 Topics are plain names (letters, digits, `-`, `_`), stored as `<topic>.md`; a note holds at most

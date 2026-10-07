@@ -19,6 +19,7 @@ Description:
         decisions and preferences, never secrets.
 """
 
+import argparse
 import re
 import sys
 from datetime import date
@@ -30,6 +31,7 @@ from typing import Optional
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents
                             if (p / "pyproject.toml").is_file())))
 from gatekeepers.fs.fs_gate import FsGate
+from tools.common.cli import ToolArgumentParser
 
 
 class Memory:
@@ -42,7 +44,6 @@ class Memory:
     INDEX = "index.md"
     TOPIC = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
     MAX_NOTE = 4000
-    OPTIONS = ("action", "topic", "text", "summary", "replace")
 
     def __init__(self, gate: Optional[FsGate] = None) -> None:
         """
@@ -175,47 +176,38 @@ class Memory:
         return f"Forgot '{name}'."
 
     @classmethod
-    def parse(cls, argv: list[str]) -> dict:
+    def build_parser(cls) -> ToolArgumentParser:
         """
-        Read "--action <save|read|forget> [--topic T] [--text X] [--summary S] [--replace true]". Values
-        are taken verbatim, as the agents pass them.
-        Args:
-            argv: The arguments.
+        The command line: "--action=<save|read|forget> [--topic=T] [--text=X] [--summary=S] [--replace=true]".
         Returns:
-            dict: The given options.
-        Raises:
-            ValueError: If an argument is not a known option with a value.
+            ToolArgumentParser: The parser.
         """
-        rest = list(argv)
-        options: dict = {}
-        while rest:
-            argument = rest.pop(0)
-            if argument.startswith("--") and argument[2:] in cls.OPTIONS and rest:
-                options[argument[2:]] = rest.pop(0)
-            else:
-                raise ValueError(f"Unexpected argument '{argument}'.")
-        return options
+        parser = ToolArgumentParser("memory", cls.VERSION, "Save, read or forget the agents' notes.")
+        parser.add_argument("--action", default="read", help="save, read (default) or forget")
+        parser.add_argument("--topic", help="Short topic name; omit it with read for the index")
+        parser.add_argument("--text", default="", help="save: the fact to remember (the whole note with replace)")
+        parser.add_argument("--summary", help="save: the topic's one-line summary for the index")
+        parser.add_argument("--replace", type=ToolArgumentParser.boolean, default=False,
+                            help="save: rewrite the whole note with text (true or false)")
+        return parser
 
-    def run(self, argv: list[str]) -> str:
+    def run(self, args: argparse.Namespace) -> str:
         """
         Run the action a command line asks for.
         Args:
-            argv: The arguments, as `parse` reads them.
+            args: The command line, from `build_parser`.
         Returns:
             str: The result.
         Raises:
-            ValueError: If the arguments are invalid, or the action fails.
+            ValueError: If the action is unknown, or it fails.
         """
-        options = self.parse(argv)
-        action = options.get("action", "read")
-        if action == "save":
-            return self.save(options.get("topic", ""), options.get("text", ""), options.get("summary"),
-                             options.get("replace", "").lower() in ("true", "1", "yes"))
-        if action == "read":
-            return self.read(options.get("topic"))
-        if action == "forget":
-            return self.forget(options.get("topic", ""))
-        raise ValueError(f"Unknown action '{action}'; use save, read or forget.")
+        if args.action == "save":
+            return self.save(args.topic or "", args.text, args.summary, args.replace)
+        if args.action == "read":
+            return self.read(args.topic)
+        if args.action == "forget":
+            return self.forget(args.topic or "")
+        raise ValueError(f"Unknown action '{args.action}'; use save, read or forget.")
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -226,12 +218,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     Returns:
         int: 0 on success, 1 on an error.
     """
-    argv = sys.argv[1:] if argv is None else argv
-    if argv in (["-v"], ["--version"]):
-        print(f"memory {Memory.VERSION}")
-        return 0
     try:
-        print(Memory().run(argv))
+        args = Memory.build_parser().parse_args(argv)
+        print(Memory().run(args))
     except (ValueError, OSError) as e:
         print(f"Error: {e}")
         return 1

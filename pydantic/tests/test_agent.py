@@ -137,7 +137,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             toolset = LocalTools.load(Path(folder))
             self.assertEqual(list(toolset.tools), ["hello"])
             hello = tool_function(toolset, "hello")
-            self.assertEqual(hello(who="world"), "hello world")
+            self.assertEqual(hello(who="world"), "hello -- world")  # Positionals follow "--"
             with self.assertRaises(ModelRetry):
                 hello(who=1)  # validated against the manifest's schema
 

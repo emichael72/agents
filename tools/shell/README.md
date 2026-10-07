@@ -7,10 +7,10 @@ folders it can reach, with their access, in [`../../context/paths.json`](../../c
 **Usage Example:**
 
 ```bash
-python3 shell/shell.py --cwd core_dump --command "grep -rn print_pi src | wc -l"
-python3 shell/shell.py --cwd core_dump --command "make && ./core_dump -dp && make clean"
-python3 shell/shell.py --cwd core_dump --command "git log --oneline -5"
-python3 shell/shell.py --cwd core_dump --command help        # the folders, their access and the commands
+python3 shell/shell.py --cwd=core_dump --command="grep -rn print_pi src | wc -l"
+python3 shell/shell.py --cwd=core_dump --command="make && ./core_dump -dp && make clean"
+python3 shell/shell.py --cwd=core_dump --command="git log --oneline -5"
+python3 shell/shell.py --cwd=core_dump --command=help        # the folders, their access and the commands
 ```
 
 Inside, the allowed folders appear as `/work/<name>`, and the command starts in `cwd`, or in the
