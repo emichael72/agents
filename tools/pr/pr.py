@@ -37,10 +37,11 @@ from typing import Optional
 # holding pyproject.toml).
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents
                             if (p / "pyproject.toml").is_file())))
-from gatekeepers.fs import fs_gate
+from gatekeepers import CONTEXT_DIR
+from gatekeepers.fs.fs_gate import FsGate
 
 OPTIONS = ("action", "title", "body", "branch")
-CLANG_FORMAT = fs_gate.CONTEXT_DIR / "clang-format.yaml"  # The default style
+CLANG_FORMAT = CONTEXT_DIR / "clang-format.yaml"  # The default style
 FORMATTED = {".c", ".h", ".cc", ".cpp", ".hpp", ".cxx", ".hh"}
 WAIT_CHECK = os.environ.get("PR_WAIT_CHECK", "")  # The status check to wait for; "" waits for none
 WAIT_SECONDS = float(os.environ.get("PR_WAIT_SECONDS") or 0)
@@ -170,7 +171,7 @@ def sync(path: str) -> str:
         ValueError: If the repository is not on its default branch, has uncommitted changes or
             commits of its own, or GitHub cannot be reached.
     """
-    folder, shown = fs_gate.resolve(path, "dir", "w")
+    folder, shown = FsGate.load().resolve(path, "dir", "w")
     repo = Path(git(folder, "rev-parse", "--show-toplevel")).resolve()
     base = default_branch(repo)
     if git(repo, "branch", "--show-current") != base:
@@ -206,9 +207,10 @@ def open_pr(path: str, title: str, body: str = "", branch: Optional[str] = None)
     title = title.strip()
     if not 3 <= len(title) <= 120:
         raise ValueError("Give a title of 3 to 120 characters: what the change does.")
-    folder, shown = fs_gate.resolve(path, "dir", "w")
+    gate = FsGate.load()
+    folder, shown = gate.resolve(path, "dir", "w")
     repo = Path(git(folder, "rev-parse", "--show-toplevel")).resolve()
-    if not fs_gate.locate(repo, fs_gate.load_allowed()):
+    if not gate.locate(repo):
         raise ValueError(f"The repository of '{shown}' starts outside the allowed folders.")
 
     base = default_branch(repo)

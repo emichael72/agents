@@ -30,7 +30,7 @@ from typing import Optional
 # holding pyproject.toml).
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents
                             if (p / "pyproject.toml").is_file())))
-from gatekeepers.fs import fs_gate
+from gatekeepers.fs.fs_gate import FsGate
 
 FOLDER = "memory"  # The allowed folder's name in context/paths.json
 INDEX = "index.md"
@@ -48,11 +48,11 @@ def folder() -> Path:
     Raises:
         ValueError: If paths.json has no writable "memory" folder.
     """
-    allowed = fs_gate.load_allowed()
-    entry = allowed.get(FOLDER)
+    gate = FsGate.load()
+    entry = gate.folders.get(FOLDER)
     if entry is not None and "w" in entry.access and not entry.path.exists():
         entry.path.mkdir(parents=True)
-    return fs_gate.resolve(FOLDER, "dir", "rw", allowed)[0]
+    return gate.resolve(FOLDER, "dir", "rw")[0]
 
 
 def topic_name(topic: Optional[str]) -> str:

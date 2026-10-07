@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Module: fs_gate.py
 
@@ -18,8 +17,9 @@ Description:
         which runs the folder's Makefile).
       - An entry given as a plain string is read-only.
 
-    It lives in agents/gatekeepers/fs. Python tools import it; Bash tools run it:
-        python3 ../gatekeepers/fs/fs_gate.py PATH [--dir | --file] [--need r|w|x]
+    It lives in agents/gatekeepers/fs. Python tools load an `FsGate` and ask it; Bash tools run
+    it, with the repository root on PYTHONPATH:
+        python3 -m gatekeepers.fs.fs_gate PATH [--dir | --file] [--need r|w|x]
     which prints "<absolute path><TAB><path as shown>" or "Error: ..." with exit status 1.
 
     FS_GATE_PATHS may name another JSON file of the same shape, for a program that runs a tool on
@@ -30,18 +30,12 @@ Description:
 import argparse
 import json
 import os
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-# The repository root (the nearest folder above holding pyproject.toml); relative allowed
-# folders start here
-REPO_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file())
-TOOLS_DIR = REPO_ROOT / "tools"
-GATEKEEPERS_DIR = REPO_ROOT / "gatekeepers"
-CONTEXT_DIR = REPO_ROOT / "context"
-PATHS_FILE = CONTEXT_DIR / "paths.json"
+from gatekeepers import PATHS_FILE, REPO_ROOT, __version__
+
 RIGHTS = {"r": "read", "w": "write", "x": "execute"}
 
 
@@ -66,147 +60,171 @@ class Folder:
         return self.subpaths[max(matches, key=lambda p: len(p.parts))] if matches else self.access
 
 
-def parse_access(value: str, where: str) -> str:
+class FsGate:
     """
-    Check an access string such as "rwx" or "r".
-    Args:
-        value: The string from paths.json.
-        where: Which entry it belongs to, for the error.
+    The allowed folders, and the checks every tool that takes a path makes against them.
+    """
+
+    def __init__(self, folders: dict[str, Folder]) -> None:
+        """
+        Wrap allowed folders that are already read; `load` reads them from paths.json.
+        Args:
+            folders: The allowed folders, by name.
+        """
+        self.folders = folders
+
+    @classmethod
+    def load(cls, path: Optional[Path] = None) -> "FsGate":
+        """
+        Read the allowed folders. Each entry is a path string (read-only), or
+        {"path": ..., "access": "rwx", "subpaths": {"build": "rw", ...}}.
+        Args:
+            path: The JSON file; None uses FS_GATE_PATHS, then context/paths.json.
+        Returns:
+            FsGate: The gate over those folders.
+        """
+        path = path or Path(os.environ.get("FS_GATE_PATHS") or PATHS_FILE)
+        folders = {}
+        for name, entry in json.loads(path.read_text(encoding="utf-8"))["paths"].items():
+            if isinstance(entry, str):
+                base = (REPO_ROOT / Path(entry).expanduser()).resolve()
+                folders[name] = Folder(name, base)
+                continue
+            base = (REPO_ROOT / Path(entry["path"]).expanduser()).resolve()
+            subpaths = {(base / sub).resolve(): cls.parse_access(access, f"{name}/{sub}")
+                        for sub, access in entry.get("subpaths", {}).items()}
+            folders[name] = Folder(name, base, cls.parse_access(entry.get("access", "r"), name), subpaths)
+        return cls(folders)
+
+    @staticmethod
+    def parse_access(value: str, where: str) -> str:
+        """
+        Check an access string such as "rwx" or "r".
+        Args:
+            value: The string from paths.json.
+            where: Which entry it belongs to, for the error.
+        Returns:
+            str: The rights, in rwx order.
+        Raises:
+            ValueError: If it holds anything but r, w and x.
+        """
+        if not set(value) <= set(RIGHTS):
+            raise ValueError(f"Access '{value}' for {where} must use only r, w and x.")
+        return "".join(r for r in RIGHTS if r in value)
+
+    def locate(self, target: Path) -> Optional[tuple[Folder, str]]:
+        """
+        Find the allowed folder an absolute path is in.
+        Args:
+            target: A resolved absolute path.
+        Returns:
+            Optional[tuple[Folder, str]]: The folder and the path as shown (<name>/...), or None.
+        """
+        for folder in sorted(self.folders.values(), key=lambda f: -len(f.path.parts)):  # Deepest first
+            if target == folder.path or folder.path in target.parents:
+                return folder, folder.name if target == folder.path else f"{folder.name}/{target.relative_to(folder.path)}"
+        return None
+
+    def resolve(self, path: str, kind: str = "any", need: str = "r") -> tuple[Path, str]:
+        """
+        Turn a "<name>/<sub/path>" into a file or folder inside the allowed folder of that name, with
+        the access needed.
+        Args:
+            path: The path the model gave.
+            kind: "dir" or "file" to require one, "any" for either, or "output" for a file that may not
+                exist yet (its folder must exist, inside the allowed folder).
+            need: The rights required there, e.g. "r", "w" or "x".
+        Returns:
+            tuple[Path, str]: The absolute path, and the path as it should be shown ("<name>/<sub/path>").
+        Raises:
+            ValueError: If the name is not allowed, the path leaves its folder, lacks the access, does
+                not exist, or is not of the required kind.
+        """
+        name, _, rest = path.strip().strip("/").partition("/")
+        if name not in self.folders:
+            raise ValueError(f"'{name}' is not an allowed folder. Allowed: {', '.join(sorted(self.folders))} "
+                             f"(paths start with one of these names, e.g. {sorted(self.folders)[0]}/...).")
+        folder = self.folders[name]
+        target = (folder.path / rest).resolve()
+        if target != folder.path and folder.path not in target.parents:
+            raise ValueError(f"'{path}' is outside the allowed folder '{name}'.")
+        access = folder.access_at(target)
+        missing = [RIGHTS[r] for r in need if r not in access]
+        if missing:
+            raise ValueError(f"'{path}' does not allow {' and '.join(missing)} (its access is '{access or 'none'}').")
+        if kind == "output":
+            if target.is_dir() or not target.parent.is_dir():
+                raise ValueError(f"'{path}' must be a file name in an existing folder.")
+        elif not target.exists():
+            raise ValueError(f"'{path}' does not exist.")
+        if kind == "dir" and not target.is_dir():
+            raise ValueError(f"'{path}' is not a folder.")
+        if kind == "file" and not target.is_file():
+            raise ValueError(f"'{path}' is not a file.")
+        display_path = name if target == folder.path else f"{name}/{target.relative_to(folder.path)}"
+        return target, display_path
+
+    def display(self, text: str) -> str:
+        """
+        Show the absolute paths in a command's output the way the model gives them (<name>/...).
+        Args:
+            text: The output, e.g. a compiler's messages.
+        Returns:
+            str: The text, with each allowed folder's absolute path replaced by its name.
+        """
+        for folder in sorted(self.folders.values(), key=lambda f: -len(str(f.path))):  # Deepest first
+            text = text.replace(str(folder.path), folder.name)
+        return text
+
+    def describe(self) -> str:
+        """
+        List the allowed folders and their access, for a tool called without a path.
+        Returns:
+            str: One line per folder (and sub-folder override).
+        """
+        width = max(map(len, self.folders))
+        lines = ["Allowed folders (paths start with one of these names; access r=read w=write x=execute):"]
+        for name, folder in sorted(self.folders.items()):
+            lines.append(f"{name:<{width}}  {folder.access or '-':<3}  {folder.path}")
+            for sub, access in sorted(folder.subpaths.items()):
+                lines.append(f"{'':<{width}}  {access or '-':<3}    {name}/{sub.relative_to(folder.path)}")
+        return "\n".join(lines)
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    """
+    Build the argument parser for the command line (python -m gatekeepers.fs.fs_gate).
     Returns:
-        str: The rights, in rwx order.
-    Raises:
-        ValueError: If it holds anything but r, w and x.
+        argparse.ArgumentParser: The parser.
     """
-    if not set(value) <= set(RIGHTS):
-        raise ValueError(f"Access '{value}' for {where} must use only r, w and x.")
-    return "".join(r for r in RIGHTS if r in value)
-
-
-def load_allowed(path: Optional[Path] = None) -> dict[str, Folder]:
-    """
-    Read the allowed folders. Each entry is a path string (read-only), or
-    {"path": ..., "access": "rwx", "subpaths": {"build": "rw", ...}}.
-    Args:
-        path: The JSON file; None uses FS_GATE_PATHS, then context/paths.json.
-    Returns:
-        dict[str, Folder]: The folders, by name.
-    """
-    path = path or Path(os.environ.get("FS_GATE_PATHS") or PATHS_FILE)
-    folders = {}
-    for name, entry in json.loads(path.read_text(encoding="utf-8"))["paths"].items():
-        if isinstance(entry, str):
-            base = (REPO_ROOT / Path(entry).expanduser()).resolve()
-            folders[name] = Folder(name, base)
-            continue
-        base = (REPO_ROOT / Path(entry["path"]).expanduser()).resolve()
-        subpaths = {(base / sub).resolve(): parse_access(access, f"{name}/{sub}")
-                    for sub, access in entry.get("subpaths", {}).items()}
-        folders[name] = Folder(name, base, parse_access(entry.get("access", "r"), name), subpaths)
-    return folders
-
-
-def locate(target: Path, allowed: dict[str, Folder]) -> Optional[tuple[Folder, str]]:
-    """
-    Find the allowed folder an absolute path is in.
-    Args:
-        target: A resolved absolute path.
-        allowed: The allowed folders.
-    Returns:
-        Optional[tuple[Folder, str]]: The folder and the path as shown (<name>/...), or None.
-    """
-    for folder in sorted(allowed.values(), key=lambda f: -len(f.path.parts)):  # Deepest first
-        if target == folder.path or folder.path in target.parents:
-            return folder, folder.name if target == folder.path else f"{folder.name}/{target.relative_to(folder.path)}"
-    return None
-
-
-def resolve(path: str, kind: str = "any", need: str = "r",
-            allowed: Optional[dict[str, Folder]] = None) -> tuple[Path, str]:
-    """
-    Turn a "<name>/<sub/path>" into a file or folder inside the allowed folder of that name, with
-    the access needed.
-    Args:
-        path: The path the model gave.
-        kind: "dir" or "file" to require one, "any" for either, or "output" for a file that may not
-            exist yet (its folder must exist, inside the allowed folder).
-        need: The rights required there, e.g. "r", "w" or "x".
-        allowed: The allowed folders; None reads them.
-    Returns:
-        tuple[Path, str]: The absolute path, and the path as it should be shown ("<name>/<sub/path>").
-    Raises:
-        ValueError: If the name is not allowed, the path leaves its folder, lacks the access, does
-            not exist, or is not of the required kind.
-    """
-    allowed = load_allowed() if allowed is None else allowed
-    name, _, rest = path.strip().strip("/").partition("/")
-    if name not in allowed:
-        raise ValueError(f"'{name}' is not an allowed folder. Allowed: {', '.join(sorted(allowed))} "
-                         f"(paths start with one of these names, e.g. {sorted(allowed)[0]}/...).")
-    folder = allowed[name]
-    target = (folder.path / rest).resolve()
-    if target != folder.path and folder.path not in target.parents:
-        raise ValueError(f"'{path}' is outside the allowed folder '{name}'.")
-    access = folder.access_at(target)
-    missing = [RIGHTS[r] for r in need if r not in access]
-    if missing:
-        raise ValueError(f"'{path}' does not allow {' and '.join(missing)} (its access is '{access or 'none'}').")
-    if kind == "output":
-        if target.is_dir() or not target.parent.is_dir():
-            raise ValueError(f"'{path}' must be a file name in an existing folder.")
-    elif not target.exists():
-        raise ValueError(f"'{path}' does not exist.")
-    if kind == "dir" and not target.is_dir():
-        raise ValueError(f"'{path}' is not a folder.")
-    if kind == "file" and not target.is_file():
-        raise ValueError(f"'{path}' is not a file.")
-    display_path = name if target == folder.path else f"{name}/{target.relative_to(folder.path)}"
-    return target, display_path
-
-
-def display(text: str, allowed: Optional[dict[str, Folder]] = None) -> str:
-    """
-    Show the absolute paths in a command's output the way the model gives them (<name>/...).
-    Args:
-        text: The output, e.g. a compiler's messages.
-        allowed: The allowed folders; None reads them.
-    Returns:
-        str: The text, with each allowed folder's absolute path replaced by its name.
-    """
-    allowed = load_allowed() if allowed is None else allowed
-    for folder in sorted(allowed.values(), key=lambda f: -len(str(f.path))):  # Deepest first
-        text = text.replace(str(folder.path), folder.name)
-    return text
-
-
-def describe(allowed: Optional[dict[str, Folder]] = None) -> str:
-    """
-    List the allowed folders and their access, for a tool called without a path.
-    Args:
-        allowed: The allowed folders; None reads them.
-    Returns:
-        str: One line per folder (and sub-folder override).
-    """
-    allowed = load_allowed() if allowed is None else allowed
-    width = max(map(len, allowed))
-    lines = ["Allowed folders (paths start with one of these names; access r=read w=write x=execute):"]
-    for name, folder in sorted(allowed.items()):
-        lines.append(f"{name:<{width}}  {folder.access or '-':<3}  {folder.path}")
-        for sub, access in sorted(folder.subpaths.items()):
-            lines.append(f"{'':<{width}}  {access or '-':<3}    {name}/{sub.relative_to(folder.path)}")
-    return "\n".join(lines)
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Check a tool path against context/paths.json.")
+    parser = argparse.ArgumentParser(prog="python -m gatekeepers.fs.fs_gate",
+                                     description="Check a tool path against context/paths.json.")
     parser.add_argument("path", help="<allowed name>/<sub/path>")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--dir", action="store_const", const="dir", dest="kind", help="Require a folder")
     group.add_argument("--file", action="store_const", const="file", dest="kind", help="Require a file")
     parser.add_argument("--need", default="r", help="Rights required: some of r, w, x (default r)")
-    args = parser.parse_args()
+    parser.add_argument("-v", "--version", action="version", version=f"fs_gate {__version__}")
+    return parser
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    """
+    Check one path and print it: "<absolute path><TAB><path as shown>", or "Error: <reason>".
+    Args:
+        argv: The arguments; None reads sys.argv.
+    Returns:
+        int: 0 when the path is allowed, 1 otherwise.
+    """
+    args = build_arg_parser().parse_args(argv)
     try:
-        absolute, shown = resolve(args.path, args.kind or "any", args.need)
+        absolute, shown = FsGate.load().resolve(args.path, args.kind or "any", args.need)
     except (ValueError, OSError) as e:
         print(f"Error: {e}")
-        sys.exit(1)
+        return 1
     print(f"{absolute}\t{shown}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

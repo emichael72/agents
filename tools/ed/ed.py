@@ -36,7 +36,8 @@ from typing import Optional
 # holding pyproject.toml).
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents
                             if (p / "pyproject.toml").is_file())))
-from gatekeepers.fs import fs_gate
+from gatekeepers import CONTEXT_DIR, GATEKEEPERS_DIR, TOOLS_DIR
+from gatekeepers.fs.fs_gate import FsGate
 
 ACTIONS = ("replace", "lines", "insert", "write", "hex")
 OPTIONS = ("action", "old", "new", "all", "start", "end", "line", "offset", "length")
@@ -58,9 +59,8 @@ def target_file(path: str, action: str) -> tuple[Path, str]:
     Raises:
         ValueError: If the path is not allowed, protected, missing, binary or too large.
     """
-    target, shown = fs_gate.resolve(path, "output" if action == "write" else "file", "w")
-    for protected, name in ((fs_gate.TOOLS_DIR, "tools"), (fs_gate.CONTEXT_DIR, "context"),
-                            (fs_gate.GATEKEEPERS_DIR, "gatekeepers")):
+    target, shown = FsGate.load().resolve(path, "output" if action == "write" else "file", "w")
+    for protected, name in ((TOOLS_DIR, "tools"), (CONTEXT_DIR, "context"), (GATEKEEPERS_DIR, "gatekeepers")):
         if target == protected or protected in target.parents:
             raise ValueError(f"'{shown}' is in the {name} folder, which ed does not change.")
     if ".git" in target.parts:
@@ -162,7 +162,7 @@ def hex_view(path: str, offset: Optional[int] = None, length: Optional[int] = No
     Raises:
         ValueError: If the path is refused, or offset or length is out of range.
     """
-    target, shown = fs_gate.resolve(path, "file", "r")
+    target, shown = FsGate.load().resolve(path, "file", "r")
     size = target.stat().st_size
     length = HEX_LENGTH if length is None else length
     if not 1 <= length <= HEX_MAX:

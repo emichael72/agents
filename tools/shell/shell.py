@@ -44,11 +44,12 @@ from typing import Optional
 # holding pyproject.toml).
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents
                             if (p / "pyproject.toml").is_file())))
-from gatekeepers.fs import fs_gate
+from gatekeepers import CONTEXT_DIR, TOOLS_DIR
+from gatekeepers.fs.fs_gate import FsGate
 
 COMMANDS_FILE = Path(__file__).resolve().parent / "commands.json"
-CLANG_FORMAT = fs_gate.CONTEXT_DIR / "clang-format.yaml"  # The default C/C++ style, at /work/.clang-format
-CLANG_TIDY = fs_gate.CONTEXT_DIR / "clang-tidy.yaml"  # The default C/C++ checks, at /work/.clang-tidy
+CLANG_FORMAT = CONTEXT_DIR / "clang-format.yaml"  # The default C/C++ style, at /work/.clang-format
+CLANG_TIDY = CONTEXT_DIR / "clang-tidy.yaml"  # The default C/C++ checks, at /work/.clang-tidy
 WORK = PurePosixPath("/work")  # Where the allowed folders appear inside the sandbox
 SEPARATORS = {"|", "||", "&&", ";"}
 # git in the shell only looks (and can undo uncommitted edits); committing, branching and syncing
@@ -76,37 +77,37 @@ def load_commands() -> dict[str, dict]:
 
 def own_tool(command: str) -> bool:
     """Whether a command is also a tool of its own (tools/<command>/tool.json), which then wins."""
-    return command != "shell" and (fs_gate.TOOLS_DIR / command / "tool.json").is_file()
+    return command != "shell" and (TOOLS_DIR / command / "tool.json").is_file()
 
 
-def to_host(path: str, current: Path, allowed: dict[str, fs_gate.Folder]) -> Optional[Path]:
+def to_host(path: str, current: Path, gate: FsGate) -> Optional[Path]:
     """
     Map a path as a command sees it (relative, or under /work) to the real path.
     Args:
         path: The path in the command line.
         current: The real folder the command runs in.
-        allowed: The allowed folders.
+        gate: The allowed folders.
     Returns:
         Optional[Path]: The resolved real path, or None if it is outside the sandbox's folders.
     """
     if path.startswith("/"):
         parts = PurePosixPath(path).parts
-        if len(parts) < 3 or PurePosixPath(*parts[:2]) != WORK or parts[2] not in allowed:
+        if len(parts) < 3 or PurePosixPath(*parts[:2]) != WORK or parts[2] not in gate.folders:
             return None
-        target = (allowed[parts[2]].path / Path(*parts[3:])).resolve()
+        target = (gate.folders[parts[2]].path / Path(*parts[3:])).resolve()
     else:
         target = (current / path).resolve()
-    return target if fs_gate.locate(target, allowed) else None
+    return target if gate.locate(target) else None
 
 
-def check(command: str, cwd: Path, commands: dict[str, dict], allowed: dict[str, fs_gate.Folder]) -> None:
+def check(command: str, cwd: Path, commands: dict[str, dict], gate: FsGate) -> None:
     """
     Check a command line before it runs.
     Args:
         command: The command line.
         cwd: The real folder it starts in.
         commands: The allowed commands.
-        allowed: The allowed folders.
+        gate: The allowed folders.
     Raises:
         ValueError: If any part of it is not allowed; the message says why.
     """
@@ -135,8 +136,8 @@ def check(command: str, cwd: Path, commands: dict[str, dict], allowed: dict[str,
             raise ValueError("Empty command between separators.")
         name = words[0]
         if "/" in name:  # A program in an allowed folder: needs execute access there
-            program = to_host(name, current, allowed)
-            located = fs_gate.locate(program, allowed) if program else None
+            program = to_host(name, current, gate)
+            located = gate.locate(program) if program else None
             # The program may not exist yet (make builds it).
             if program is None or located is None or "x" not in located[0].access_at(program):
                 raise ValueError(f"'{name}' is not a program in a folder with execute (x) access.")
@@ -155,12 +156,12 @@ def check(command: str, cwd: Path, commands: dict[str, dict], allowed: dict[str,
                                  f"{', '.join(sorted(GIT_READ_ONLY))}). The pr tool commits, creates the branch "
                                  f"and opens the pull request; pr with action sync updates the repository from GitHub.")
         if name == "cd":
-            target = to_host(words[1] if len(words) > 1 else ".", current, allowed)
+            target = to_host(words[1] if len(words) > 1 else ".", current, gate)
             if not target or not target.is_dir():
                 raise ValueError(f"cd: '{words[1] if len(words) > 1 else ''}' is not a folder in the allowed folders.")
             current = target
         if commands[name].get("needs"):
-            located = fs_gate.locate(current, allowed)
+            located = gate.locate(current)
             if located is None:
                 raise ValueError("The working folder is outside the allowed folders.")
             folder, shown = located
@@ -195,11 +196,11 @@ def identity_files(folder: Path) -> Path:
     return folder
 
 
-def sandbox(allowed: dict[str, fs_gate.Folder], cwd: Path, identity: Optional[Path] = None) -> list[str]:
+def sandbox(gate: FsGate, cwd: Path, identity: Optional[Path] = None) -> list[str]:
     """
     Build the bubblewrap command line for the allowed folders.
     Args:
-        allowed: The allowed folders.
+        gate: The allowed folders.
         cwd: The real folder to start in.
         identity: A folder from identity_files, mounted as /etc/passwd and /etc/group; None for none.
     Returns:
@@ -219,7 +220,7 @@ def sandbox(allowed: dict[str, fs_gate.Folder], cwd: Path, identity: Optional[Pa
             args += ["--ro-bind", etc, etc]
     if identity is not None:
         args += ["--ro-bind", str(identity / "passwd"), "/etc/passwd", "--ro-bind", str(identity / "group"), "/etc/group"]
-    for name, folder in allowed.items():
+    for name, folder in gate.folders.items():
         mount = str(WORK / name)
         # A folder that does not exist yet (.memory before the first note) has nothing to show
         if "r" not in folder.access or not folder.path.is_dir():
@@ -240,7 +241,7 @@ def sandbox(allowed: dict[str, fs_gate.Folder], cwd: Path, identity: Optional[Pa
     for config, name in ((CLANG_FORMAT, ".clang-format"), (CLANG_TIDY, ".clang-tidy")):
         if config.is_file():
             args += ["--ro-bind", str(config), str(WORK / name)]
-    located = fs_gate.locate(cwd, allowed)
+    located = gate.locate(cwd)
     if located is None:
         raise ValueError("The working folder is outside the allowed folders.")
     _, shown = located
@@ -274,26 +275,26 @@ def run(cwd: str, command: str) -> tuple[bool, str]:
     Raises:
         ValueError: If the folder or the command line is not allowed.
     """
-    allowed = fs_gate.load_allowed()
+    gate = FsGate.load()
     commands = {name: entry for name, entry in load_commands().items() if not own_tool(name)}
     if command.strip() in ("", "help"):
-        return True, help_text(allowed, commands)
+        return True, help_text(gate, commands)
     if not cwd.strip():
-        cwd = next(iter(allowed))  # The first allowed folder
-    folder, shown = fs_gate.resolve(cwd, "dir", "r", allowed)
+        cwd = next(iter(gate.folders))  # The first allowed folder
+    folder, shown = gate.resolve(cwd, "dir", "r")
     command = STDERR_HABITS.sub("", command)
-    check(command, folder, commands, allowed)
+    check(command, folder, commands, gate)
     if not shutil.which("bwrap"):
         raise ValueError("bubblewrap (bwrap) is not installed, so the shell cannot run safely.")
     try:
         with tempfile.TemporaryDirectory(prefix="shell-identity-") as identity:
-            result = subprocess.run([*sandbox(allowed, folder, identity_files(Path(identity))),
+            result = subprocess.run([*sandbox(gate, folder, identity_files(Path(identity))),
                                      "/usr/bin/bash", "--noprofile", "--norc", "-c", command],
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
                                     env={}, timeout=TIMEOUT)  # Nothing of the caller's environment
     except subprocess.TimeoutExpired:
         return False, f"Stopped after {TIMEOUT}s: {command}"
-    output = fs_gate.display(result.stdout, allowed).replace(f"{WORK}/", "")
+    output = gate.display(result.stdout).replace(f"{WORK}/", "")
     if len(output) > MAX_CHARS:
         output = output[:MAX_CHARS] + "\n..."
     lines = output.rstrip("\n").splitlines()
@@ -304,17 +305,17 @@ def run(cwd: str, command: str) -> tuple[bool, str]:
     return result.returncode == 0, "\n".join(lines) if lines else f"(no output) in {shown}"
 
 
-def help_text(allowed: dict[str, fs_gate.Folder], commands: dict[str, dict]) -> str:
+def help_text(gate: FsGate, commands: dict[str, dict]) -> str:
     """
     Describe the folders and commands available.
     Args:
-        allowed: The allowed folders.
+        gate: The allowed folders.
         commands: The allowed commands (without those that are their own tools).
     Returns:
         str: The allowed folders with their access, then each command and its note.
     """
     width = max(map(len, commands))
-    lines = [fs_gate.describe(allowed), "", "Commands (join them with |, &&, || or ;):"]
+    lines = [gate.describe(), "", "Commands (join them with |, &&, || or ;):"]
     lines += [f"{name:<{width}}  {entry['about']}" + (f" [needs {entry['needs']}]" if entry.get("needs") else "")
               for name, entry in sorted(commands.items())]
     return "\n".join(lines)

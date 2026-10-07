@@ -76,8 +76,9 @@ A path given as a plain string is read-only. Folders are absolute, start with `~
 to the agents repository. So `ed` takes `core_dump/src/main.c` but refuses `tools/...` (read-only),
 and nothing outside those folders is reachable (`..` and symbolic links are resolved before the
 check). The checks live in the file-system gate, [`gatekeepers/fs/fs_gate.py`](../gatekeepers/fs/fs_gate.py):
-Python tools import it, and Bash tools run `python3 ../gatekeepers/fs/fs_gate.py <path> [--dir|--file]
-[--need r|w|x]`, which prints the absolute path and the path as shown, or an error. `gatekeepers/fs/` has
+Python tools load its `FsGate` and ask it, and Bash tools run it with the repository root on
+`PYTHONPATH`: `python3 -m gatekeepers.fs.fs_gate <path> [--dir|--file] [--need r|w|x]`, which
+prints the absolute path and the path as shown, or an error. `gatekeepers/fs/` has
 no `tool.json`, so it is not offered as a tool. `paths.json` is read on every call.
 
 Each agent validates the model's arguments against the schema built from `params` before running

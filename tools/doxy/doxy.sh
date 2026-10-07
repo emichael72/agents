@@ -24,7 +24,7 @@ EXTENSIONS="c|h|cc|cpp|hpp|cxx|hh" # File extensions checked, as an extended reg
 REPO_ROOT=""                       # Set by init_paths: the repository root
 TOOL_DIR=""                        # Set by init_paths: this script's folder
 CONFIG=""                          # Set by init_paths: the Doxygen settings, Doxyfile.check
-FS_GATE=""                         # Set by init_paths: gatekeepers/fs/fs_gate.py
+FS_GATE=""                         # Set by init_paths: gatekeepers/fs/fs_gate.py (run as a module)
 WORK_DIR=""                        # Set by main: Doxygen's temporary output, removed on exit
 INPUT_PATHS=()                     # The paths to check, as given
 FILE_LIST=()                       # Every C/C++ file found under them
@@ -217,7 +217,8 @@ resolve_inputs() {
 
     for item in "${INPUT_PATHS[@]}"; do
         # The gate prints "<absolute path><TAB><path as shown>", or "Error: <reason>"
-        if ! resolved="$(python3 "${FS_GATE}" "${item}")"; then
+        if ! resolved="$(PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}" \
+            python3 -m gatekeepers.fs.fs_gate "${item}")"; then
             log ERROR "${resolved#Error: }"
             return 1
         fi
