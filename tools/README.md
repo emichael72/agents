@@ -4,7 +4,7 @@ The tools every agent can use. Each sub-folder is one tool: a `tool.json` manife
 runs, and a `README.md` documenting it. The agents scan this folder when they start, so a tool
 added here is available to all of them without code changes:
 
-- **mcp** — the MCP server reads `tools_dir` from `mcp/mcpagent/jsons/server.jsonc` and serves every manifest
+- **mcp** — the MCP server reads `tools_dir` from `mcp/mcpagent/jsons/mcpagent.jsonc` and serves every manifest
   over MCP, with each tool's `README.md` as an MCP resource.
 - **pydantic** — `pydantic/pydantic_agent/toolset.py` turns each manifest into a pydantic-ai tool.
 - **vercel** — `vercel/tools.ts` turns each manifest into an AI SDK tool.

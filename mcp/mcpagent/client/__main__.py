@@ -5,9 +5,10 @@ Description:
     Command-line entry point of the MCP Agent: `python -m mcpagent.client`, run from the
     mcp project directory.
 
-    Starts the agent (`run_agent`): a model that uses the tools of the MCP servers in the client
-    config (default: jsons/client.jsonc in this package), with a model profile from the
-    shared agents/context/models.json. Runs one prompt (--prompt) or an interactive session.
+    Starts the agent (`run_agent`): a model that uses the tools of the MCP servers in the
+    "client" section of the MCPAgent config (default: jsons/mcpagent.jsonc in this package),
+    with a model profile from the shared agents/context/models.json. Runs one prompt
+    (--prompt) or an interactive session.
     Also takes --version.
 """
 
@@ -24,7 +25,7 @@ from colorama import Fore, Style, init
 # Local imports
 from .. import __version__
 from .agent import run_agent
-from .client import DEFAULT_CONFIG
+from mcpagent.config import DEFAULT_CONFIG
 
 
 # Both CLI entry points keep their exception reporting self-contained.
@@ -100,8 +101,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         prog="python mcp/client.py",
         description="Chat with a model that can call the MCP servers' tools.")
     parser.add_argument("--config", type=Path,
-                        help="Client config file: MCP servers, model profiles and instructions "
-                             "(default: mcp/mcpagent/jsons/client.jsonc).")
+                        help="MCPAgent config file; its client section names the MCP servers, model "
+                             "profiles and instructions (default: mcp/mcpagent/jsons/mcpagent.jsonc).")
     parser.add_argument("--context", type=Path,
                         help="Text file with extra instructions for the assistant.")
     parser.add_argument("--profile",

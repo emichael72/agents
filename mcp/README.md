@@ -14,10 +14,10 @@ is named `mcpagent`, inside the `mcp/` project folder.
 client.py                            client launcher (python mcp/client.py from the repository root)
 server.py                            server launcher (python mcp/server.py from the repository root)
 mcpagent/__init__.py                  the package's public names and __version__
-mcpagent/config.py                    JSON/JSONC loading and optional schema validation
-mcpagent/jsons/client.jsonc           MCP servers and shared settings (context/*.json)
-mcpagent/jsons/server.jsonc           server settings; "tools_dir": "tools"
-mcpagent/jsons/schemas/client.schema  JSON schema for client.jsonc
+mcpagent/config.py                    loads and validates the config; its server and client sections
+mcpagent/jsons/mcpagent.jsonc         the config: "server" (port, tools_dir) and "client" (MCP servers,
+                                      shared context/*.json)
+mcpagent/jsons/schemas/mcpagent.schema JSON schema for mcpagent.jsonc
 mcpagent/client/__main__.py           client module entry point (python -m mcpagent.client)
 mcpagent/client/agent.py              OpenAI Responses tool calling over MCP tools
 mcpagent/client/client.py             MCP client for multiple servers
@@ -73,7 +73,7 @@ exchanged with the model, `/reset` clears them and
 | `--model`, `--base-url`              | Override the profile's model or server for this run                                    |
 | `--prompt "..."`                     | Run one prompt and exit                                                                |
 | `-d`, `--debug`                      | Show the banner, tool calls and results instead of a spinner                           |
-| `--config path/to/client.jsonc`      | Use another client config                                                              |
+| `--config path/to/mcpagent.jsonc`    | Use another config (its client section)                                                |
 | `--context path/to/instructions.txt` | Add instructions for the assistant                                                     |
 
 Try: "What time is it in Tokyo?", "Count the lines in tools/time/README.md", "What OS is this
@@ -85,7 +85,7 @@ explain what happened". The tools are listed in [../tools/README.md](../tools/RE
 | Concern              | mcpagent                                                                       | pydantic                                               | vercel                                                |
 |----------------------|--------------------------------------------------------------------------------|--------------------------------------------------------|-------------------------------------------------------|
 | Agent loop           | `MCPAgent.ask()`, hand-written                                                 | `Agent.run_stream_events()`                            | `ToolLoopAgent.stream()`                              |
-| Instructions         | `../context/instructions.json`, named by `instructions_file` in `client.jsonc` | `../context/instructions.json` → `load_instructions()` | `../context/instructions.json` → `loadInstructions()` |
+| Instructions         | `../context/instructions.json`, named by `instructions_file` in `mcpagent.jsonc` | `../context/instructions.json` → `load_instructions()` | `../context/instructions.json` → `loadInstructions()` |
 | Model provider       | raw `aiohttp`, `/v1/responses`                                                 | `OpenAIChatModel`                                      | `@ai-sdk/openai-compatible`                           |
 | Tools                | `../tools/*/tool.json`, loaded by the server (`tools_dir`)                     | `../tools/*/tool.json` → `Tool.from_schema`            | `../tools/*/tool.json` → `z.fromJSONSchema`           |
 | Argument validation  | `jsonschema.validate`                                                          | `jsonschema.validate`                                  | zod, from the same JSON schema                        |
@@ -101,20 +101,19 @@ rejected with `Busy: another tool is currently running in this workspace`.
 
 ## Configuring the model
 
-The model is not set in code. `"models_file"` in `mcpagent/jsons/client.jsonc` names the model profiles shared by
+The model is not set in code. `"models_file"` in `mcpagent/jsons/mcpagent.jsonc` names the model profiles shared by
 all three agents, [`../context/models.json`](../context/models.json); the fields, the options (`--profile`, `--local`,
 `--openai`, `--model`, `--base-url`) and their precedence are described
 under "Context" in [../README.md](../README.md). For this agent the profile's server must support
-the `/v1/responses` endpoint. `client.jsonc` is validated against
-`mcpagent/jsons/schemas/client.schema`.
+the `/v1/responses` endpoint.
 
-Both client and server configs are loaded as JSON/JSONC/JSON5. A config uses the schema with
-the same filename stem under `mcp/mcpagent/jsons/schemas`: `client.jsonc` or `client.json` uses
-`client.schema`, and `server.jsonc` uses `server.schema` if one is added. This also applies to
-custom config paths. Without a matching schema, the config loads without schema validation;
-an invalid schema or a validation error stops loading. `schema_version` no longer selects a schema.
+The server and the client share one config, `mcpagent/jsons/mcpagent.jsonc` (JSON, JSONC or
+JSON5): `mcp/server.py` reads its `"server"` section and `mcp/client.py` its `"client"` section,
+and each stops with an error if its section is missing. Every config, including one given with
+`--config`, is validated against `mcpagent/jsons/schemas/mcpagent.schema`; an invalid config or
+schema stops loading. Paths in the config are relative to the repository root.
 
-The model's instructions are not in the code either: `"instructions_file"` in `client.jsonc` names
+The model's instructions are not in the code either: `"instructions_file"` in the client section names
 the JSON file whose `"instructions"` lines are sent with every request, by default the shared
 [`../context/instructions.json`](../context/instructions.json). `--context FILE` appends extra
 instructions for one run.
@@ -133,7 +132,7 @@ loaded automatically.
 
 ## Configuring the MCP servers
 
-`"servers"` in `client.jsonc` lists the MCP servers whose tools the model gets; tools from all
+`"servers"` in the client section lists the MCP servers whose tools the model gets; tools from all
 enabled servers are combined. Each entry has:
 
 | Field         | Meaning                                                       |
@@ -141,7 +140,7 @@ enabled servers are combined. Each entry has:
 | `server_id`   | Unique id, shown in tool descriptions as `<server_id>/<tool>` |
 | `description` | What the server provides                                      |
 | `transport`   | `HTTP` (used here) or `STDIO`                                 |
-| `config`      | For HTTP: `url` (and optionally `sse_url`)                    |
+| `config`      | For HTTP: `url` (and optionally `sse_url`); omit it to reach the server section's address and port |
 | `enabled`     | Optional; `false` skips the entry                             |
 
 ## Inspect tools visually
@@ -173,17 +172,18 @@ For VS Code, merge this entry into the workspace's `.vscode/mcp.json`:
 To add a tool for all three agents, add a folder to `../tools` (see
 [../tools/README.md](../tools/README.md)) and restart the server.
 
-To serve a different set of scripts, copy `mcpagent/jsons/server.jsonc`, point `tools_dir` at another folder of
-`<tool>/tool.json` manifests (relative to the new config file) and run:
+To serve a different set of scripts, copy `mcpagent/jsons/mcpagent.jsonc`, point the server
+section's `tools_dir` at another folder of `<tool>/tool.json` manifests (relative to the
+repository root, or absolute) and run:
 
 ```bash
-.venv/bin/python mcp/server.py /absolute/path/to/server.jsonc
+.venv/bin/python mcp/server.py /absolute/path/to/mcpagent.jsonc
 ```
 
 `tools_env` adds environment variables to every discovered tool. A config can also define tools
 inline under `"tools": {"<name>": {...}}`, with the same fields as a `tool.json`; inline tools run
-from the configuration's directory unless they set `working_dir`. After changing the server port,
-update `"servers"` in `mcpagent/jsons/client.jsonc` too.
+from the repository root unless they set `working_dir`. The client's local server entry has no
+address of its own, so a new server port needs no second edit.
 
 ## Transport and deployment limits
 

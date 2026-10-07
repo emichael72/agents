@@ -23,15 +23,12 @@ from unittest.mock import Mock, patch
 
 import io
 
-import json5
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 from rich.console import Console
 
 from mcpagent import MCPClient, MCPService
-from mcpagent.config import REPO_ROOT
-from mcpagent.client.client import DEFAULT_CONFIG as CLIENT_CONFIG
-from mcpagent.server.service import DEFAULT_CONFIG as SERVER_CONFIG
+from mcpagent.config import DEFAULT_CONFIG, REPO_ROOT, load_config, server_settings
 from mcpagent.client.agent import (MCPAgent, Output, load_instructions, load_models, load_output_settings,
                                    resolve_model, identity_text, load_agent_settings, worth_saving, wrap)
 
@@ -76,11 +73,10 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.key_patch = patch.dict(os.environ, {"OPENAI_API_KEY": "test-key-not-real"})
         self.key_patch.start()
         self.addCleanup(self.key_patch.stop)
-        config = SERVER_CONFIG
         old = Path.cwd()
         try:
             os.chdir(REPO_ROOT)  # As start_mcp_server does: config paths are repository-relative
-            self.service = MCPService(json5.loads(config.read_text()))
+            self.service = MCPService(server_settings(load_config(DEFAULT_CONFIG), DEFAULT_CONFIG))
         finally:
             os.chdir(old)
         self.server = TestServer(self.service._app)
@@ -88,10 +84,10 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.server.close)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.config = Path(self.temp.name) / 'client.json'
-        self.config.write_text(json.dumps({"log_level": "ERROR", "servers": [{
+        self.config = Path(self.temp.name) / 'mcpagent.json'
+        self.config.write_text(json.dumps({"client": {"log_level": "ERROR", "servers": [{
             "server_id": "tools", "description": "Test shell tools", "transport": "HTTP", "config": {"url": str(self.server.make_url('/'))}
-        }]}))
+        }]}}))
         self.requests = []
         self.outputs = []
         self.traces = []
@@ -286,7 +282,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         await server.start_server()
         self.addAsyncCleanup(server.close)
         config = json.loads(self.config.read_text())
-        config['servers'][0]['config']['url'] = str(server.make_url('/'))
+        config['client']['servers'][0]['config']['url'] = str(server.make_url('/'))
         self.config.write_text(json.dumps(config))
         client = MCPClient(self.config)
         self.addAsyncCleanup(client.close, close_all=True)
@@ -298,7 +294,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
 
     def shipped_models(self):
         """
-        Load the shared model profiles through the shipped jsons/client.jsonc.
+        Load the shared model profiles through the shipped jsons/mcpagent.jsonc.
         Returns:
             dict: The parsed models file.
         """
@@ -307,11 +303,11 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     def shipped_config():
         """
-        Load the client config the package ships (jsons/client.jsonc).
+        Load the client section of the config the package ships (jsons/mcpagent.jsonc).
         Returns:
             dict: The parsed config.
         """
-        return json5.loads(CLIENT_CONFIG.read_text())
+        return load_config(DEFAULT_CONFIG)['client']
 
     async def test_model_profiles_come_from_the_shared_models_file(self):
         config = self.shipped_models()
@@ -384,7 +380,7 @@ class OutputTests(unittest.TestCase):
     """The terminal layout shared by the three agents (README.md, "Terminal output")."""
 
     def test_layout_settings_come_from_the_shared_context_file(self):
-        settings = load_output_settings(json5.loads(CLIENT_CONFIG.read_text()))
+        settings = load_output_settings(load_config(DEFAULT_CONFIG)['client'])
         self.assertEqual((settings['width'], settings['show_time']), (120, True))
 
     # The agents keep independent tests for their shared terminal behavior.

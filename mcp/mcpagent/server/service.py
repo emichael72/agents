@@ -27,9 +27,8 @@ import re
 import shlex
 import signal
 from datetime import datetime
-from json import JSONDecodeError
 from pathlib import Path
-from typing import Optional, Any, Union
+from typing import Optional, Any
 from urllib.parse import urlparse, unquote
 
 # Third-party
@@ -38,11 +37,9 @@ from jsonschema import validate, ValidationError
 from colorama import Fore, Style
 
 # Local imports
-from mcpagent.config import JSONS_DIR
 from .logger import MCPAgentLogger
 from .types import MCPServiceConfigType, MCPServiceToolType
 
-DEFAULT_CONFIG = JSONS_DIR / "server.jsonc"
 
 MAX_BATCH_MCP_COMMANDS = 64
 BUSY_CODE = -32004
@@ -59,20 +56,18 @@ class MCPService:
         """
         Load the tools and server settings from the parsed server config, and set up the routes.
         Args:
-            project_data: The parsed server config (server.jsonc): server name and port, bind
+            project_data: The server settings (mcpagent.jsonc's "server" section): server name and port, bind
                 address, allowed browser origins, tools_dir / tools_env and inline tools.
         Raises:
             TypeError: If project_data is not a dict.
         """
 
         self._single_flight = asyncio.Semaphore(1)  # Single-flight across the whole workspace
-        self._current = None  # (tool_name, started_at) for status/telemetry
 
         self._mcp_config = MCPServiceConfigType()
         self._logger = MCPAgentLogger("Service")
         self._shutdown_event = asyncio.Event()
         self._tools_registry: dict[str, MCPServiceToolType] = {}
-        self._patch_vscode_config: bool = False
         self._show_usage_examples: bool = False
         self._shutting_down: bool = False
         self._log_request: bool = False
@@ -85,8 +80,6 @@ class MCPService:
 
         # Override defaults using configuration optional parameters
         self._show_usage_examples = self._project_data.get("show_usage_examples", self._show_usage_examples)
-        self._patch_vscode_config = self._project_data.get("patch_vscode_config", self._patch_vscode_config)
-        self._tool_prefix: str = (self._project_data.get("tool_prefix") or self._project_data.get("tools_prefix") or "")
 
         self._mcp_server_name: str = self._project_data.get("project_name", "MCP service")
         self._mcp_server_version: str = self._project_data.get("version", "1.0.0")
@@ -447,7 +440,6 @@ class MCPService:
                             BUSY_CODE,
                             "Busy: another tool is currently running in this workspace")
 
-                    self._current = (tool_name, asyncio.get_running_loop().time())
                     try:
                         result = await self._rpc_tools_call(params)
                         wrapped = {
@@ -458,7 +450,6 @@ class MCPService:
                         return ok(wrapped)
 
                     finally:
-                        self._current = None
                         self._single_flight.release()
 
                 # -----------------------------------------------------------------
@@ -647,7 +638,7 @@ class MCPService:
             raise TypeError("tools must be a non-empty dict")
 
         for key, entry in self._tools_data.items():
-            tool_name = f"{self._tool_prefix}{key}"
+            tool_name = key
             if not re.fullmatch(r"[a-z0-9_-]+", tool_name):
                 raise RuntimeError(f"Invalid MCP tool name: {tool_name}")
 
@@ -823,123 +814,6 @@ class MCPService:
             # Give aiohttp tasks a chance to settle
             await asyncio.sleep(1)
 
-    @staticmethod
-    def _remove_vscode_config(base_path: Optional[Union[Path, str]],
-                              host: str,
-                              port: int,
-                              server_name: str) -> bool:
-        """
-        Quietly remove a server entry from an existing VS Code MCP config.
-        Args:
-            base_path (Union[Path, str], optional):
-                Workspace base directory containing the .vscode folder.
-                If None, use the current directory.
-            host (str): Host IP address to match in the config.
-            port (int): Host port to match in the config.
-            server_name (str): Server key to remove.
-
-        Returns:
-            bool: True if the config was updated or nothing needed removal,
-                  False if an error occurred.
-        """
-        if base_path is None:
-            base_path = os.getcwd()
-
-        vscode_dir = Path(base_path).expanduser().resolve() / ".vscode"
-        config_path = vscode_dir / "mcp.json"
-
-        if not config_path.exists():
-            return True  # nothing to remove
-
-        with contextlib.suppress(json.JSONDecodeError, UnicodeDecodeError, OSError):
-            with config_path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            # Generated URLs match this service's HTTP listener.
-            # noinspection HttpUrlsUsage
-            url_to_remove = f"http://{host}:{port}"
-            servers = data.get("servers", {})
-
-            if server_name in servers:
-                if servers[server_name].get("url") == url_to_remove:
-                    del servers[server_name]
-
-            # Clean up if servers now empty
-            if not servers:
-                data.pop("servers", None)
-
-            with contextlib.suppress(Exception):
-                config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-                return True
-
-        return False
-
-    @staticmethod
-    def _generate_vscode_config(base_path: Optional[Union[Path, str]],
-                                host: str,
-                                port: int,
-                                server_name: str,
-                                overwrite_existing: bool = True,
-                                create_parents: bool = False,
-                                ensure_inputs: bool = True) -> bool:
-        """
-        Generate/merge a VS Code MCP config without clobbering existing servers.
-        Args:
-            base_path: Base directory where '.vscode/mcp.json' will be written.
-                         If None, uses the current directory.
-            host: IP for the SSE server.
-            port: Port for the SSE server.
-            server_name: Key under "servers" to write/update.
-            overwrite_existing: If True, overwrite the existing <server_name> entry
-                                if present. If False, only add it if missing.
-            create_parents: If True, create <dir>/.vscode if missing.
-            ensure_inputs: If True, add a minimal "inputs" section when absent.
-
-        Returns:
-            bool: True if the config file was written/updated, False otherwise.
-        """
-        if base_path is None:
-            base_path = os.getcwd()
-
-        base_dir = Path(base_path).expanduser().resolve()
-
-        vscode_dir = base_dir / ".vscode"
-        config_path = vscode_dir / "mcp.json"
-
-        if create_parents:
-            vscode_dir.mkdir(parents=True, exist_ok=True)
-
-        data: dict[str, Any] = {}
-
-        if config_path.exists():
-            try:
-                loaded_data = json.loads(config_path.read_text(encoding="utf-8"))
-                if isinstance(loaded_data, dict):
-                    data = loaded_data
-            except (JSONDecodeError, UnicodeDecodeError):
-                with contextlib.suppress(Exception):
-                    config_path.rename(config_path.with_suffix(".json.bak"))
-                data = {}
-
-        servers = data.setdefault("servers", {})
-        # noinspection HttpUrlsUsage
-        new_entry = {"type": "http", "url": f"http://{host}:{port}"}
-
-        if server_name not in servers or overwrite_existing or servers[server_name] != new_entry:
-            servers[server_name] = new_entry
-        else:
-            return False  # no change needed
-
-        if ensure_inputs and "inputs" not in data:
-            data["inputs"] = [
-                {"id": "args", "type": "promptString", "description": "Extra arguments"}]
-
-        with contextlib.suppress(Exception):
-            config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            return True
-
-        return False
-
     # noinspection SpellCheckingInspection
     @staticmethod
     def _greetings(host: str, port: int, server_name: str, show_examples: bool = False,
@@ -1015,14 +889,6 @@ class MCPService:
             self._shutting_down = True
             self._shutdown_event.set()
 
-
-            # Remove VSCode config if needed
-            if self._patch_vscode_config:
-                self._remove_vscode_config(
-                    base_path=None,
-                    host=self._mcp_config.advertise_ip or "127.0.0.1",
-                    port=self._mcp_config.port,
-                    server_name=self._mcp_server_name, )
             # Terminate
             if self._brutal_termination:
                 os.kill(os.getpid(), signal.SIGKILL)
@@ -1033,12 +899,6 @@ class MCPService:
             advertise_ip = "127.0.0.1" if host == "0.0.0.0" else host
             self._mcp_config.host = host
             self._mcp_config.advertise_ip = advertise_ip
-
-            # Create VSCode 'mcp.json' file in the solution workspace
-            if self._patch_vscode_config:
-                self._generate_vscode_config(base_path=None, host=advertise_ip,
-                                             port=self._mcp_config.port, server_name=self._mcp_server_name,
-                                             overwrite_existing=True, create_parents=True)
 
             # Show welcome message and usage examples
             self._greetings(host=advertise_ip, port=self._mcp_config.port,

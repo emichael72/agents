@@ -45,9 +45,7 @@ from mcpagent import (
     STDIOConfigType,
     __version__,  # Sent to servers in the initialize handshake
 )
-from mcpagent.config import JSONS_DIR, load_config
-
-DEFAULT_CONFIG = JSONS_DIR / "client.jsonc"
+from mcpagent.config import client_settings, load_config
 
 
 class MCPClient:
@@ -66,7 +64,6 @@ class MCPClient:
         self._health_check_task: Optional[asyncio.Task] = None
         self._logger = MCPAgentLogger("Client")
         self._log_level: Optional[int] = None
-        self._config_file: Union[Path, str] = config_file
         self._debug_guru: Optional[DebugGuru] = None
 
         # Load configuration and optionally validate using a schema
@@ -96,15 +93,15 @@ class MCPClient:
     @staticmethod
     def _load_config(config_file: Union[Path, str]) -> dict[str, Any]:
         """
-        Load an MCP client configuration file written in JSONC/JSON5 format.
+        Load the client section of an MCPAgent configuration file (JSONC/JSON5).
         Args:
             config_file: Path to the configuration file (Path or str).
         Returns:
-            dict[str, Any]: Parsed configuration dictionary.
+            dict[str, Any]: The "client" section, with local HTTP servers' URLs filled in.
         Raises:
-            RuntimeError: If the file is missing or fails schema validation.
+            RuntimeError: If the file is missing, fails schema validation, or has no client section.
         """
-        return load_config(config_file)
+        return client_settings(load_config(config_file), config_file)
 
     def _load_servers_from_config(self) -> None:
         """
@@ -215,15 +212,6 @@ class MCPClient:
                 server_data["last_ping"] = now
 
             await asyncio.sleep(0.5)
-
-    def _ping_loop(self) -> None:
-        """
-        Entry point for the background ping thread.
-        """
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(self._health_check())
-        loop.close()
 
     def _get_connection(self, server_id: str) -> Optional[MCPClientConnection]:
         """
@@ -526,8 +514,3 @@ class MCPClient:
     def log_level(self) -> Optional[int]:
         """Return the modules selected logging level"""
         return self._log_level
-
-    @property
-    def debug_json_box(self) -> bool:
-        """Return debug box usage flag"""
-        return self._debug_json_box

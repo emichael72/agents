@@ -15,7 +15,6 @@ import inspect
 import json
 import logging
 import itertools
-import time
 from typing import Any, AsyncGenerator, Optional, Union
 
 # Third-party
@@ -70,7 +69,6 @@ class MCPClientConnection:
         self._server_id: str = server_id
         self._transport: MCPTransportType = transport
         self._config: ConfigType = config
-        self._stop_event: asyncio.Event = asyncio.Event()
         self._last_error = None
         self._capabilities: dict = capabilities or {}
         self._request_ids = itertools.count(1)
@@ -87,7 +85,6 @@ class MCPClientConnection:
 
         # Transport-specific state
         self._http_session: Optional[aiohttp.ClientSession] = None
-        self._last_seen: Optional[float] = None
         self._lock = asyncio.Lock()
 
         # STDIO state
@@ -156,35 +153,6 @@ class MCPClientConnection:
             await self._writer.drain()
         else:
             raise NotImplementedError("send_message only supports STDIO in this version")
-
-    async def stdio_read(self, timeout: float = 5.0) -> dict:
-        """
-        Read the next JSON message from the connected server.
-        For STDIO transport, this expects newline-delimited JSON messages.
-        Args:
-            timeout (float): Maximum number of seconds to wait for a message
-                             before raising TimeoutError. Defaults to 5.0.
-        Returns:
-            dict: The decoded JSON message.
-        Raises:
-            RuntimeError: If the reader is not initialized.
-            EOFError: If the process closes its stdout unexpectedly.
-            TimeoutError: If no message arrives before the timeout expires.
-        """
-        if self._transport == MCPTransportType.STDIO:
-            if not self._reader:
-                raise RuntimeError("STDIO reader not initialized")
-            try:
-                line = await asyncio.wait_for(self._reader.readline(), timeout=timeout)
-            except asyncio.TimeoutError:
-                raise TimeoutError(f"No message received within {timeout:.1f}s") from None
-
-            if not line:
-                raise EOFError("STDIO process closed")
-
-            return json.loads(line.decode())
-        else:
-            raise NotImplementedError("read_message only supports STDIO in this version")
 
     def listen(self,
                callback: Optional[EventCallbackType] = None) -> ListenEventsReturnType:
@@ -371,7 +339,6 @@ class MCPClientConnection:
 
                         # Special case: initialize via SSE
                         if method == "initialize" and self._capabilities.get("initialize_via") == "sse":
-                            self._last_seen = time.time()
                             return {
                                 "jsonrpc": "2.0",
                                 "id": request_id,
@@ -384,7 +351,6 @@ class MCPClientConnection:
 
                         # Normal synchronous response
                         data = await resp.json()
-                        self._last_seen = time.time()
 
                         if self._debug_guru:
                             self._debug_guru.show_box(title=f"Response from '{self._server_id}'", debug_data=data)
@@ -408,7 +374,6 @@ class MCPClientConnection:
                         raise EOFError("STDIO server closed the connection")
 
                     data = json.loads(line.decode())
-                    self._last_seen = time.time()
                     return data
 
                 else:
@@ -534,11 +499,6 @@ class MCPClientConnection:
     def transport(self) -> Optional[MCPTransportType]:
         """Return the connection selected transport type"""
         return self._transport
-
-    @property
-    def last_seen(self) -> Optional[float]:
-        """Return the last-seen timestamp for this connection, if available."""
-        return self._last_seen
 
     @property
     def session_id(self) -> Optional[Union[str, int]]:
