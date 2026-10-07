@@ -18,23 +18,5 @@
   "tools_prefix": null,
 
   // Identify this agent to the shared tools.
-  "tools_env": {"AGENT_NAME": "MCP Agent"},
-
-  // Example tool calls: description, command name and preset arguments.
-  "templates": {
-    "utc_time": {
-      "description": "Template to show the time in UTC using time",
-      "command": "time",
-      "args": {
-        "timezone": "UTC"
-      }
-    },
-    "list_project": {
-      "description": "Template to list the core_dump project's files using ls",
-      "command": "ls",
-      "args": {
-        "path": "core_dump"
-      }
-    }
-  }
+  "tools_env": {"AGENT_NAME": "MCP Agent"}
 }

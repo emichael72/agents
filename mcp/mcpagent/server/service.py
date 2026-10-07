@@ -30,7 +30,7 @@ from datetime import datetime
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Optional, Any, Union
-from urllib.parse import urlparse, parse_qsl, unquote
+from urllib.parse import urlparse, unquote
 
 # Third-party
 from aiohttp import web
@@ -412,7 +412,6 @@ class MCPService:
 
                     parsed = urlparse(uri)
                     path = unquote(parsed.path)
-                    query_params = dict(parse_qsl(parsed.query))
                     allowed_paths: set[Path] = set()
                     for tool in self._tools_registry.values():
                         resource = tool.resource
@@ -427,46 +426,11 @@ class MCPService:
                     except Exception as read_error:
                         return make_error(-32000, f"Failed to read resource {uri}: {read_error}")
 
-                    # --- Dynamic substitution: used in templates ---
-                    if query_params:
-                        # Append a small note at the bottom of the Markdown
-                        args_str = ", ".join(f"{k}={v}" for k, v in query_params.items())
-                        text += f"\n\n---\n*Template arguments applied:* {args_str}\n"
-
                     return ok({
                         "contents": [
                             {"uri": uri, "text": text}
                         ]
                     })
-                # -----------------------------------------------------------------
-
-                elif method in ("templates/list", "resources/templates/list"):
-                    resource_templates = []
-                    base = os.path.abspath(os.path.join(self._project_base_path, "resources"))
-
-                    for name, tmpl in self._project_data.get("templates", {}).items():
-                        args = []
-                        arg_name = ""
-                        for arg_name, default in tmpl.get("args", {}).items():
-                            args.append({
-                                "name": arg_name,
-                                "description": f"Argument for {tmpl.get('command')}",
-                                "default": default
-                            })
-
-                        # Build a simple uriTemplate using the resource path
-                        resource_path = tmpl.get("command").replace("tool_", "tool_") + ".md"
-                        uri_template = f"file://{base}/{resource_path}?{arg_name}={{{arg_name}}}"
-
-                        resource_templates.append({
-                            "name": name,
-                            "description": tmpl.get("description", ""),
-                            "uriTemplate": uri_template,
-                            "arguments": args
-                        })
-
-                    return ok({"resourceTemplates": resource_templates})
-
 
                 # -----------------------------------------------------------------
 
