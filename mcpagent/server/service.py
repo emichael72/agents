@@ -990,11 +990,13 @@ class MCPService:
         """
 
         base = f"http://{host}:{port}"
-        title = f"{Fore.CYAN}MCPAgent HTTP Service Info:{Style.RESET_ALL}"
+        # Muted, like the agents: dark gray for labels and hints, plain text for what to read or copy
+        gray, reset = Fore.LIGHTBLACK_EX, Style.RESET_ALL
+        title = "MCPAgent HTTP Service Info:"
 
         # Clear screen and print header
         print("\033[2J\033[3J\033[H", end="")
-        print(f"\n{title}\n{Fore.CYAN}{'-' * len('MCPAgent HTTP Service Info:')}{Style.RESET_ALL}")
+        print(f"\n{Style.BRIGHT}{title}{reset}\n{gray}{'-' * len(title)}{reset}")
         info = [
             ("Base", base),
             ("Diagnostic event feed", f"{base}/sse"),
@@ -1004,34 +1006,29 @@ class MCPService:
         if isinstance(host_bind_address, str):
             info.append(("Bind address", host_bind_address))
         for label, value in info:
-            print(f"{Fore.YELLOW}{f'- {label}:':<25}{Style.RESET_ALL}{Fore.GREEN}{value}{Style.RESET_ALL}")
+            print(f"{gray}{f'- {label}:':<25}{reset}{value}")
 
         if show_examples:
-            curl = f"{Fore.CYAN}curl{Style.RESET_ALL}"
-            host_colored = f"{Fore.GREEN}{host}{Style.RESET_ALL}"
-            port_colored = f"{Fore.MAGENTA}{port}{Style.RESET_ALL}"
+            print(f"\n{gray}Example commands you can run in another shell:{reset}")
 
-            print(f"\n{Fore.CYAN}Example commands you can run in another shell:{Style.RESET_ALL}")
+            print(f"\n{gray}1. Listen for SSE broadcasts:{reset}")
+            print(f"   curl -s -N --noproxy {host} {base}/sse")
 
-            print(f"\n{Fore.YELLOW}1. Listen for SSE broadcasts:{Style.RESET_ALL}")
-            print(f"   {curl} -s -N --noproxy {host_colored} http://{host_colored}:{port_colored}/sse{Style.RESET_ALL}")
-
-            print(f"\n{Fore.YELLOW}2. List available tools:{Style.RESET_ALL}")
-            print(f"   {curl} -s --noproxy {host_colored} "
+            print(f"\n{gray}2. List available tools:{reset}")
+            print(f"   curl -s --noproxy {host} "
                   "-H \"Content-Type: application/json\" "
                   "-d \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":1,\\\"method\\\":\\\"tools/list\\\",\\\"params\\\":{}}\" "
-                  f"http://{host_colored}:{port_colored}/message | jq{Style.RESET_ALL}")
+                  f"{base}/message | jq")
 
-            print(f"\n{Fore.YELLOW}3. Execute tool 'time' with argument 'UTC':{Style.RESET_ALL}")
-            print(f"   {curl} -s --noproxy {host_colored} "
+            print(f"\n{gray}3. Execute tool 'time' with argument 'UTC':{reset}")
+            print(f"   curl -s --noproxy {host} "
                   "-H \"Content-Type: application/json\" "
                   "-d \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":2,\\\"method\\\":\\\"tools/call\\\","
                   "\\\"params\\\":{\\\"name\\\":\\\"time\\\","
                   "\\\"arguments\\\":{\\\"timezone\\\":\\\"UTC\\\"}}}\" "
-                  f"http://{host_colored}:{port_colored}/message | jq{Style.RESET_ALL}")
+                  f"{base}/message | jq")
 
-        print(
-            f"\n{Fore.MAGENTA}Running... Press {Style.BRIGHT}{Fore.RED}Ctrl+C{Style.RESET_ALL}{Fore.MAGENTA} to stop.{Style.RESET_ALL}\n")
+        print(f"\n{gray}Running... Press Ctrl+C to stop.{reset}\n")
 
     def start(self) -> int:
         """

@@ -177,7 +177,7 @@ def main() -> int:
         exit_code = start_mcp_server(config_file)
 
     except KeyboardInterrupt:
-        print(f"\n\n{Fore.YELLOW}Interrupted by user, shutting down.{Style.RESET_ALL}\n")
+        print(f"\n\n{Fore.LIGHTBLACK_EX}Interrupted by user, shutting down.{Style.RESET_ALL}\n")
 
     except Exception as runtime_error:
         # Retrieve information about the original exception that triggered this handler.
