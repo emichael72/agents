@@ -9,7 +9,7 @@ Description:
     The service provides:
       - `/` lists the quizzes and what the poller is doing; `/q/<id>` shows and grades a quiz.
       - `/health` for liveness checks (no authentication).
-      - `Poller`, which lists the open PRs every few seconds and calls `quiz.create_quiz` for
+      - `Poller`, which lists the open PRs every few seconds and calls `QuizGate.create` for
         each revision that has no quiz yet.
 
     Key design points:
@@ -39,8 +39,10 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
 # Local imports
-from gatekeepers.pr import quiz
+from gatekeepers.pr import TEMPLATES_DIR
 from gatekeepers.pr.clone import LocalClone
+from gatekeepers.pr.gate import QuizGate
+from gatekeepers.pr.quiz import Quiz
 
 MAX_FAILURES = 3  # Generation attempts per revision before the poller gives up on it
 SESSION_COOKIE = "pr_gate_session"
@@ -55,12 +57,14 @@ class Poller:
     MAX_FAILURES times; pushing a new commit starts over.
     """
 
-    def __init__(self, interval: float = 30, profile: Optional[str] = None) -> None:
+    def __init__(self, gate: QuizGate, interval: float = 30, profile: Optional[str] = None) -> None:
         """
         Args:
+            gate: The gate that assesses each revision.
             interval: Seconds between polls.
             profile: The model profile for generation; None uses the default.
         """
+        self.gate = gate
         self._interval = interval
         self._profile = profile
         self._stop = threading.Event()
@@ -99,11 +103,12 @@ class Poller:
         Every SYNC_SECONDS, fast-forward the local clone (QUIZ_LOCAL_CLONE) to GitHub when it is
         safe (see LocalClone.sync), so agents start from current code. Logged when it changes.
         """
-        if not quiz.LOCAL_CLONE or time.monotonic() < self._next_sync:
+        settings = self.gate.settings
+        if not settings.local_clone or time.monotonic() < self._next_sync:
             return
-        self._next_sync = time.monotonic() + quiz.SYNC_SECONDS
+        self._next_sync = time.monotonic() + settings.sync_seconds
         try:
-            outcome, message = LocalClone(quiz.LOCAL_CLONE).sync()
+            outcome, message = LocalClone(settings.local_clone).sync()
         except Exception as exc:  # Never stop polling for this
             outcome, message = "skipped", str(exc)
         if outcome == "updated" or (outcome == "skipped" and message != self.last_sync):
@@ -117,23 +122,23 @@ class Poller:
             list[int]: The PRs a quiz was created for.
         """
         created = []
-        for pr in quiz.open_prs():
-            if pr["user"]["login"] != quiz.DEVELOPER:
+        for pr in self.gate.github.open_prs():
+            if pr["user"]["login"] != self.gate.settings.developer:
                 continue
             number, head, base = pr["number"], pr["head"]["sha"], pr["base"]["sha"]
             key = (number, head, base)
-            if quiz.find_quiz(*key) or self._failures.get(key, 0) >= MAX_FAILURES:
+            if self.gate.find_quiz(*key) or self._failures.get(key, 0) >= MAX_FAILURES:
                 continue
             logger.info("PR #%s at %s has no quiz; generating one", number, head[:7])
             self.working = number
             try:
-                row = quiz.create_quiz(number, self._profile)
+                row = self.gate.create(number, self._profile)
             except (ValueError, RuntimeError, httpx.HTTPError) as exc:
                 self._record_failure(key, exc)
                 continue
             finally:
                 self.working = None
-            logger.info("PR #%s: quiz ready at %s/q/%s", number, quiz.BASE_URL, row["id"])
+            logger.info("PR #%s: quiz ready at %s", number, self.gate.quiz_url(row["id"]))
             created.append(number)
         self.last_poll = time.strftime("%Y-%m-%d %H:%M:%S")
         return created
@@ -150,8 +155,8 @@ class Poller:
                        key[0], self._failures[key], MAX_FAILURES, exc)
         if self._failures[key] >= MAX_FAILURES:
             try:
-                quiz.publish_status(key[1], "error", "Quiz generation failed; push again or create it by hand",
-                                    quiz.BASE_URL + "/")
+                self.gate.github.publish_status(key[1], "error", "Quiz generation failed; push again or create it by hand",
+                                                self.gate.settings.base_url + "/")
             except RuntimeError as status_exc:
                 logger.warning("PR #%s: could not post the error status: %s", key[0], status_exc)
 
@@ -170,16 +175,17 @@ def local_time(stamp: Optional[str]) -> str:
     return moment.strftime("%Y-%m-%d %H:%M %Z")
 
 
-def create_app(poller: Optional[Poller] = None) -> FastAPI:
+def create_app(gate: QuizGate, poller: Optional[Poller] = None) -> FastAPI:
     """
     Build the web application.
     Args:
+        gate: The gate whose quizzes it serves.
         poller: Started and stopped with the application; None serves quizzes without polling.
     Returns:
         FastAPI: The application.
     """
-    secret = quiz.init()
-    templates = Jinja2Templates(directory=quiz.GATE_DIR / "templates")
+    secret = gate.store.init()
+    templates = Jinja2Templates(directory=TEMPLATES_DIR)
     submission_lock = threading.Lock()
 
     @asynccontextmanager
@@ -197,20 +203,20 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
 
     def authenticate(request: Request) -> str:
         # Not signed in: send the browser to the sign-in page, then back here
-        if not secrets.compare_digest(request.cookies.get(SESSION_COOKIE, ""), sign("session:" + quiz.WEB_USER)):
+        if not secrets.compare_digest(request.cookies.get(SESSION_COOKIE, ""), sign("session:" + gate.settings.web_user)):
             raise HTTPException(303, headers={"Location": "/login?next=" + quote(request.url.path)})
-        return quiz.WEB_USER
+        return gate.settings.web_user
 
     def csrf(qid: str) -> str:
         return sign(qid)
 
     def locked_submit(qid: str, answers: list[int]) -> dict[str, Any]:
         with submission_lock:
-            return quiz.submit(qid, answers)
+            return gate.submit(qid, answers)
 
     def locked_skip(qid: str) -> dict[str, Any]:
         with submission_lock:
-            return quiz.skip(qid)
+            return gate.skip(qid)
 
     @app.middleware("http")
     async def headers(request: Request, call_next):
@@ -230,7 +236,7 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
     @app.get("/login", response_class=HTMLResponse)
     def login_page(request: Request, target: str = Query("/", alias="next")):
         return templates.TemplateResponse(request=request, name="login.html", context={
-            "next": target, "user": quiz.WEB_USER, "password": quiz.WEB_PASSWORD, "failed": False})
+            "next": target, "user": gate.settings.web_user, "password": gate.settings.web_password, "failed": False})
 
     @app.post("/login", response_class=HTMLResponse)
     async def login(request: Request):
@@ -238,39 +244,39 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
         target = str(form.get("next", "/"))
         if not target.startswith("/") or target.startswith("//"):
             target = "/"  # Only redirect within this site
-        valid_user = secrets.compare_digest(str(form.get("user", "")).encode(), quiz.WEB_USER.encode())
-        valid_password = secrets.compare_digest(str(form.get("password", "")).encode(), quiz.WEB_PASSWORD.encode())
+        valid_user = secrets.compare_digest(str(form.get("user", "")).encode(), gate.settings.web_user.encode())
+        valid_password = secrets.compare_digest(str(form.get("password", "")).encode(), gate.settings.web_password.encode())
         if not (valid_user and valid_password):
             return templates.TemplateResponse(request=request, name="login.html", status_code=401, context={
-                "next": target, "user": quiz.WEB_USER, "password": quiz.WEB_PASSWORD, "failed": True})
+                "next": target, "user": gate.settings.web_user, "password": gate.settings.web_password, "failed": True})
         response = RedirectResponse(target, status_code=303)
-        response.set_cookie(SESSION_COOKIE, sign("session:" + quiz.WEB_USER), httponly=True, samesite="lax")
+        response.set_cookie(SESSION_COOKIE, sign("session:" + gate.settings.web_user), httponly=True, samesite="lax")
         return response
 
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request, user: str = Depends(authenticate)):
         return templates.TemplateResponse(request=request, name="home.html", context={
-            "rows": quiz.list_quizzes(), "repo": quiz.REPO, "user": user, "poller": poller})
+            "rows": gate.store.quizzes(), "repo": gate.settings.repo, "user": user, "poller": poller})
 
     @app.get("/history", response_class=HTMLResponse)
     def history_page(request: Request, pr: Optional[int] = None, _user: str = Depends(authenticate)):
         return templates.TemplateResponse(request=request, name="history.html", context={
-            "rows": quiz.history(pr), "repo": quiz.REPO, "pr": pr, "local_time": local_time,
-            "not_found": quiz.NOT_FOUND})
+            "rows": gate.history(pr), "repo": gate.settings.repo, "pr": pr, "local_time": local_time,
+            "not_found": gate.NOT_FOUND})
 
     @app.get("/q/{qid}", response_class=HTMLResponse)
     def quiz_page(qid: str, request: Request, _user: str = Depends(authenticate)):
         try:
-            row = quiz.get_quiz(qid)
+            row = gate.store.get(qid)
         except KeyError:
             raise HTTPException(404, "Quiz not found") from None
-        content = quiz.Quiz.model_validate_json(row["content"])
+        content = Quiz.model_validate_json(row["content"])
         # Only public fields enter the rendered form
         questions = [{"question": q.question, "options": q.options} for q in content.questions]
-        state, description = quiz.gate_state(row)
+        state, description = gate.gate_state(row)
         return templates.TemplateResponse(request=request, name="quiz.html", context={
             "row": row, "title": content.title, "questions": questions, "csrf": csrf(qid),
-            "repo": quiz.REPO, "state": state, "description": description, "allow_skip": quiz.ALLOW_SKIP})
+            "repo": gate.settings.repo, "state": state, "description": description, "allow_skip": gate.settings.allow_skip})
 
     @app.post("/q/{qid}", response_class=HTMLResponse)
     async def grade(qid: str, request: Request, _user: str = Depends(authenticate)):
@@ -278,8 +284,8 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
         if not secrets.compare_digest(str(form.get("csrf", "")), csrf(qid)):
             raise HTTPException(403, "Invalid form token. Reload the quiz.")
         try:
-            row = quiz.get_quiz(qid)
-            count = len(quiz.Quiz.model_validate_json(row["content"]).questions)
+            row = gate.store.get(qid)
+            count = len(Quiz.model_validate_json(row["content"]).questions)
             try:
                 answers = [int(str(form[f"q{i}"])) for i in range(count)]
             except (KeyError, ValueError):
@@ -292,7 +298,7 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
         except (RuntimeError, TimeoutError):
             raise HTTPException(502, "GitHub could not confirm the result. Retry this submission.") from None
         return templates.TemplateResponse(request=request, name="result.html",
-                                          context={"result": result, "row": row, "repo": quiz.REPO})
+                                          context={"result": result, "row": row, "repo": gate.settings.repo})
 
     @app.post("/q/{qid}/skip", response_class=HTMLResponse)
     async def skip(qid: str, request: Request, _user: str = Depends(authenticate)):
@@ -300,7 +306,7 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
         if not secrets.compare_digest(str(form.get("csrf", "")), csrf(qid)):
             raise HTTPException(403, "Invalid form token. Reload the quiz.")
         try:
-            row = quiz.get_quiz(qid)
+            row = gate.store.get(qid)
             result = await run_in_threadpool(locked_skip, qid)
         except KeyError:
             raise HTTPException(404, "Quiz not found") from None
@@ -309,6 +315,6 @@ def create_app(poller: Optional[Poller] = None) -> FastAPI:
         except (RuntimeError, TimeoutError):
             raise HTTPException(502, "GitHub could not confirm the result. Retry.") from None
         return templates.TemplateResponse(request=request, name="result.html",
-                                          context={"result": result, "row": row, "repo": quiz.REPO})
+                                          context={"result": result, "row": row, "repo": gate.settings.repo})
 
     return app

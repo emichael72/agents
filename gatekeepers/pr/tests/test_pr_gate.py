@@ -12,17 +12,26 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-# Keep the module-level data directory away from live data, then import the tool's modules
-IMPORT_DATA = tempfile.TemporaryDirectory()
-os.environ["QUIZ_DATA_DIR"] = IMPORT_DATA.name
+import httpx
+from fastapi.testclient import TestClient
 
-from gatekeepers.pr import pr_gate, quiz, server  # noqa: E402
-from gatekeepers.pr.changes import ChangeInspector  # noqa: E402
-from gatekeepers.pr.clone import LocalClone  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
+from gatekeepers.pr import SETTINGS_FILE, pr_gate, server
+from gatekeepers.pr.changes import ChangeInspector
+from gatekeepers.pr.clone import LocalClone
+from gatekeepers.pr.gate import QuizGate
+from gatekeepers.pr.generator import QuizGenerator
+from gatekeepers.pr.github import GitHub
+from gatekeepers.pr.quiz import Quiz
+from gatekeepers.pr.settings import GateSettings
+
+# Fixed settings, so the tests depend on neither settings.json nor the environment; each test
+# gives the gate its own temporary data folder
+SETTINGS = GateSettings(repo="owner/name", developer="dev", base_url="http://gate.test", pr_comment=False,
+                        allow_skip=False, data_dir=Path("/nonexistent"))
 
 FIXTURE = {"title": "C math quiz", "questions": [
     {"question": f"What does the changed code do in case {i}?",
@@ -30,7 +39,7 @@ FIXTURE = {"title": "C math quiz", "questions": [
      "correct": i, "explanation": "Private explanation sentinel " + str(i)}
     for i in range(3)]}
 INFO = {"number": 1, "state": "open", "base": {"ref": "main", "sha": "b" * 40},
-        "head": {"sha": "a" * 40}, "user": {"login": quiz.DEVELOPER}, "title": "Compute pi"}
+        "head": {"sha": "a" * 40}, "user": {"login": SETTINGS.developer}, "title": "Compute pi"}
 CODE_CHANGE = {"build_ok": True, "build_report": "$ make && make check: succeeded", "docs_ok": True, "docs_report": "All 1 changed C/C++ file(s) are documented.",
                "cosmetic": False, "code_files": ["src/pi.c"]}
 MODELS = {"default": "local", "profiles": {
@@ -48,21 +57,20 @@ class QuizTests(unittest.TestCase):
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.data_patch = patch.object(quiz, "DATA", Path(self.temp.name))
-        self.data_patch.start()
-        self.info = patch.object(quiz, "pr_info", return_value=copy.deepcopy(INFO))
+        self.gate = QuizGate(replace(SETTINGS, data_dir=Path(self.temp.name)))
+        self.info = patch.object(self.gate.github, "pr_info", return_value=copy.deepcopy(INFO))
         self.mock_info = self.info.start()
-        self.gh = patch.object(quiz, "gh", return_value="diff --git a/pi.c b/pi.c")
+        self.gh = patch.object(self.gate.github, "run", return_value="diff --git a/pi.c b/pi.c")
         self.mock_gh = self.gh.start()
-        self.model = patch.object(quiz, "generate", return_value=(quiz.Quiz.model_validate(FIXTURE), "test model"))
-        self.model.start()
+        self.model = patch.object(self.gate.generator, "generate", return_value=(Quiz.model_validate(FIXTURE), "test model"))
+        self.mock_generate = self.model.start()
         self.inspect = patch.object(ChangeInspector, "inspect", return_value=dict(CODE_CHANGE))
         self.mock_inspect = self.inspect.start()
-        self.row = quiz.create_quiz(1)
+        self.row = self.gate.create(1)
         self.qid = self.row["id"]
-        self.content = quiz.Quiz.model_validate_json(quiz.get_quiz(self.qid)["content"])
+        self.content = Quiz.model_validate_json(self.gate.store.get(self.qid)["content"])
         self.answers = [q.correct for q in self.content.questions]
-        self.app = server.create_app()
+        self.app = server.create_app(self.gate)
         self.client = TestClient(self.app)
         self.client.post("/login", data={"user": "user", "password": "pass"})
 
@@ -72,8 +80,11 @@ class QuizTests(unittest.TestCase):
         self.model.stop()
         self.gh.stop()
         self.info.stop()
-        self.data_patch.stop()
         self.temp.cleanup()
+
+    def enabled(self, **changes):
+        """Patch the gate's settings, e.g. enabled(allow_skip=True)."""
+        return patch.object(self.gate, "settings", replace(self.gate.settings, **changes))
 
     def wrong(self):
         return [(x + 1) % 4 for x in self.answers]
@@ -82,7 +93,7 @@ class QuizTests(unittest.TestCase):
         call = self.mock_gh.call_args
         self.assertEqual(call.kwargs["payload"]["state"], "pending")
         self.assertEqual(call.kwargs["payload"]["context"], "developer-quiz")
-        self.assertEqual(call.kwargs["payload"]["target_url"], f"{quiz.BASE_URL}/q/{self.qid}")
+        self.assertEqual(call.kwargs["payload"]["target_url"], f"{SETTINGS.base_url}/q/{self.qid}")
         self.assertIn(INFO["head"]["sha"], call.args[1])
         self.assertEqual(self.row["source"], "test model")
 
@@ -109,22 +120,22 @@ class QuizTests(unittest.TestCase):
         self.assertEqual(anonymous.get("/").status_code, 200)
 
     def test_pass_is_persisted_and_published(self):
-        self.assertTrue(quiz.submit(self.qid, self.answers)["passed"])
-        self.assertEqual(quiz.get_quiz(self.qid)["published"], "success")
-        with quiz.connect() as db:
+        self.assertTrue(self.gate.submit(self.qid, self.answers)["passed"])
+        self.assertEqual(self.gate.store.get(self.qid)["published"], "success")
+        with self.gate.store.connect() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM attempts").fetchone()[0], 1)
 
     def test_failure_allows_retry_and_hides_explanations(self):
-        result = quiz.submit(self.qid, self.wrong())
+        result = self.gate.submit(self.qid, self.wrong())
         self.assertFalse(result["passed"])
         self.assertEqual(result["questions"], [])
-        self.assertEqual(quiz.get_quiz(self.qid)["published"], "failure")
-        self.assertTrue(quiz.submit(self.qid, self.answers)["passed"])
+        self.assertEqual(self.gate.store.get(self.qid)["published"], "failure")
+        self.assertTrue(self.gate.submit(self.qid, self.answers)["passed"])
 
     def test_pass_cannot_be_downgraded(self):
-        quiz.submit(self.qid, self.answers)
-        quiz.submit(self.qid, self.wrong())
-        self.assertEqual(quiz.get_quiz(self.qid)["published"], "success")
+        self.gate.submit(self.qid, self.answers)
+        self.gate.submit(self.qid, self.wrong())
+        self.assertEqual(self.gate.store.get(self.qid)["published"], "success")
 
     def test_changed_head_or_base_rejected_without_publishing(self):
         for field in ("head", "base"):
@@ -133,29 +144,29 @@ class QuizTests(unittest.TestCase):
             self.mock_info.return_value = info
             self.mock_gh.reset_mock()
             with self.assertRaises(ValueError):
-                quiz.submit(self.qid, self.answers)
+                self.gate.submit(self.qid, self.answers)
             self.mock_gh.assert_not_called()
 
     def test_closed_pr_or_wrong_developer_rejected(self):
         for info in [dict(INFO, state="closed"), dict(INFO, user={"login": "someone-else"})]:
             self.mock_info.return_value = info
             with self.assertRaises(ValueError):
-                quiz.submit(self.qid, self.answers)
+                self.gate.submit(self.qid, self.answers)
 
     def test_publication_failure_can_be_retried(self):
         self.mock_gh.side_effect = RuntimeError("network unavailable")
         with self.assertRaises(RuntimeError):
-            quiz.submit(self.qid, self.answers)
-        self.assertTrue(quiz.get_quiz(self.qid)["passed"])
-        self.assertEqual(quiz.get_quiz(self.qid)["published"], "pending")
+            self.gate.submit(self.qid, self.answers)
+        self.assertTrue(self.gate.store.get(self.qid)["passed"])
+        self.assertEqual(self.gate.store.get(self.qid)["published"], "pending")
         self.mock_gh.side_effect = None
-        quiz.submit(self.qid, self.answers)
-        self.assertEqual(quiz.get_quiz(self.qid)["published"], "success")
+        self.gate.submit(self.qid, self.answers)
+        self.assertEqual(self.gate.store.get(self.qid)["published"], "success")
 
     def test_invalid_answers_rejected(self):
         for answers in [[], [4, 0, 0], [True, 0, 0], ["0", 0, 0]]:
             with self.assertRaises(ValueError):
-                quiz.submit(self.qid, answers)
+                self.gate.submit(self.qid, answers)
 
     def test_browser_form_csrf_and_grading(self):
         url = "/q/" + self.qid
@@ -174,28 +185,28 @@ class QuizTests(unittest.TestCase):
             else:
                 fixture["questions"][0]["options"] = ["same"] * 4
             with self.assertRaises(ValueError):
-                quiz.Quiz.model_validate(fixture)
+                Quiz.model_validate(fixture)
 
     def test_same_revision_reuses_quiz(self):
-        self.assertEqual(quiz.create_quiz(1)["id"], self.qid)
+        self.assertEqual(self.gate.create(1)["id"], self.qid)
 
     def test_new_revision_gets_new_quiz(self):
         info = copy.deepcopy(INFO)
         info["head"]["sha"] = "d" * 40
         self.mock_info.return_value = info
-        row = quiz.create_quiz(1)
+        row = self.gate.create(1)
         self.assertNotEqual(row["id"], self.qid)
         self.assertEqual(row["sha"], "d" * 40)
 
     def test_mid_generation_change_rejected(self):
         self.mock_info.side_effect = [dict(INFO, head={"sha": "e" * 40}), dict(INFO, head={"sha": "f" * 40})]
         with self.assertRaises(ValueError):
-            quiz.create_quiz(1)
+            self.gate.create(1)
 
     def test_html_escapes_model_text(self):
         fixture = copy.deepcopy(FIXTURE)
         fixture["title"] = "<script>alert(1)</script>"
-        with quiz.connect() as db:
+        with self.gate.store.connect() as db:
             db.execute("UPDATE quizzes SET content=? WHERE id=?", (json.dumps(fixture), self.qid))
         page = self.client.get("/q/" + self.qid)
         self.assertNotIn("<script>", page.text)
@@ -208,8 +219,8 @@ class QuizTests(unittest.TestCase):
         self.mock_info.return_value = info
         self.mock_inspect.return_value = inspection
         if content is not None:
-            quiz.generate.return_value = (quiz.Quiz.model_validate(content), "test model")
-        return quiz.create_quiz(1)
+            self.mock_generate.return_value = (Quiz.model_validate(content), "test model")
+        return self.gate.create(1)
 
     def test_documentation_problems_fail_the_check_and_show_on_the_page(self):
         report = "src/pi.c:6: error: Member print_pi() (function) of file pi.c is not documented."
@@ -220,7 +231,7 @@ class QuizTests(unittest.TestCase):
         self.assertIn("print_pi() (function) of file pi.c is not documented", page)
         self.assertNotIn('name="q0"', page)  # No quiz until the documentation is fixed
         with self.assertRaisesRegex(ValueError, "documentation"):
-            quiz.submit(row["id"], [q.correct for q in quiz.Quiz.model_validate_json(row["content"]).questions])
+            self.gate.submit(row["id"], [q.correct for q in Quiz.model_validate_json(row["content"]).questions])
 
     def test_pull_request_gets_one_comment_with_the_quiz_link_kept_current(self):
         comments, calls = [], []
@@ -235,22 +246,22 @@ class QuizTests(unittest.TestCase):
                 comments[0]["body"] = payload["body"]
             return "{}"
 
-        with patch.object(quiz, "PR_COMMENT", True), patch.object(quiz, "gh", side_effect=fake_gh):
-            row = quiz.get_quiz(self.qid)
-            quiz.publish(row)
+        with self.enabled(pr_comment=True), patch.object(self.gate.github, "run", side_effect=fake_gh):
+            row = self.gate.store.get(self.qid)
+            self.gate.publish(row)
             self.assertEqual(len(comments), 1)
-            self.assertIn(f"[Take the quiz]({quiz.BASE_URL}/q/{self.qid})", comments[0]["body"])
+            self.assertIn(f"[Take the quiz]({SETTINGS.base_url}/q/{self.qid})", comments[0]["body"])
             self.assertIn("| Build and tests | ✅ make && make check: succeeded |", comments[0]["body"])
-            quiz.publish(row)  # Nothing changed: no new comment, no edit
+            self.gate.publish(row)  # Nothing changed: no new comment, no edit
             self.assertEqual(sum(1 for args, _ in calls if "PATCH" in args or "POST" in args and "comments" in args[1]), 1)
-            quiz.submit(self.qid, self.answers)
+            self.gate.submit(self.qid, self.answers)
             self.assertEqual(len(comments), 1)  # Edited in place
             self.assertIn("✅ [Passed]", comments[0]["body"])
-            self.assertTrue(comments[0]["body"].startswith(quiz.COMMENT_MARKER))
+            self.assertTrue(comments[0]["body"].startswith(QuizGate.COMMENT_MARKER))
 
     def test_skip_button_unlocks_the_merge_and_is_recorded_as_skipped(self):
         url = "/q/" + self.qid
-        with patch.object(quiz, "ALLOW_SKIP", True):
+        with self.enabled(allow_skip=True):
             page = self.client.get(url).text
             self.assertIn('formaction="/q/%s/skip"' % self.qid, page)
             token = re.search(r'name="csrf" value="([0-9a-f]+)"', page).group(1)
@@ -260,44 +271,44 @@ class QuizTests(unittest.TestCase):
         self.assertIn("Quiz skipped", response.text)
         payload = self.mock_gh.call_args.kwargs["payload"]
         self.assertEqual((payload["state"], payload["description"]), ("success", "Quiz skipped (proof-of-concept mode)"))
-        row = quiz.get_quiz(self.qid)
+        row = self.gate.store.get(self.qid)
         self.assertEqual((row["passed"], row["skipped"]), (1, 1))
 
     def test_skip_is_refused_when_turned_off_or_before_the_build_passes(self):
-        with patch.object(quiz, "ALLOW_SKIP", False):
+        with self.enabled(allow_skip=False):
             self.assertNotIn("/skip", self.client.get("/q/" + self.qid).text)
             with self.assertRaisesRegex(ValueError, "turned off"):
-                quiz.skip(self.qid)
+                self.gate.skip(self.qid)
         row = self.new_revision("b", dict(CODE_CHANGE, build_ok=False, build_report="$ make: FAILED"))
-        with patch.object(quiz, "ALLOW_SKIP", True), self.assertRaisesRegex(ValueError, "build"):
-            quiz.skip(row["id"])
+        with self.enabled(allow_skip=True), self.assertRaisesRegex(ValueError, "build"):
+            self.gate.skip(row["id"])
 
     def test_history_lists_every_assessment_with_its_attempts_and_outcome(self):
-        quiz.submit(self.qid, self.wrong())
-        quiz.submit(self.qid, self.answers)
+        self.gate.submit(self.qid, self.wrong())
+        self.gate.submit(self.qid, self.answers)
         self.new_revision("d", dict(CODE_CHANGE, docs_ok=False, docs_report="x.c:1: error: undocumented"))
-        with quiz.connect() as db:  # An assessment from before titles were stored
+        with self.gate.store.connect() as db:  # An assessment from before titles were stored
             db.execute("UPDATE quizzes SET pr_title=''")
         commits = json.dumps([{"sha": "a" * 40}])  # PR #1's commits: only the first revision's
-        with patch.object(quiz, "gh", return_value=commits):
-            rows = quiz.history()
+        with patch.object(self.gate.github, "run", return_value=commits):
+            rows = self.gate.history()
         self.assertEqual([row["outcome"] for row in rows],
                          ["Documentation problems in the changed files; see Details",
                           "Developer passed the revision-specific quiz"])
         self.assertEqual((rows[1]["attempts"], rows[1]["best"], rows[1]["total"]), (2, 3, 3))
         # Fetched once and saved, only where the pull request contains the assessed commit
-        self.assertEqual([row["pr_title"] for row in rows], [quiz.NOT_FOUND, INFO["title"]])
+        self.assertEqual([row["pr_title"] for row in rows], [QuizGate.NOT_FOUND, INFO["title"]])
         page = self.client.get("/history").text
         self.assertIn("Compute pi", page)
         self.assertIn("2 (best 3/3)", page)
         self.assertIn(f'href="/q/{self.qid}"', page)
-        self.assertEqual(len(quiz.history(pr=999)), 0)
+        self.assertEqual(len(self.gate.history(pr=999)), 0)
         self.assertIn("Show all pull requests", self.client.get("/history?pr=1").text)
         self.assertEqual(self.client.get("/history", follow_redirects=False).status_code, 200)
-        text = pr_gate.history(pr=1)  # The agents' pr_gate tool, action history
+        text = pr_gate.history(self.gate, pr=1)  # The agents' pr_gate tool, action history
         self.assertIn("PR #1 Compute pi", text)
         self.assertIn("(2 attempt(s), best 3/3)", text)
-        self.assertTrue(text.endswith(f"{quiz.BASE_URL}/history?pr=1"))
+        self.assertTrue(text.endswith(f"{SETTINGS.base_url}/history?pr=1"))
         self.assertEqual(TestClient(self.app).get("/history", follow_redirects=False).status_code, 303)  # Sign-in
 
     def test_failed_build_or_tests_fail_the_check_and_show_on_the_page(self):
@@ -309,7 +320,7 @@ class QuizTests(unittest.TestCase):
         self.assertIn("invalid option or unexpected option argument", page)
         self.assertNotIn('name="q0"', page)
         with self.assertRaisesRegex(ValueError, "build"):
-            quiz.submit(row["id"], [q.correct for q in quiz.Quiz.model_validate_json(row["content"]).questions])
+            self.gate.submit(row["id"], [q.correct for q in Quiz.model_validate_json(row["content"]).questions])
 
     def test_cosmetic_change_passes_without_a_quiz(self):
         cosmetic = {"title": "Comment updates", "cosmetic": True, "questions": []}
@@ -333,13 +344,13 @@ class QuizTests(unittest.TestCase):
         info["head"]["sha"] = "9" * 40
         self.mock_info.return_value = info
         with self.assertRaisesRegex(ValueError, "cosmetic"):
-            quiz.create_quiz(1, fixed=str(fixture))
+            self.gate.create(1, fixed=str(fixture))
 
     def test_quiz_kind_and_question_count_must_match(self):
         with self.assertRaises(ValueError):
-            quiz.Quiz.model_validate({"title": "Comment updates", "cosmetic": True, "questions": FIXTURE["questions"]})
+            Quiz.model_validate({"title": "Comment updates", "cosmetic": True, "questions": FIXTURE["questions"]})
         with self.assertRaises(ValueError):
-            quiz.Quiz.model_validate({"title": "Code change", "questions": []})
+            Quiz.model_validate({"title": "Code change", "questions": []})
 
 
 class ModelTests(unittest.TestCase):
@@ -349,47 +360,47 @@ class ModelTests(unittest.TestCase):
         self.models.write_text(json.dumps(MODELS))
 
     def test_settings_come_from_the_manifest_and_the_environment_overrides_them(self):
-        manifest = json.loads(quiz.SETTINGS_FILE.read_text())["settings"]
-        self.assertEqual(quiz.setting("QUIZ_DEVELOPER"), os.environ.get("QUIZ_DEVELOPER") or manifest["QUIZ_DEVELOPER"])
+        manifest = json.loads(SETTINGS_FILE.read_text())["settings"]
+        self.assertEqual(GateSettings.setting("QUIZ_DEVELOPER"), os.environ.get("QUIZ_DEVELOPER") or manifest["QUIZ_DEVELOPER"])
         with patch.dict(os.environ, {"QUIZ_REPO": "someone/else"}):
-            self.assertEqual(quiz.setting("QUIZ_REPO"), "someone/else")
+            self.assertEqual(GateSettings.setting("QUIZ_REPO"), "someone/else")
         with self.assertRaisesRegex(ValueError, "QUIZ_NOT_SET"):
-            quiz.setting("QUIZ_NOT_SET")
-        self.assertEqual(quiz.setting("QUIZ_NOT_SET", required=False), "")
+            GateSettings.setting("QUIZ_NOT_SET")
+        self.assertEqual(GateSettings.setting("QUIZ_NOT_SET", required=False), "")
 
     def test_profiles_come_from_the_shared_models_file(self):
-        self.assertEqual(quiz.resolve_model(None, self.models)["base_url"], "http://boba:1234/v1")
+        self.assertEqual(QuizGenerator(models_file=self.models).resolve_model(None)["base_url"], "http://boba:1234/v1")
         with patch.dict(os.environ, {"TEST_OPENAI_KEY": "sk-test"}):
-            settings = quiz.resolve_model("openai", self.models)
+            settings = QuizGenerator(models_file=self.models).resolve_model("openai")
         self.assertEqual((settings["model"], settings["api_key"]), ("gpt", "sk-test"))
 
     def test_missing_key_and_unknown_profile(self):
         with patch.dict(os.environ, {"TEST_OPENAI_KEY": ""}), self.assertRaises(ValueError):
-            quiz.resolve_model("openai", self.models)
+            QuizGenerator(models_file=self.models).resolve_model("openai")
         with self.assertRaises(ValueError):
-            quiz.resolve_model("nope", self.models)
+            QuizGenerator(models_file=self.models).resolve_model("nope")
 
     def test_fenced_json_is_accepted_and_invalid_reply_retried(self):
         settings = {"name": "Local", "base_url": "http://x/v1", "model": "m", "api_key": "k", "timeout": 5}
-        with patch.object(quiz, "resolve_model", return_value=settings), patch.object(quiz.httpx, "post") as post:
+        with patch.object(QuizGenerator, "resolve_model", return_value=settings), patch.object(httpx, "post") as post:
             post.return_value.json.side_effect = [reply("not JSON"), reply("```json\n" + json.dumps(FIXTURE) + "\n```")]
-            content, source = quiz.generate("a small diff", "local")
+            content, source = QuizGenerator().generate("a small diff", "local")
             self.assertEqual(len(content.questions), 3)
             self.assertEqual(source, "Local / m")
             self.assertEqual(post.call_count, 2)
             self.assertEqual(post.call_args.args[0], "http://x/v1/chat/completions")
-            self.assertEqual(post.call_args.kwargs["json"]["messages"][0]["content"], quiz.load_instructions())
-            self.assertIn("untrusted data", quiz.load_instructions())
+            self.assertEqual(post.call_args.kwargs["json"]["messages"][0]["content"], QuizGenerator().instructions())
+            self.assertIn("untrusted data", QuizGenerator().instructions())
             post.return_value.json.side_effect = [reply("not JSON"), reply(json.dumps(FIXTURE), "length")]
             with self.assertRaises(ValueError):
-                quiz.generate("a small diff", "local")
+                QuizGenerator().generate("a small diff", "local")
 
     def test_the_pull_request_and_test_output_reach_the_quiz_writer(self):
         settings = {"name": "Local", "base_url": "http://x/v1", "model": "m", "api_key": "k", "timeout": 5}
-        context = quiz.quiz_context({"title": "Add -w", "body": "Works with -dpw."}, "$ make && make check: succeeded\n./core_dump -d")
-        with patch.object(quiz, "resolve_model", return_value=settings), patch.object(quiz.httpx, "post") as post:
+        context = QuizGenerator.context({"title": "Add -w", "body": "Works with -dpw."}, "$ make && make check: succeeded\n./core_dump -d")
+        with patch.object(QuizGenerator, "resolve_model", return_value=settings), patch.object(httpx, "post") as post:
             post.return_value.json.return_value = reply(json.dumps(FIXTURE))
-            quiz.generate("a diff", "local", ["src/main.c"], context)
+            QuizGenerator().generate("a diff", "local", ["src/main.c"], context)
         prompt = post.call_args.kwargs["json"]["messages"][1]["content"]
         for part in ("Pull request title: Add -w", "untrusted, may be wrong):\nWorks with -dpw.",
                      "./core_dump -d", "Code diff:\na diff"):
@@ -399,44 +410,44 @@ class ModelTests(unittest.TestCase):
     def test_a_code_change_called_cosmetic_is_rejected(self):
         settings = {"name": "Local", "base_url": "http://x/v1", "model": "m", "api_key": "k", "timeout": 5}
         cosmetic = json.dumps({"title": "Comment updates", "cosmetic": True, "questions": []})
-        with patch.object(quiz, "resolve_model", return_value=settings), patch.object(quiz.httpx, "post") as post:
+        with patch.object(QuizGenerator, "resolve_model", return_value=settings), patch.object(httpx, "post") as post:
             post.return_value.json.side_effect = [reply(cosmetic), reply(cosmetic)]
             with self.assertRaisesRegex(ValueError, "cosmetic"):
-                quiz.generate("a small diff", "local", ["src/pi.c"])
+                QuizGenerator().generate("a small diff", "local", ["src/pi.c"])
             self.assertIn("Server analysis: code changed in: src/pi.c",
                           post.call_args.kwargs["json"]["messages"][1]["content"])
             post.return_value.json.side_effect = [reply(cosmetic)]
-            self.assertTrue(quiz.generate("a small diff", "local", [])[0].cosmetic)
+            self.assertTrue(QuizGenerator().generate("a small diff", "local", [])[0].cosmetic)
 
 
 class PollerTests(unittest.TestCase):
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        patches = [patch.object(quiz, "DATA", Path(self.temp.name)),
-                   patch.object(quiz, "gh", return_value="diff --git a/pi.c b/pi.c"),
-                   patch.object(quiz, "pr_info", return_value=copy.deepcopy(INFO)),
+        self.gate = QuizGate(replace(SETTINGS, data_dir=Path(self.temp.name)))
+        patches = [patch.object(self.gate.github, "run", return_value="diff --git a/pi.c b/pi.c"),
+                   patch.object(self.gate.github, "pr_info", return_value=copy.deepcopy(INFO)),
                    patch.object(ChangeInspector, "inspect", return_value=dict(CODE_CHANGE)),
-                   patch.object(quiz, "open_prs", return_value=[copy.deepcopy(INFO),
-                                                                dict(INFO, number=2, user={"login": "someone-else"})])]
+                   patch.object(self.gate.github, "open_prs",
+                                return_value=[copy.deepcopy(INFO), dict(INFO, number=2, user={"login": "someone-else"})])]
         self.mocks = [p.start() for p in patches]
-        self.mock_gh = self.mocks[1]
+        self.mock_gh = self.mocks[0]
         for p in patches:
             self.addCleanup(p.stop)
         self.addCleanup(self.temp.cleanup)
-        quiz.init()
+        self.gate.store.init()
 
     def test_new_revision_gets_a_quiz_once_and_other_authors_are_skipped(self):
-        poller = server.Poller()
-        with patch.object(quiz, "generate", return_value=(quiz.Quiz.model_validate(FIXTURE), "test")) as generate:
+        poller = server.Poller(self.gate)
+        with patch.object(self.gate.generator, "generate", return_value=(Quiz.model_validate(FIXTURE), "test")) as generate:
             self.assertEqual(poller.poll_once(), [1])
             self.assertEqual(poller.poll_once(), [])
         generate.assert_called_once()
-        self.assertEqual(len(quiz.list_quizzes()), 1)
+        self.assertEqual(len(self.gate.store.quizzes()), 1)
 
     def test_failing_revision_is_retried_then_marked_error(self):
-        poller = server.Poller()
-        with patch.object(quiz, "generate", side_effect=ValueError("bad reply")) as generate:
+        poller = server.Poller(self.gate)
+        with patch.object(self.gate.generator, "generate", side_effect=ValueError("bad reply")) as generate:
             for _ in range(server.MAX_FAILURES + 2):
                 self.assertEqual(poller.poll_once(), [])
         self.assertEqual(generate.call_count, server.MAX_FAILURES)
@@ -468,7 +479,7 @@ class ChangesTests(unittest.TestCase):
     def test_build_and_tests_run_in_the_sandbox(self):
         with tempfile.TemporaryDirectory() as folder:
             tree = Path(folder)
-            inspector = ChangeInspector(quiz.gh, "owner/name")
+            inspector = ChangeInspector(GitHub("owner/name").run, "owner/name")
             (tree / "Makefile").write_text("all:\n\techo built > out.txt\ncheck: all\n\tgrep -q built out.txt\n")
             ok, report = inspector.check_build(tree)
             self.assertTrue(ok, report)
@@ -484,7 +495,7 @@ class ChangesTests(unittest.TestCase):
             self.assertFalse(ok)
             self.assertIn("built with 1 compiler warning(s), which fail the check", report)
             self.assertIn("w.c:1:", report.splitlines()[1])  # The warning is listed first
-            self.assertTrue(ChangeInspector(quiz.gh, "owner/name", fail_on_warnings=False).check_build(tree)[0])
+            self.assertTrue(ChangeInspector(GitHub("owner/name").run, "owner/name", fail_on_warnings=False).check_build(tree)[0])
             (tree / "Makefile").write_text("all:\n\tcat /etc/os-release\n")  # The sandbox sees only the tree (and no host /etc)
             self.assertFalse(inspector.check_build(tree)[0])
             (tree / "Makefile").unlink()
@@ -523,17 +534,17 @@ class ServiceControlTests(unittest.TestCase):
 
         with patch.object(pr_gate.subprocess, "run", side_effect=fake_run), \
                 patch.dict(os.environ, {"AGENT_NAME": "Test Agent"}):
-            text = pr_gate.control("stop")
+            text = pr_gate.control(QuizGate(SETTINGS), "stop")
         self.assertIn("Stopped the pr-gate service (asked by Test Agent)", text)
         self.assertEqual(calls, [["systemctl", "--user", "cat", "pr-gate"], ["systemctl", "--user", "stop", "pr-gate"]])
         with self.assertRaisesRegex(ValueError, "Unknown action"):
-            pr_gate.control("disable")
+            pr_gate.control(QuizGate(SETTINGS), "disable")
 
     def test_a_missing_unit_is_reported(self):
         missing = subprocess.CompletedProcess([], 1, "", "No files found")
         with patch.object(pr_gate.subprocess, "run", return_value=missing), \
                 self.assertRaisesRegex(ValueError, "install.sh --gate install"):
-            pr_gate.control("start")
+            pr_gate.control(QuizGate(SETTINGS), "start")
 
 
 class CloneSyncTests(unittest.TestCase):
@@ -583,15 +594,15 @@ class CloneSyncTests(unittest.TestCase):
         self.assertEqual(LocalClone(str(Path(self.temp.name))).sync()[0], "skipped")  # Not a clone
 
     def test_the_poller_syncs_on_its_own_schedule(self):
-        poller = server.Poller()
+        settings = replace(SETTINGS, data_dir=Path(self.temp.name), local_clone=str(self.clone), sync_seconds=60)
+        poller = server.Poller(QuizGate(settings))
         self.commit(self.other, "b.c", "Second")
-        with patch.object(quiz, "LOCAL_CLONE", str(self.clone)), patch.object(quiz, "SYNC_SECONDS", 60):
-            poller.sync_clone()
-            self.assertTrue((self.clone / "b.c").exists())
-            self.assertIn("fast-forwarded by 1 commit", poller.last_sync)
-            self.commit(self.other, "c.c", "Third")
-            poller.sync_clone()  # Not due yet
-            self.assertFalse((self.clone / "c.c").exists())
+        poller.sync_clone()
+        self.assertTrue((self.clone / "b.c").exists())
+        self.assertIn("fast-forwarded by 1 commit", poller.last_sync)
+        self.commit(self.other, "c.c", "Third")
+        poller.sync_clone()  # Not due yet
+        self.assertFalse((self.clone / "c.c").exists())
 
 
 if __name__ == "__main__":

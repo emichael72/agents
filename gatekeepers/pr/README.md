@@ -117,7 +117,7 @@ password `pass`; the sign-in page shows them.
 
 ## Settings
 
-The settings live in [`settings.json`](settings.json). `quiz.py` reads them for both the service
+The settings live in [`settings.json`](settings.json). `settings.py` reads them for both the service
 and the agents' status tool ([`tools/pr_gate`](../../tools/pr_gate/README.md)), so they share one
 configuration. Edit it, then restart the service (`./install.sh --gate restart` from the repository
 root). A variable set in the environment (for example in `~/.config/pr-gate.env` for the service)

@@ -1,5 +1,5 @@
 {
-  "description": "Settings of the pull request gate (gatekeepers/pr): read by quiz.py for the service and the agents' pr_gate status tool. A variable set in the environment overrides its value here; see README.md, 'Settings'.",
+  "description": "Settings of the pull request gate (gatekeepers/pr): read by settings.py for the service and the agents' pr_gate status tool. A variable set in the environment overrides its value here; see README.md, 'Settings'.",
   "settings": {
     "QUIZ_REPO": "emichael72/core_dump",
     "QUIZ_DEVELOPER": "emichael72",
