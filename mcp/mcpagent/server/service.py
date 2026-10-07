@@ -28,7 +28,7 @@ import shlex
 import signal
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Any, Union
+from typing import Any, Awaitable, Callable, Optional, Union
 from urllib.parse import urlparse, unquote
 
 # Third-party
@@ -39,7 +39,7 @@ from colorama import Fore, Style
 # Local imports
 from mcpagent.config import DEFAULT_CONFIG, REPO_ROOT, MCPAgentConfig
 from mcpagent.common.logger import MCPAgentLogger
-from .types import MCPServiceConfigType, MCPServiceToolType
+from .types import MCPServiceConfigType, MCPServiceToolType, RPCError
 
 
 MAX_BATCH_MCP_COMMANDS = 64
@@ -64,6 +64,16 @@ class MCPService:
         """
 
         self._single_flight = asyncio.Semaphore(1)  # Single-flight across the whole workspace
+        # JSON-RPC methods and their handlers: each takes the params and returns the result
+        self._rpc_methods: dict[str, Callable[[dict[str, Any]], Awaitable[Any]]] = {
+            "initialize": self._on_initialize,
+            "ping": self._on_ping,
+            "help": self._on_help,
+            "tools/list": self._on_tools_list,
+            "tools/call": self._on_tools_call,
+            "resources/list": self._on_resources_list,
+            "resources/read": self._on_resources_read,
+        }
 
         self._mcp_config = MCPServiceConfigType()
         self._logger = MCPAgentLogger("Service")
@@ -266,7 +276,8 @@ class MCPService:
         JSON-RPC endpoint for MCP over HTTP POST.
         Supports:
           - Single requests and batches per JSON-RPC 2.0.
-          - Methods: initialize, ping, help, tools/list, tools/call, resources/list, resources/read.
+          - The methods in the dispatch table (`_rpc_methods`): initialize, ping, help, tools/list,
+            tools/call, resources/list, resources/read.
           - Notifications (no "id"): answered with 202 and an empty response body.
         Error behavior:
           - Always HTTP 200 with a JSON-RPC error envelope (-32700, -32600, -32602, -32603).
@@ -276,36 +287,22 @@ class MCPService:
         Returns:
             web.Response: The JSON-RPC response(s), or 202 for notifications only.
         """
-
-        # Helper builders (avoid repeating structure everywhere)
-        def _jr_ok(_jid: Any, _result: Any) -> dict[str, Any]:
-            return {"jsonrpc": "2.0", "id": _jid, "result": _result}
-
-        def _jr_err(_jid: Any, _code: int, _message: str, _data: Any = None) -> dict[str, Any]:
-            err: dict[str, Any] = {"code": _code, "message": _message}
-            if _data is not None:
-                err["data"] = _data
-            return {"jsonrpc": "2.0", "id": _jid, "error": err}
-
         with contextlib.suppress(Exception):
             self._log_line(msg="POST /message", level="debug")
 
         # Method gate first (cheap)
         if request.method != "POST":
-            error_body = _jr_err(_jid=None, _code=-32600, _message="method not allowed")
-            return web.json_response(error_body)
+            return web.json_response(self._rpc_error(None, -32600, "method not allowed"))
 
         # Read body defensively
         raw = await request.read()
         if not raw:
-            error_body = _jr_err(_jid=None, _code=-32600, _message="Empty request")
-            return web.json_response(error_body)
+            return web.json_response(self._rpc_error(None, -32600, "Empty request"))
 
         try:
             payload: Any = json.loads(raw.decode("utf-8"))
         except Exception as e:
-            error_body = _jr_err(_jid=None, _code=-32700, _message="Parse error", _data=str(e))
-            return web.json_response(error_body)
+            return web.json_response(self._rpc_error(None, -32700, "Parse error", str(e)))
 
         with contextlib.suppress(Exception):
             self._log_line(msg="RPC handler got payload", level="debug")
@@ -314,180 +311,19 @@ class MCPService:
                 pretty = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False)
                 self._log_line(msg=f"Request:\n{pretty}", level="debug")
 
-        async def _handle_one(msg: dict[str, Any]) -> Optional[dict[str, Any]]:
-            """
-            Handle a single JSON-RPC message. Returns a response dict,
-            or None if input was a notification (no 'id').
-            """
-            if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0" or not isinstance(msg.get("method"), str):
-                return _jr_err(None, -32600, "invalid request")
-            jid = msg.get("id", None)
-            is_notification = "id" not in msg
-            method = msg.get("method")
-            params = msg.get("params", {})
-
-            self._log_line(msg=f"Incoming method: {method}/params:'{params}', id: {jid}", level="debug")
-
-            # Inline helpers return proper envelopes only when id is present
-            if is_notification:
-                def ok(_: Any) -> None:  # type: ignore[override]
-                    return None
-
-                def make_error(_: int, __: str) -> None:  # type: ignore[override]
-                    return None
-            else:
-                def ok(_result: Any) -> dict[str, Any]:
-                    return _jr_ok(jid, _result)
-
-                def make_error(_code: int, _message: str) -> dict[str, Any]:
-                    return _jr_err(jid, _code, _message)
-
-            if not isinstance(msg, dict) or not isinstance(method, str):
-                return make_error(-32600, "invalid request")
-            if not isinstance(params, dict):
-                return make_error(-32602, "invalid params")
-
-            # -----------------------------------------------------------------
-            #
-            # Handle common MCP service methods
-            #
-            # -----------------------------------------------------------------
-
-            try:
-                if method == "initialize":
-                    client_proto = params.get("protocolVersion", "2025-06-18")
-                    info = {
-                        "protocolVersion": client_proto if client_proto in ("2025-03-26", "2025-06-18") else "2025-06-18",
-                        "serverInfo": {
-                            "name": str(self._mcp_server_name),
-                            "version": str(self._mcp_server_version),
-                        },
-                        "capabilities": {
-                            "tools": {},
-                            "resources": {}
-                        },
-                    }
-                    self._log_line(msg="Handled 'initialize'", level="debug")
-                    return ok(info)
-
-                # -----------------------------------------------------------------
-
-                elif method == "tools/list":
-                    return ok(self._rpc_tools_list())
-
-                # -----------------------------------------------------------------
-
-                elif method == "help":
-                    result = await self._help_handler_rpc(params)
-                    return ok(result)
-
-                # -----------------------------------------------------------------
-
-                elif method == "resources/list":
-
-                    resources = []
-                    for tool_name, tool_info in self._project_data.get("tools", {}).items():
-                        resource_path = tool_info.get("resource")
-                        if not resource_path:
-                            continue
-                        abs_path = os.path.join(self._project_base_path, resource_path)
-                        uri = f"file://{os.path.abspath(abs_path)}"
-                        resources.append({
-                            "name": tool_name,
-                            "uri": uri,
-                            "mimeType": "text/markdown"
-                        })
-                    return ok({"resources": resources})
-
-                # -----------------------------------------------------------------
-
-                elif method == "resources/read":
-
-                    uri = params.get("uri")
-                    if not isinstance(uri, str) or not uri.startswith("file://"):
-                        return make_error(-32602, f"Invalid or missing URI: {uri}")
-
-                    parsed = urlparse(uri)
-                    path = unquote(parsed.path)
-                    allowed_paths: set[Path] = set()
-                    for tool in self._tools_registry.values():
-                        resource = tool.resource
-                        if resource:
-                            allowed_paths.add((Path(self._project_base_path) / resource).resolve())
-                    if parsed.netloc or Path(path).resolve() not in allowed_paths:
-                        return make_error(-32602, "Resource is not registered")
-
-                    try:
-                        with open(path, "r", encoding="utf-8") as f:
-                            text = f.read()
-                    except Exception as read_error:
-                        return make_error(-32000, f"Failed to read resource {uri}: {read_error}")
-
-                    return ok({
-                        "contents": [
-                            {"uri": uri, "text": text}
-                        ]
-                    })
-
-                # -----------------------------------------------------------------
-
-                elif method == "tools/call":
-                    tool_name = params.get("name", "<?>")
-                    with contextlib.suppress(Exception):
-                        self._log_line(msg=f"Calling tool: {tool_name} with: {params}", level="debug")
-
-                    # Single flight: try to acquire immediately; reject if busy
-                    try:
-                        await asyncio.wait_for(self._single_flight.acquire(), timeout=0.001)
-                    except asyncio.TimeoutError:
-                        return make_error(
-                            BUSY_CODE,
-                            "Busy: another tool is currently running in this workspace")
-
-                    try:
-                        result = await self._rpc_tools_call(params)
-                        wrapped = {
-                            "isError": result.get("status", 0) != 0,
-                            "content": [{"type": "text", "text": json.dumps(result, indent=2)}],
-                        }
-
-                        return ok(wrapped)
-
-                    finally:
-                        self._single_flight.release()
-
-                # -----------------------------------------------------------------
-
-                elif method == "ping":
-                    return ok({})
-
-                return make_error(-32601, f"unknown method: {method}")
-
-            except ValidationError as ex:
-                return make_error(-32602, ex.message)
-            except KeyError as ke:
-                return make_error(-32601, str(ke))
-            except Exception as ex:
-                with contextlib.suppress(Exception):
-                    await self._broadcast({"jsonrpc": "2.0", "method": "tools/error", "params": {"error": str(ex)}})
-                    self._log_line(f"_handle_one crash: {ex!r}", level="error")
-                return make_error(-32603, "Internal error")
-
         # Single vs batch
         try:
             if isinstance(payload, list):
                 # Empty batch is invalid
                 if len(payload) == 0:
-                    error_body = _jr_err(_jid=None, _code=-32600, _message="invalid request (empty batch)")
-                    return web.json_response(error_body)
+                    return web.json_response(self._rpc_error(None, -32600, "invalid request (empty batch)"))
 
                 if len(payload) > MAX_BATCH_MCP_COMMANDS:
-                    error_body = _jr_err(_jid=None, _code=-32600, _message="batch too large")
-                    return web.json_response(error_body)
+                    return web.json_response(self._rpc_error(None, -32600, "batch too large"))
 
                 replies: list[dict[str, Any]] = []
                 for item in payload:
-                    resp = await _handle_one(item if isinstance(item, dict) else {})
+                    resp = await self._handle_message(item if isinstance(item, dict) else {})
                     if resp is not None:
                         replies.append(resp)
 
@@ -498,10 +334,9 @@ class MCPService:
 
             # Single message
             if not isinstance(payload, dict):
-                error_body = _jr_err(_jid=None, _code=-32600, _message="Invalid request")
-                return web.json_response(error_body)
+                return web.json_response(self._rpc_error(None, -32600, "Invalid request"))
 
-            reply = await _handle_one(payload)
+            reply = await self._handle_message(payload)
             if reply is None:
                 return web.Response(status=202)
             return web.json_response(reply)
@@ -509,8 +344,215 @@ class MCPService:
         except Exception as e:
             with contextlib.suppress(Exception):
                 self._log_line(f"/message handler crash (outer): {e!r}", level="error")
-            error_body = _jr_err(_jid=None, _code=-32603, _message="Internal error")
-            return web.json_response(error_body)
+            return web.json_response(self._rpc_error(None, -32603, "Internal error"))
+
+    async def _handle_message(self, msg: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """
+        Handle one JSON-RPC message: check it, run its method from the dispatch table, and wrap
+        the result or the error in a response envelope.
+        Args:
+            msg: The message.
+        Returns:
+            Optional[dict[str, Any]]: The response, or None for a notification (no "id"), whose
+                method still runs.
+        """
+        if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0" or not isinstance(msg.get("method"), str):
+            return self._rpc_error(None, -32600, "invalid request")
+        jid = msg.get("id", None)
+        is_notification = "id" not in msg
+        method = msg["method"]
+        params = msg.get("params", {})
+
+        self._log_line(msg=f"Incoming method: {method}/params:'{params}', id: {jid}", level="debug")
+
+        try:
+            if not isinstance(params, dict):
+                raise RPCError(-32602, "invalid params")
+            handler = self._rpc_methods.get(method)
+            if handler is None:
+                raise RPCError(-32601, f"unknown method: {method}")
+            result = await handler(params)
+            return None if is_notification else self._rpc_result(jid, result)
+        except RPCError as error:
+            return None if is_notification else self._rpc_error(jid, error.code, error.message)
+        except ValidationError as ex:
+            return None if is_notification else self._rpc_error(jid, -32602, ex.message)
+        except KeyError as ke:
+            return None if is_notification else self._rpc_error(jid, -32601, str(ke))
+        except Exception as ex:
+            with contextlib.suppress(Exception):
+                await self._broadcast({"jsonrpc": "2.0", "method": "tools/error", "params": {"error": str(ex)}})
+                self._log_line(f"_handle_message crash: {ex!r}", level="error")
+            return None if is_notification else self._rpc_error(jid, -32603, "Internal error")
+
+    @staticmethod
+    def _rpc_result(jid: Any, result: Any) -> dict[str, Any]:
+        """
+        A JSON-RPC success envelope.
+        Args:
+            jid: The request id.
+            result: The method's result.
+        Returns:
+            dict[str, Any]: The response.
+        """
+        return {"jsonrpc": "2.0", "id": jid, "result": result}
+
+    @staticmethod
+    def _rpc_error(jid: Any, code: int, message: str, data: Any = None) -> dict[str, Any]:
+        """
+        A JSON-RPC error envelope.
+        Args:
+            jid: The request id; None when it is not known.
+            code: The JSON-RPC error code.
+            message: The error message.
+            data: Optional detail.
+        Returns:
+            dict[str, Any]: The response.
+        """
+        error: dict[str, Any] = {"code": code, "message": message}
+        if data is not None:
+            error["data"] = data
+        return {"jsonrpc": "2.0", "id": jid, "error": error}
+
+    async def _on_initialize(self, params: dict[str, Any]) -> dict[str, Any]:
+        """
+        initialize: the protocol version (the client's, when supported), server info and capabilities.
+        Args:
+            params: The request params ("protocolVersion").
+        Returns:
+            dict[str, Any]: The result.
+        """
+        client_proto = params.get("protocolVersion", "2025-06-18")
+        info = {
+            "protocolVersion": client_proto if client_proto in ("2025-03-26", "2025-06-18") else "2025-06-18",
+            "serverInfo": {
+                "name": str(self._mcp_server_name),
+                "version": str(self._mcp_server_version),
+            },
+            "capabilities": {
+                "tools": {},
+                "resources": {}
+            },
+        }
+        self._log_line(msg="Handled 'initialize'", level="debug")
+        return info
+
+    async def _on_ping(self, _params: dict[str, Any]) -> dict[str, Any]:
+        """
+        ping: an empty result.
+        Args:
+            _params: The request params (unused).
+        Returns:
+            dict[str, Any]: {}.
+        """
+        return {}
+
+    async def _on_help(self, params: dict[str, Any]) -> dict[str, Any]:
+        """
+        help: see `_help_handler_rpc`.
+        Args:
+            params: The request params.
+        Returns:
+            dict[str, Any]: The result.
+        """
+        return await self._help_handler_rpc(params)
+
+    async def _on_tools_list(self, _params: dict[str, Any]) -> dict[str, Any]:
+        """
+        tools/list: every registered tool, see `_rpc_tools_list`.
+        Args:
+            _params: The request params (unused).
+        Returns:
+            dict[str, Any]: The result.
+        """
+        return self._rpc_tools_list()
+
+    async def _on_tools_call(self, params: dict[str, Any]) -> dict[str, Any]:
+        """
+        tools/call: run one tool, one at a time in the whole workspace.
+        Args:
+            params: The request params ("name", "arguments").
+        Returns:
+            dict[str, Any]: The tool's result as MCP content, with isError set when it failed.
+        Raises:
+            RPCError: BUSY_CODE when another tool is running.
+        """
+        tool_name = params.get("name", "<?>")
+        with contextlib.suppress(Exception):
+            self._log_line(msg=f"Calling tool: {tool_name} with: {params}", level="debug")
+
+        # Single flight: try to acquire immediately; reject if busy
+        try:
+            await asyncio.wait_for(self._single_flight.acquire(), timeout=0.001)
+        except asyncio.TimeoutError:
+            raise RPCError(BUSY_CODE, "Busy: another tool is currently running in this workspace") from None
+
+        try:
+            result = await self._rpc_tools_call(params)
+            return {
+                "isError": result.get("status", 0) != 0,
+                "content": [{"type": "text", "text": json.dumps(result, indent=2)}],
+            }
+        finally:
+            self._single_flight.release()
+
+    async def _on_resources_list(self, _params: dict[str, Any]) -> dict[str, Any]:
+        """
+        resources/list: each tool's documentation (its README) as a Markdown resource.
+        Args:
+            _params: The request params (unused).
+        Returns:
+            dict[str, Any]: The result: "resources".
+        """
+        resources = []
+        for tool_name, tool_info in self._project_data.get("tools", {}).items():
+            resource_path = tool_info.get("resource")
+            if not resource_path:
+                continue
+            abs_path = os.path.join(self._project_base_path, resource_path)
+            uri = f"file://{os.path.abspath(abs_path)}"
+            resources.append({
+                "name": tool_name,
+                "uri": uri,
+                "mimeType": "text/markdown"
+            })
+        return {"resources": resources}
+
+    async def _on_resources_read(self, params: dict[str, Any]) -> dict[str, Any]:
+        """
+        resources/read: one registered tool's documentation.
+        Args:
+            params: The request params ("uri", a file:// URI from resources/list).
+        Returns:
+            dict[str, Any]: The result: "contents".
+        Raises:
+            RPCError: -32602 for a missing, invalid or unregistered URI; -32000 if it cannot be read.
+        """
+        uri = params.get("uri")
+        if not isinstance(uri, str) or not uri.startswith("file://"):
+            raise RPCError(-32602, f"Invalid or missing URI: {uri}")
+
+        parsed = urlparse(uri)
+        path = unquote(parsed.path)
+        allowed_paths: set[Path] = set()
+        for tool in self._tools_registry.values():
+            resource = tool.resource
+            if resource:
+                allowed_paths.add((Path(self._project_base_path) / resource).resolve())
+        if parsed.netloc or Path(path).resolve() not in allowed_paths:
+            raise RPCError(-32602, "Resource is not registered")
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read()
+        except Exception as read_error:
+            raise RPCError(-32000, f"Failed to read resource {uri}: {read_error}") from None
+
+        return {
+            "contents": [
+                {"uri": uri, "text": text}
+            ]
+        }
 
     @staticmethod
     async def _help_handler_rpc(_params: dict[str, Any]) -> dict[str, Any]:

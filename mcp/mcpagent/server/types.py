@@ -5,6 +5,7 @@ Description:
     The server's types:
       - `MCPServiceConfigType`: where the server listens (host, port) and whether it is read-only.
       - `MCPServiceToolType`: one registered tool: its schema, command, arguments and environment.
+      - `RPCError`: a JSON-RPC error a method handler raises: its code and message.
 """
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -17,6 +18,22 @@ class MCPServiceConfigType:
     advertise_ip: Optional[str] = None
     port: Optional[int] = None  # The server settings' mcp_server_port
     readonly: bool = False
+
+
+class RPCError(Exception):
+    """
+    A JSON-RPC error that a method handler raises, answered with this code and message.
+    """
+
+    def __init__(self, code: int, message: str) -> None:
+        """
+        Args:
+            code: The JSON-RPC error code, e.g. -32602 for invalid params.
+            message: The error message.
+        """
+        super().__init__(message)
+        self.code = code
+        self.message = message
 
 
 class MCPServiceToolType:
