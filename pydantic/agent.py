@@ -258,7 +258,8 @@ def load_output_settings(path: Path = OUTPUT_FILE) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-# A Markdown link, [text](url), or a bare web address: shown as a clickable OSC 8 link
+# A Markdown link, [text](url), or a bare web address: shown as a clickable OSC 8 link, in LINK_COLOR
+LINK_COLOR = "bright_cyan"
 LINK = re.compile(r"\[([^\]\n]+)\]\((https?://[^\s)]+)\)|(https?://[^\s<>()\[\]\"'`]+)")
 OPEN_LINK = re.compile(r"\[[^\]\n]*$|\]\([^)\s]*$")  # A Markdown link that is not finished yet
 
@@ -479,7 +480,8 @@ class Output:
 
     def _render(self, text: str) -> Text:
         """
-        Turn text into a rich Text, with its links as clickable OSC 8 links when links are on.
+        Turn text into a rich Text, with its links as clickable OSC 8 links when links are on, in
+        LINK_COLOR: the one vivid color, in the gray lines too, so a link such as the quiz's stands out.
         Args:
             text: Plain text, possibly with Markdown links or web addresses.
         Returns:
@@ -489,7 +491,7 @@ class Output:
             return Text(text)
         rendered = Text()
         for part, url in link_segments(text):
-            rendered.append(part, style=Style(link=url) if url else None)
+            rendered.append(part, style=Style(link=url, color=LINK_COLOR) if url else None)
         return rendered
 
     def _wrap_stream(self, text: str) -> str:

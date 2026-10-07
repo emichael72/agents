@@ -417,6 +417,16 @@ class OutputTests(unittest.TestCase):
             expected = ["", "Let me check the build."] + (["", "It builds cleanly."] if more_text else [])
             self.assertEqual(printed.getvalue().splitlines(), expected + ["Response time: 0.0s", ""])
 
+    def test_a_link_in_a_gray_line_is_bright_cyan_and_the_rest_stays_gray(self):
+        printed = io.StringIO()
+        output = Output(Console(file=printed, force_terminal=True, width=120), {"width": 120, "links": True})
+        output.line("← mr: quiz at http://minion:8000/q/abc for PR #12")
+        raw = printed.getvalue()
+        self.assertRegex(raw, r"\x1b\[90m← mr: quiz at ")  # Gray before the link
+        self.assertIn("\x1b]8;", raw)  # Clickable
+        self.assertIn("\x1b[96mhttp://minion:8000/q/abc", raw)  # The link, bright cyan
+        self.assertRegex(raw, r"\x1b\[90m for PR #12")  # Gray again after it
+
     def test_token_counts_follow_the_response_time(self):
         printed = io.StringIO()
         output = Output(Console(file=printed), {'width': 120, 'show_time': True, 'show_tokens': True})

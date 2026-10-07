@@ -181,7 +181,8 @@ Response time: 6.3s · tokens: 4,313 in, 53 out · 2 model calls
    it arrives. A word longer than the width, such as a URL, is never broken.
 3. **Links are clickable.** On a terminal, a Markdown link `[text](url)` shows as *text* and a web
    address as itself, both as clickable OSC 8 links (VS Code's terminal, iTerm2, GNOME Terminal and
-   others), in the answer and in the gray tool lines. A link is never split while the answer
+   others), in the answer and in the gray tool lines. Links are bright cyan, the one vivid color, so
+   a link such as the pull request's quiz stands out. A link is never split while the answer
    streams. `"links": false` turns this off; piped output is always plain.
 4. **The answer has one blank line before it, and the response time right under it**, then one
    blank line before the next prompt. Text the model writes between tool calls is set off by one

@@ -352,7 +352,7 @@ export class Output {
     this.end();
     if (this.blankOwed) this.write('\n'); // Text ended without its blank line (a tool call followed it)
     this.blankOwed = false;
-    for (const line of wrap(text, this.width)) this.write(gray(this.render(line)) + '\n');
+    for (const line of wrap(text, this.width)) this.write(this.render(line, gray) + '\n');
   }
 
   /**
@@ -391,10 +391,16 @@ export class Output {
     this.write('\n');
   }
 
-  /** Show the text's Markdown links and web addresses as clickable OSC 8 links, when links are on. */
-  private render(text: string): string {
-    if (!this.links) return text;
-    return linkSegments(text).map(([part, url]) => url ? `\x1b]8;;${url}\x1b\\${part}\x1b]8;;\x1b\\` : part).join('');
+  /**
+   * Show the text's Markdown links and web addresses as clickable OSC 8 links, when links are on,
+   * in bright cyan: the one vivid color, in the gray lines too, so a link such as the quiz's stands out.
+   * @param text The text.
+   * @param style Styles the rest of the text (gray for the gray lines).
+   */
+  private render(text: string, style = (part: string) => part): string {
+    if (!this.links) return style(text);
+    return linkSegments(text).map(([part, url]) =>
+      url ? styleText('cyanBright', `\x1b]8;;${url}\x1b\\${part}\x1b]8;;\x1b\\`) : style(part)).join('');
   }
 
   /** Word-wrap streamed text: words are held until they end, so they can move to the next line. */
