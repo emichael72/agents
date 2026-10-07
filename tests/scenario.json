@@ -1,0 +1,24 @@
+{
+  "description": "One scripted turn that every agent's tests replay (mcpagent, pydantic and vercel): the stand-in model asks for these tool calls in one response, the real tools run, and each call must end as expected. outcome ok: the result contains output; outcome error: the model is told of the failure, which contains output. Change a call here and all three agents are tested on it.",
+  "prompt": "Check the tools",
+  "calls": [
+    {
+      "tool": "shell",
+      "arguments": {"cwd": "tools", "command": "echo scenario check | tr a-z A-Z"},
+      "outcome": "ok",
+      "output": "SCENARIO CHECK"
+    },
+    {
+      "tool": "shell",
+      "arguments": {"cwd": "missing-file", "command": "ls"},
+      "outcome": "error",
+      "output": "not an allowed folder"
+    },
+    {
+      "tool": "time",
+      "arguments": {"timezone": "UTC"},
+      "outcome": "ok",
+      "output": "(UTC+00:00)"
+    }
+  ]
+}

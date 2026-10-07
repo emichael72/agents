@@ -10,7 +10,7 @@
       "access": "r"
     },
     "memory": {
-      "path": "memory",
+      "path": ".memory",
       "access": "rw"
     }
   }

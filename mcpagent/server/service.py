@@ -1022,12 +1022,12 @@ class MCPService:
                   "-d \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":1,\\\"method\\\":\\\"tools/list\\\",\\\"params\\\":{}}\" "
                   f"http://{host_colored}:{port_colored}/message | jq{Style.RESET_ALL}")
 
-            print(f"\n{Fore.YELLOW}3. Execute tool 'greet' with argument 'Alice':{Style.RESET_ALL}")
+            print(f"\n{Fore.YELLOW}3. Execute tool 'time' with argument 'UTC':{Style.RESET_ALL}")
             print(f"   {curl} -s --noproxy {host_colored} "
                   "-H \"Content-Type: application/json\" "
                   "-d \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":2,\\\"method\\\":\\\"tools/call\\\","
-                  "\\\"params\\\":{\\\"name\\\":\\\"greet\\\","
-                  "\\\"arguments\\\":{\\\"name\\\":\\\"Alice\\\"}}}\" "
+                  "\\\"params\\\":{\\\"name\\\":\\\"time\\\","
+                  "\\\"arguments\\\":{\\\"timezone\\\":\\\"UTC\\\"}}}\" "
                   f"http://{host_colored}:{port_colored}/message | jq{Style.RESET_ALL}")
 
         print(

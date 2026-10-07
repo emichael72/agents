@@ -24,7 +24,7 @@ this agent shares with MCPAgent.
 
 ```bash
 .venv/bin/python pydantic/agent.py                                # interactive chat, local Python tools
-.venv/bin/python pydantic/agent.py --prompt "Greet me" --history  # one prompt + raw message dump
+.venv/bin/python pydantic/agent.py --prompt "Time now" --history  # one prompt + raw message dump
 .venv/bin/python pydantic/agent.py --mcp                          # same tools, served by MCPAgent's server over MCP
 .venv/bin/python -m unittest discover -s pydantic/tests           # offline tests
 ```

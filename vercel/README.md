@@ -28,7 +28,7 @@ From the repository root:
 
 ```bash
 node vercel/agent.ts                                # interactive chat, local tools
-node vercel/agent.ts --prompt "Greet me" --history  # one prompt + raw message dump
+node vercel/agent.ts --prompt "Time now" --history  # one prompt + raw message dump
 node vercel/agent.ts --parallel                     # run a response's tool calls concurrently
 node vercel/agent.ts --mcp ""                       # same tools from MCPAgent's MCP server (see below)
 npm --prefix vercel test                            # offline tests

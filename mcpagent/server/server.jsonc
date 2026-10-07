@@ -44,7 +44,7 @@
 	// Tools live in the shared agents/tools folder; each <tool>/tool.json describes one tool.
 	// Paths in a manifest are relative to that folder, which is also the tools' working directory.
 	"tools_dir": "../../tools",
-	// Lets tools such as greet say which agent ran them
+	// Lets tools such as mr and pr_gate say which agent ran them
 	"tools_env": {"AGENT_NAME": "MCP Agent"},
 
 	"templates": {
@@ -58,12 +58,12 @@
 		  args        : Arguments to pre-fill for this example
 		*/
 
-		"say_hello": {
-			"description": "Template to greet a specific user using greet",
-			"command": "greet",
+		"utc_time": {
+			"description": "Template to show the time in UTC using time",
+			"command": "time",
 			// Must match one of the tools above
 			"args": {
-				"name": "Alice"
+				"timezone": "UTC"
 				// Predefined argument
 			}
 		},

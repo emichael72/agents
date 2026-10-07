@@ -4,11 +4,11 @@ import { test } from 'node:test';
 import { tool, type ToolSet } from 'ai';
 import { convertArrayToReadableStream, MockLanguageModelV4 } from 'ai/test';
 import { z } from 'zod';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ask, buildAgent, linkSegments, loadInstructions, loadModels, loadOutputSettings, memoryText, Output, resolveModel, wrap } from '../agent.ts';
-import { loadTools, localTools } from '../tools.ts';
+import { loadTools, localTools, runScript } from '../tools.ts';
 
 const usage = {
   inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
@@ -46,34 +46,37 @@ function scriptedModel(calls: [string, object][]) {
 
 const quiet = { trace: false, write: () => {} };
 
+/** The scripted turn every agent's tests replay (tests/scenario.json). */
+type Step = { tool: string; arguments: object; outcome: 'ok' | 'error'; output: string };
+const SCENARIO = JSON.parse(readFileSync(path.join(import.meta.dirname, '..', '..', 'tests', 'scenario.json'), 'utf8')) as
+  { prompt: string; calls: Step[] };
+const CALLS: [string, object][] = SCENARIO.calls.map((step) => [step.tool, step.arguments]);
+
 test('local tools run for real and failures reach the model', async () => {
-  const agent = buildAgent(scriptedModel([
-    ['greet', { name: 'Alice' }], ['shell', { cwd: 'missing-file', command: 'ls' }], ['time', { timezone: 'UTC' }],
-  ]), localTools);
-  const history = await ask(agent, 'Do everything', [], quiet);
-  const answer = JSON.stringify(history.at(-1));
-  assert.match(answer, /Hello, Alice!/);
-  assert.match(answer, /not an allowed folder/);
-  assert.match(answer, /\(UTC\+00:00\)/);
+  const agent = buildAgent(scriptedModel(CALLS), localTools);
+  const answer = JSON.stringify((await ask(agent, SCENARIO.prompt, [], quiet)).at(-1));
+  for (const step of SCENARIO.calls) assert.ok(answer.includes(step.output), step.output);
 });
 
 test('each tool call prints next to its result', async () => {
   let printed = '';
-  const agent = buildAgent(scriptedModel([
-    ['greet', { name: 'Alice' }], ['shell', { cwd: 'missing-file', command: 'ls' }], ['time', { timezone: 'UTC' }],
-  ]), localTools);
-  await ask(agent, 'Do everything', [], { trace: true, write: (text) => { printed += text; } });
+  const agent = buildAgent(scriptedModel(CALLS), localTools);
+  await ask(agent, SCENARIO.prompt, [], { trace: true, write: (text) => { printed += text; } });
   const lines = printed.replace(/\x1b\[[0-9;]*m/g, '').split('\n')
     .filter((line) => /^[→←✗] /.test(line))
     .map((line) => line.slice(0, 2) + line.slice(2).split(/[(:]/)[0]);
-  assert.deepEqual(lines, ['→ greet', '← greet', '→ shell', '✗ shell',
-                           '→ time', '← time']);
+  assert.deepEqual(lines, SCENARIO.calls.flatMap((step) =>
+    [`→ ${step.tool}`, `${step.outcome === 'ok' ? '←' : '✗'} ${step.tool}`]));
 });
 
-test('greet without a name greets the shell user', async () => {
-  const agent = buildAgent(scriptedModel([['greet', {}]]), localTools);
-  const answer = JSON.stringify((await ask(agent, 'Greet me', [], quiet)).at(-1));
-  assert.match(answer, new RegExp(`Hello, ${process.env.USER}!`));
+test('tools are told which agent runs them', async () => {
+  assert.equal(await runScript(['printenv', 'AGENT_NAME']), 'Vercel Agent');
+});
+
+test('an omitted optional argument runs the tool without it', async () => {
+  const agent = buildAgent(scriptedModel([['time', {}]]), localTools);
+  const answer = JSON.stringify((await ask(agent, 'What time is it?', [], quiet)).at(-1));
+  assert.match(answer, /\d{2}:\d{2}/);
 });
 
 test('a tool added to the tools folder is discovered and validated', async () => {

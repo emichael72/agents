@@ -4,8 +4,8 @@ Module: memory.py
 
 Description:
     The agents' memory: short notes kept between runs, one topic per file in the folder named
-    "memory" in context/paths.json (read and write, no execute), with an index the agents load at
-    start-up (memory/index.md).
+    "memory" in context/paths.json (agents/.memory, read and write, no execute), with an index the
+    agents load at start-up (.memory/index.md).
 
     Actions:
       - save: add a line to a topic's note (or, with replace, rewrite the note), and update the

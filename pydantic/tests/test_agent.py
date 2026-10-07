@@ -27,8 +27,9 @@ from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel 
 import agent  # noqa: E402
 import toolset as tools_module  # noqa: E402
 
-CALLS = [("greet", {"name": "Alice"}), ("shell", {"cwd": "missing-file", "command": "ls"}),
-         ("time", {"timezone": "UTC"})]
+# The scripted turn every agent's tests replay (tests/scenario.json)
+SCENARIO = json.loads((Path(__file__).resolve().parents[2] / "tests" / "scenario.json").read_text())
+CALLS = [(step["tool"], step["arguments"]) for step in SCENARIO["calls"]]
 
 
 async def scripted_model(messages, info: AgentInfo):
@@ -88,7 +89,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
 
         bot = agent.build_agent(FunctionModel(stream_function=scripted_model))
         with patch.object(tools_module, "run_script", tracked):
-            history = await agent.ask(bot, "Do everything", [], trace=False, parallel=parallel)
+            history = await agent.ask(bot, SCENARIO["prompt"], [], trace=False, parallel=parallel)
         return history, overlaps
 
     async def test_parallel_flag_runs_tools_concurrently(self):
@@ -99,9 +100,8 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         history, overlaps = await self.run_tracked(parallel=False)
         self.assertEqual(overlaps, [1, 1, 1])  # never two scripts at once (MCPAgent's server requires this)
         answer = history[-1].parts[0].content
-        self.assertIn("Hello, Alice!", answer)
-        self.assertIn("not an allowed folder", answer)
-        self.assertIn("(UTC+00:00)", answer)
+        for step in SCENARIO["calls"]:
+            self.assertIn(step["output"], answer)
         returns = [part.tool_name for message in history if isinstance(message, ModelRequest)
                    for part in message.parts if isinstance(part, ToolReturnPart)]
         self.assertEqual(returns, [name for name, _ in CALLS])
@@ -160,17 +160,20 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_each_tool_call_prints_next_to_its_result(self):
         bot = agent.build_agent(FunctionModel(stream_function=scripted_model))
-        await agent.ask(bot, "Do everything", [], trace=True)
+        await agent.ask(bot, SCENARIO["prompt"], [], trace=True)
         lines = [line[:1] + " " + line[2:].split("(")[0].split(":")[0]
                  for line in self.output.getvalue().splitlines() if line[:1] in "→←✗" and line]
-        self.assertEqual(lines, ["→ greet", "← greet", "→ shell", "✗ shell",
-                                 "→ time", "← time"])
+        expected = [line for step in SCENARIO["calls"]
+                    for line in (f"→ {step['tool']}", f"{'←' if step['outcome'] == 'ok' else '✗'} {step['tool']}")]
+        self.assertEqual(lines, expected)
 
-    def test_greet_without_name_greets_the_shell_user(self):
-        greet = tool_function(tools_module.toolset, "greet")
-        self.assertIn(f"Hello, {os.environ['USER']}!", greet())
-        self.assertIn("Hello, Alice! Greetings from the Pydantic Agent.", greet(name="Alice"))
-        self.assertIn(f"Hello, {os.environ['USER']}!", greet(name=None))  # null means omitted
+    def test_tools_are_told_which_agent_runs_them(self):
+        self.assertEqual(tools_module.run_script("printenv", "AGENT_NAME"), "Pydantic Agent")
+
+    def test_an_omitted_optional_argument_may_be_null(self):
+        clock = tool_function(tools_module.toolset, "time")
+        self.assertIn("(UTC+00:00)", clock(timezone="UTC"))
+        self.assertEqual(clock(timezone=None)[:4], clock()[:4])  # null means omitted: local time
 
     async def test_history_carries_across_turns(self):
         async def remember(messages, info):

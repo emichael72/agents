@@ -3,7 +3,7 @@
 Three agents that do the same job, each built a different way. All three talk to the same model,
 configured once in [`context/models.json`](context/models.json) (by default an LM Studio server
 running `qwen/qwen3-coder-30b`), and run the same tools, which they discover in the shared
-[`tools/`](tools/README.md) folder. Each greeting says which agent ran it.
+[`tools/`](tools/README.md) folder, and remember between runs in the same [memory](#memory).
 
 | Agent | Built with | Who runs the agent loop | README |
 | --- | --- | --- | --- |
@@ -41,14 +41,14 @@ committed.
 Every agent scans this folder at startup, so a tool added there is available to all three
 without code changes. [tools/README.md](tools/README.md) describes the manifest and how to add
 a tool. Current tools: `shell` (ls, cat, grep, find, sed, make, gcc, git and more, in a sandbox),
-`ed` (edit files), `mr` (open a merge request), `doxy`
-(checks Doxygen documentation of C/C++ sources) and `pr_gate` (Pull Request Gate: a merge gate
+`ed` (edit files), `mr` (open a merge request), `memory` (notes kept between runs), `time`,
+`sysinfo`, `doxy` (checks Doxygen documentation of C/C++ sources) and `pr_gate` (Pull Request Gate: a merge gate
 that quizzes a developer on their pull request; see [gatekeepers/pr/README.md](gatekeepers/pr/README.md)).
 Tools that take a path only reach the folders named in
 [`context/paths.json`](context/paths.json).
 
 ```bash
-bash tools/greet/greet.sh --name Alice  # run a tool's script by hand
+bash tools/time/time.sh --timezone UTC  # run a tool's script by hand
 ```
 
 ## Gatekeepers
@@ -71,6 +71,7 @@ change on its next start. None of this is hard-coded in the agents.
   lines.
 - `context/agent.json`: the agent loop: `max_tool_calls`, the most tool calls the model may make while
   answering one prompt; `0` (the setting now) means no limit, so stop a runaway answer with Ctrl+C.
+  `memory_index` names the memory index every agent loads (see "Memory" below).
 - `context/output.json`: the terminal layout: `width` (120) and `show_time` (true). See
   "Terminal output" below.
 - `context/clang-format.yaml`: the C/C++ style (4-space indents, function braces on their own
@@ -79,11 +80,8 @@ change on its next start. None of this is hard-coded in the agents.
 - `context/clang-tidy.yaml`: the C/C++ checks for `clang-tidy` in the shell (likely bugs and
   unsafe patterns, not style); Fedora's clang-tidy enables none on its own. A project's own
   `.clang-tidy` wins.
-- `memory/` (with `context/agent.json`'s `memory_index`): the agents' memory between runs. The
-  `memory` tool saves, reads and forgets notes there, and every agent loads `memory/index.md`
-  into its instructions at start-up. The notes stay on this machine (git ignores them).
 - `context/paths.json`: the folders the tools may use and their access (`r` read, `w` write,
-  `x` execute): `core_dump` is `rwx`, `tools` is `r`. Every tool that takes a path checks it with
+  `x` execute): `core_dump` is `rwx`, `tools` is `r`, `memory` (`.memory/`) is `rw`. Every tool that takes a path checks it with
   the file-system gate, `gatekeepers/fs/fs_gate.py`, and `shell` mounts exactly these folders in its
   sandbox; see
   [tools/README.md](tools/README.md). Unlike the rest of `context/`, it is read on every tool call,
@@ -121,6 +119,22 @@ All three agents take the same options: `--profile NAME` (or the shortcuts `--lo
 `--openai`) picks a profile, and `--model` / `--base-url` override it for one run. Precedence is
 the command line, then the `*_env` variables, then the file. To add a model, add a profile (for
 example `"mistral": {...}`) and pass `--profile mistral`.
+
+## Memory
+
+The agents keep notes between runs in `.memory/`: what they learned about a project, decisions
+made, and the user's preferences. Any agent can read what another saved.
+
+- The folder is named `memory` in `context/paths.json`, with read and write access but no
+  execute, so nothing stored there can run.
+- The [`memory`](tools/memory/README.md) tool saves, reads and forgets the notes, one topic per
+  file (for example `core_dump.md`, `preferences.md`), each kept short and up to date.
+- `.memory/index.md` lists the topics, one line each. Every agent loads it into its instructions
+  at start-up (`memory_index` in `context/agent.json`), then reads only the notes it needs.
+- Never secrets: no keys, passwords or tokens.
+
+The notes are local to this machine: git ignores `.memory/`. Delete a note, or the whole folder,
+to make the agents forget.
 
 ## Terminal output
 
@@ -167,7 +181,7 @@ See [mcpagent/README.md](mcpagent/README.md).
 ```bash
 .venv/bin/python -m mcpagent.server                      # terminal 1: MCP server on 127.0.0.1:6275
 .venv/bin/python -m mcpagent.client                      # terminal 2: chat, default model profile
-.venv/bin/python -m mcpagent.client --prompt "Greet me"  # one prompt and exit
+.venv/bin/python -m mcpagent.client --prompt "Time now"  # one prompt and exit
 .venv/bin/python -m unittest discover -s mcpagent/tests  # offline tests
 ```
 
@@ -178,7 +192,7 @@ MCPAgent server with `--mcp`. See [pydantic/README.md](pydantic/README.md).
 
 ```bash
 .venv/bin/python pydantic/agent.py                                # interactive chat
-.venv/bin/python pydantic/agent.py --prompt "Greet me" --history  # one prompt + raw message dump
+.venv/bin/python pydantic/agent.py --prompt "Time now" --history  # one prompt + raw message dump
 .venv/bin/python pydantic/agent.py --parallel                     # run a response's tool calls concurrently
 .venv/bin/python pydantic/agent.py --mcp                          # tools from the MCPAgent server
 .venv/bin/python -m unittest discover -s pydantic/tests           # offline tests
@@ -191,13 +205,26 @@ directly. See [vercel/README.md](vercel/README.md).
 
 ```bash
 node vercel/agent.ts                                # interactive chat
-node vercel/agent.ts --prompt "Greet me" --history  # one prompt + raw message dump
+node vercel/agent.ts --prompt "Time now" --history  # one prompt + raw message dump
 node vercel/agent.ts --parallel                     # run a response's tool calls concurrently
 npm --prefix vercel test                            # offline tests
 ```
 
 `--mcp` is also available, but it does not yet work against the MCPAgent server (an MCP protocol
 version mismatch); the vercel README explains why.
+
+## Tests
+
+Each agent has offline tests: a scripted stand-in model, with the real tools. All three replay
+the same turn, [`tests/scenario.json`](tests/scenario.json): the model asks for a few tool calls
+in one response (a shell command, one that must fail, the time), and each must end as the file
+says. Change a call there and all three agents are tested on it.
+
+```bash
+.venv/bin/python -m unittest discover -s mcpagent/tests
+.venv/bin/python -m unittest discover -s pydantic/tests
+npm --prefix vercel test
+```
 
 ## Shared settings
 

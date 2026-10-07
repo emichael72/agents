@@ -34,6 +34,5 @@ Thumbs.db
 # pr gatekeeper: quiz database, answer keys and access password
 gatekeepers/pr/data/
 
-# Agents' memory: local notes, not committed (only the README is)
-memory/*
-!memory/README.md
+# Agents' memory: local notes, not committed
+.memory/

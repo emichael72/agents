@@ -11,13 +11,12 @@ added here is available to all of them without code changes:
 
 | Tool | Runs | Parameters | Result |
 | --- | --- | --- | --- |
-| `greet` | Bash | `name` (optional) | A greeting for `name`, or for the shell user (`$USER`) |
 | `time` | Bash / `date` | `timezone` (optional, IANA name) | The current date and time |
 | `sysinfo` | Python | `section` (optional) | The system, CPU utilization and load, memory, disks, network, GPU, busiest processes and software versions (Python, gcc, ...) |
 | `shell` | Python / `bwrap` | `cwd`, `command` | Runs a command line (ls, cat, grep, find, sed, make, gcc, git, ... joined with `\|`, `&&`, `;`) in an allowed folder, inside a sandbox; `help` lists the commands |
 | `ed` | Python | `path`, `action`, `old`, `new`, `all`, `start`, `end`, `line` (by action) | Edits a file: replace exact text, replace or delete lines, insert, or write a whole file; shows the changed lines |
 | `mr` | Python / `git`, `gh` | `path`, `title`, `body`, `branch` (optional) | Opens a merge request: formats the changed C/C++ files, puts the changes on a new branch, pushes it and opens a pull request into the default branch; returns the gate's quiz link |
-| `memory` | Python | `action` (save, read, forget), `topic`, `text`, `summary`, `replace` | The agents' notes between runs, in `memory/`; the index is loaded into every agent's instructions |
+| `memory` | Python | `action` (save, read, forget), `topic`, `text`, `summary`, `replace` | The agents' notes between runs, in `.memory/`; the index is loaded into every agent's instructions |
 | `doxy` | Bash / `doxygen` | `paths` (files or folders, space-separated) | Doxygen documentation problems as `file:line: message`, or "All documented" |
 | `pr_gate` | Python (shared `.venv`) | `pr` (optional) | Open PRs in the gated repository and their gate state; the gate itself is [gatekeepers/pr](../gatekeepers/pr/README.md) |
 
@@ -27,17 +26,17 @@ below. Most file and build work goes through `shell`; see [shell/README.md](shel
 
 ## The manifest
 
-`greet/tool.json`:
+`time/tool.json`:
 
 ```json
 {
-  "description": "Prints a greeting for the given name. Omit name to greet the current user (for example, when asked to greet me).",
+  "description": "Returns the current date and time, optionally in a given time zone.",
   "command": "bash",
-  "args": ["greet/greet.sh"],
+  "args": ["time/time.sh"],
   "params": [
-    {"name": "name", "type": "string", "description": "Name of the user to greet; omit it to greet the current user", "style": "flag", "required": false}
+    {"name": "timezone", "type": "string", "description": "IANA time zone such as Europe/London or Asia/Tokyo; omit it for the machine's local time", "style": "flag", "required": false}
   ],
-  "resource": "greet/README.md"
+  "resource": "time/README.md"
 }
 ```
 
@@ -45,7 +44,7 @@ below. Most file and build work goes through `shell`; see [shell/README.md](shel
 | --- | --- |
 | *(folder name)* | The tool's name, as the model sees it. Use `[a-z0-9_-]`. |
 | `description` | What the model reads to decide when to use the tool. |
-| `command`, `args` | The program and its fixed arguments, e.g. `bash greet/greet.sh`. |
+| `command`, `args` | The program and its fixed arguments, e.g. `bash time/time.sh`. |
 | `params` | Arguments the model supplies. Each has `name`, `type` (`string`, `integer`, `number`, `boolean`), `description`, `style` and optionally `required`. |
 | `style` | `flag` passes `--<name> <value>`; `positional` passes the bare value, in `params` order. Default `flag`. |
 | `required` | Defaults to `true`. An optional parameter the model omits is not passed at all, so the script's own default applies. |

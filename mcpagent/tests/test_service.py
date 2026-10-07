@@ -66,15 +66,14 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         shared_tools = Path(__file__).resolve().parents[2] / 'tools'  # agents/tools
         self.assertEqual(len(tools['result']['tools']), len(list(shared_tools.glob('*/tool.json'))))
         for name, args, expected in [
-            ('greet', {'name': 'Alice Smith'}, 'Hello, Alice Smith!'),
-            ('greet', {}, f"Hello, {os.environ['USER']}!"),  # no name: the shell user
             ('sysinfo', {'section': 'software'}, 'python (running this tool)'),
             ('sysinfo', {}, '[cpu]'),
             ('time', {'timezone': 'UTC'}, 'UTC (UTC+00:00)'),
-            ('shell', {'cwd': 'tools', 'command': 'ls greet'}, 'tool.json'),
+            ('time', {}, ':'),  # no time zone: local time
+            ('shell', {'cwd': 'tools', 'command': 'ls time'}, 'tool.json'),
             ('shell', {'cwd': 'tools', 'command': 'help'}, 'Allowed folders'),
-            ('shell', {'cwd': 'tools/greet', 'command': 'grep -n AGENT_NAME greet.sh | head -1'}, 'AGENT_NAME'),
-            ('shell', {'cwd': 'tools', 'command': 'cat -n greet/tool.json | wc -l'}, ''),
+            ('shell', {'cwd': 'tools/time', 'command': 'grep -n timezone time.sh | head -1'}, 'timezone'),
+            ('shell', {'cwd': 'tools', 'command': 'cat -n time/tool.json | wc -l'}, ''),
         ]:
             result = (await self.rpc('tools/call', {'name': name, 'arguments': args}))['result']
             self.assertFalse(result['isError'], result)
@@ -108,16 +107,16 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue((await check(f'{folder}/good.c'))['isError'])  # Absolute paths are not allowed
 
     async def test_path_tools_stay_inside_the_allowed_folders(self):
-        for path in ('tools/..', 'tools/greet/../..', 'etc', '/etc'):
+        for path in ('tools/..', 'tools/time/../..', 'etc', '/etc'):
             for name, args in [('shell', {'cwd': path, 'command': 'ls'}), ('doxy', {'paths': path}),
                                ('ed', {'path': path + '/passwd', 'action': 'write', 'new': 'x'})]:
                 result = (await self.rpc('tools/call', {'name': name, 'arguments': args}))['result']
                 self.assertTrue(result['isError'], (name, path))
-        link = Path(__file__).resolve().parents[2] / 'tools' / 'greet' / 'escape-test-link'
+        link = Path(__file__).resolve().parents[2] / 'tools' / 'time' / 'escape-test-link'
         link.symlink_to('/etc')
         try:
             result = (await self.rpc('tools/call', {'name': 'shell', 'arguments': {
-                'cwd': 'tools/greet/escape-test-link', 'command': 'ls'}}))['result']
+                'cwd': 'tools/time/escape-test-link', 'command': 'ls'}}))['result']
             self.assertTrue(result['isError'])
             self.assertIn('outside the allowed folder', result['content'][0]['text'])
         finally:
@@ -331,9 +330,9 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tools["hello"]["resource"], str(Path(folder) / "hello" / "README.md"))
 
     async def test_errors(self):
-        # A missing name is valid (greets the shell user); a wrong type, extra field or non-object is not.
-        for arguments in ({'name': 123}, {'name': 'Alice', 'extra': True}, []):
-            result = await self.rpc('tools/call', {'name': 'greet', 'arguments': arguments})
+        # A missing time zone is valid (local time); a wrong type, extra field or non-object is not.
+        for arguments in ({'timezone': 123}, {'timezone': 'UTC', 'extra': True}, []):
+            result = await self.rpc('tools/call', {'name': 'time', 'arguments': arguments})
             self.assertEqual(result['error']['code'], -32602)
         for name, args in [('time', {'timezone': 'Not/AZone'}), ('shell', {'cwd': 'missing-file', 'command': 'ls'})]:
             result = await self.rpc('tools/call', {'name': name, 'arguments': args})

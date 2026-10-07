@@ -45,7 +45,7 @@ The client needs the server, so use two terminals, both at the repository root:
 ```bash
 .venv/bin/python -m mcpagent.server                                      # terminal 1: wait for "Running..."
 .venv/bin/python -m mcpagent.client                                      # terminal 2: chat, default model profile
-.venv/bin/python -m mcpagent.client --prompt "Greet me"                  # one prompt and exit
+.venv/bin/python -m mcpagent.client --prompt "Time now"                  # one prompt and exit
 .venv/bin/python -m mcpagent.client --model mistralai/mistral-small-3.2  # another model on the same server
 .venv/bin/python -m unittest discover -s mcpagent/tests                  # offline tests
 ```
@@ -69,8 +69,8 @@ lines. In the chat, `/history` shows the messages exchanged with the model, `/re
 | `--config path/to/client.jsonc` | Use another client config |
 | `--context path/to/instructions.txt` | Add instructions for the assistant |
 
-Try: "Greet me", "Greet Alice", "Pick a random number between 1 and 10", "Count the lines in
-greet/README.md", "What OS is this machine running?", "Count the lines in missing-file and
+Try: "What time is it in Tokyo?", "Count the lines in tools/time/README.md", "What OS is this
+machine running?", "Remember that I prefer short answers", "Count the lines in missing-file and
 explain what happened". The tools are listed in [../tools/README.md](../tools/README.md).
 
 ## How it maps to the other two
