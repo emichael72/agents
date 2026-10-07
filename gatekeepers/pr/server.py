@@ -39,8 +39,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
 # Local imports
-import clone
-import quiz
+from gatekeepers.pr import clone, quiz
 
 MAX_FAILURES = 3  # Generation attempts per revision before the poller gives up on it
 SESSION_COOKIE = "pr_gate_session"

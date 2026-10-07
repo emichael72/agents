@@ -36,7 +36,9 @@ import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
-REPO_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file())
+# Local imports
+from gatekeepers import REPO_ROOT
+
 TOOLS_DIR = REPO_ROOT / "tools"  # doxy and shell
 DOXY = TOOLS_DIR / "doxy" / "doxy.sh"
 SHELL = TOOLS_DIR / "shell" / "shell.py"

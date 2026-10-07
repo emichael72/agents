@@ -37,10 +37,10 @@ from typing import Optional
 
 # The repository root (the nearest folder above holding pyproject.toml); relative allowed
 # folders start here
-REPO_DIR = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file())
-TOOLS_DIR = REPO_DIR / "tools"
-GATEKEEPERS_DIR = REPO_DIR / "gatekeepers"
-CONTEXT_DIR = REPO_DIR / "context"
+REPO_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file())
+TOOLS_DIR = REPO_ROOT / "tools"
+GATEKEEPERS_DIR = REPO_ROOT / "gatekeepers"
+CONTEXT_DIR = REPO_ROOT / "context"
 PATHS_FILE = CONTEXT_DIR / "paths.json"
 RIGHTS = {"r": "read", "w": "write", "x": "execute"}
 
@@ -95,10 +95,10 @@ def load_allowed(path: Optional[Path] = None) -> dict[str, Folder]:
     folders = {}
     for name, entry in json.loads(path.read_text(encoding="utf-8"))["paths"].items():
         if isinstance(entry, str):
-            base = (REPO_DIR / Path(entry).expanduser()).resolve()
+            base = (REPO_ROOT / Path(entry).expanduser()).resolve()
             folders[name] = Folder(name, base)
             continue
-        base = (REPO_DIR / Path(entry["path"]).expanduser()).resolve()
+        base = (REPO_ROOT / Path(entry["path"]).expanduser()).resolve()
         subpaths = {(base / sub).resolve(): parse_access(access, f"{name}/{sub}")
                     for sub, access in entry.get("subpaths", {}).items()}
         folders[name] = Folder(name, base, parse_access(entry.get("access", "r"), name), subpaths)

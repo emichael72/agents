@@ -10,7 +10,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,13 +18,8 @@ from unittest.mock import patch
 # Keep the module-level data directory away from live data, then import the tool's modules
 IMPORT_DATA = tempfile.TemporaryDirectory()
 os.environ["QUIZ_DATA_DIR"] = IMPORT_DATA.name
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import changes  # noqa: E402
-import clone  # noqa: E402
-import quiz  # noqa: E402
-import pr_gate  # noqa: E402
-import server  # noqa: E402
+from gatekeepers.pr import changes, clone, pr_gate, quiz, server  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 FIXTURE = {"title": "C math quiz", "questions": [

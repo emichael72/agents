@@ -4,9 +4,26 @@
 # This file also marks the repository root. Code that needs a shared folder (context/, tools/,
 # gatekeepers/) walks up from its own location to the nearest folder holding this file, instead
 # of counting ../ levels, so moving a file does not break its paths.
+#
+# install.sh installs the Python packages below into the shared .venv in editable mode
+# (pip install --no-deps -e .), so they import from anywhere without sys.path changes. Editable
+# is required: the packages find the repository's shared folders through this file, so they run
+# from this checkout. Their pinned dependencies come from the requirements files.
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "agents"
 version = "1.0.0"
 description = "Three agents built three ways, sharing one set of tools, context and gatekeepers"
 requires-python = ">=3.10"
+
+[tool.setuptools]
+package-dir = {mcpagent = "mcp/mcpagent", pydantic_agent = "pydantic/pydantic_agent", gatekeepers = "gatekeepers"}
+packages = [
+    "mcpagent", "mcpagent.client", "mcpagent.server",
+    "pydantic_agent",
+    "gatekeepers", "gatekeepers.fs", "gatekeepers.pr",
+]

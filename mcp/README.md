@@ -35,12 +35,11 @@ requirements.txt                     pinned dependencies (installed by the repos
 ## Setup
 
 The repository's [`install.sh`](../install.sh) sets up the shared `.venv/` with
-`requirements.txt`. MCPAgent is not installed as a package: it runs from the source tree as
-`python mcp/server.py` and `python mcp/client.py`, from the repository root.
-
-From `mcp/`, the module commands are also available: `../.venv/bin/python -m mcpagent.server`
-and `../.venv/bin/python -m mcpagent.client`. In PyCharm, mark `mcp/` as a Sources Root so
-imports from `mcpagent` resolve.
+`requirements.txt`, and installs the `mcpagent` package into it in editable mode (from the
+repository's `pyproject.toml`), so it runs from this checkout: `python mcp/server.py` and
+`python mcp/client.py` from the repository root, or `.venv/bin/python -m mcpagent.server` and
+`.venv/bin/python -m mcpagent.client` from any folder. With the `.venv` as the interpreter,
+PyCharm resolves the `mcpagent` imports.
 
 Requirements: Python 3.10+, Bash and standard Unix tools; Node.js only for MCP Inspector.
 

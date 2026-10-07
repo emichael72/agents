@@ -5,7 +5,8 @@
 # Description:
 #   Installs everything needed to run the three agents:
 #     - A shared Python virtual environment (.venv) for MCPAgent and the Pydantic Agent,
-#       with both agents' pinned requirements and the pr_gate tool's. Both agents run from the source tree.
+#       with both agents' pinned requirements and the pr_gate tool's, and the repository's own
+#       packages (mcpagent, pydantic_agent, gatekeepers) installed editable from pyproject.toml.
 #     - vercel/node_modules for the Vercel Agent, installed exactly as package-lock.json
 #       records (npm ci).
 #   It runs only on Red Hat family systems that use dnf (RHEL, Fedora, Rocky, AlmaLinux, CentOS
@@ -29,7 +30,9 @@ PYTHON_REQUIRED_MIN_VER="3.10"
 PYTHON_BIN="" # The interpreter the venv is created with, chosen by find_python
 PYTHON_REQUIREMENTS_FILES="mcp/requirements.txt pydantic/requirements.txt gatekeepers/pr/requirements.txt requirements-dev.txt"
 PYTHON_MODULES_TO_RUN="mcpagent.server mcpagent.client" # Checked with python -m <module> --version
-PYTHON_VERIFY_MODULES="mcpagent pydantic_ai jsonschema httpx httpx2 aiohttp json5 prompt_toolkit rich ruff"
+# Checked with python -c "import <module>"
+PYTHON_VERIFY_MODULES="mcpagent pydantic_agent gatekeepers.fs.fs_gate gatekeepers.pr.changes"
+PYTHON_VERIFY_MODULES+=" pydantic_ai jsonschema httpx httpx2 aiohttp json5 prompt_toolkit rich ruff"
 
 # Node 22.18+ runs .ts files directly (type stripping), so the Vercel Agent needs no build step
 NODE_PROJECT_PATH="vercel"
@@ -383,7 +386,7 @@ create_python_venv() {
 }
 
 #
-# @brief Install the agents' requirements into the venv.
+# @brief Install the agents' requirements, then the repository's own packages (editable).
 # @param $1  Full path to the virtual environment directory.
 # @return
 #   0 on success, nonzero on failure.
@@ -406,6 +409,11 @@ install_python_packages() {
         print_status_label_results "OK"
     done
 
+    # Editable, so the packages run from this checkout and find its shared folders
+    print_status_label "Installing the repository's packages (editable)"
+    run_logged "pip install -e ." "${pip[@]}" --no-deps -e . || return 1
+    print_status_label_results "OK"
+
     print_status_label "Checking installed packages are consistent"
     run_logged "pip check" "$venv_full_path/bin/python" -m pip check || return 1
     print_status_label_results "OK"
@@ -427,7 +435,7 @@ verify_python_agents() {
     print_status_label "Verifying MCPAgent and the Pydantic Agent"
 
     for module in $PYTHON_VERIFY_MODULES; do
-        if ! (cd mcp && "$py_bin" -c "import $module") >/dev/null 2>&1; then
+        if ! "$py_bin" -c "import $module" >/dev/null 2>&1; then
             print_status_label_results "ERROR"
             printf "Module '%s' is not importable with %s.\n" "$module" "$py_bin" >&2
             return 1
@@ -435,7 +443,7 @@ verify_python_agents() {
     done
 
     for module in $PYTHON_MODULES_TO_RUN; do
-        if ! (cd mcp && "$py_bin" -m "$module" --version) >/dev/null 2>&1; then
+        if ! "$py_bin" -m "$module" --version >/dev/null 2>&1; then
             print_status_label_results "ERROR"
             printf "'python -m %s --version' failed with %s.\n" "$module" "$py_bin" >&2
             return 1

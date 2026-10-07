@@ -7,12 +7,7 @@ Description:
     A real MCP server runs the shared tools; the model is a small aiohttp server answering with
     scripted responses, so no model server or API key is needed.
 """
-import sys
 from pathlib import Path
-
-# Run from any folder: the MCP project directory holds the mcpagent package.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 import json
 import re
 import os

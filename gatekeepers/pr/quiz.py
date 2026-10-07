@@ -41,10 +41,11 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 # Local imports
-import changes
+from gatekeepers import REPO_ROOT
+from gatekeepers.pr import changes
 
 GATE_DIR = Path(__file__).resolve().parent
-MODELS_FILE = changes.REPO_ROOT / "context" / "models.json"
+MODELS_FILE = REPO_ROOT / "context" / "models.json"
 INSTRUCTIONS_FILE = GATE_DIR / "context" / "instructions.json"
 
 SETTINGS_FILE = GATE_DIR / "settings.json"

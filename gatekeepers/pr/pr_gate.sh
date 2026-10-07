@@ -17,11 +17,11 @@ SCRIPT_PATH="${BASH_SOURCE[0]:-$0}" # zsh sets $0 to the script outside function
 # Globals and configuration (command-line flags override these)
 # ============================================================================
 
-REPO_ROOT=""    # Set by init_paths: the repository root
-GATE_DIR=""     # Set by init_paths: this script's folder
-PYTHON=""       # Set by init_paths: the shared .venv's interpreter
-SHOW_HELP=false # -h/--help: this script's usage, then pr_gate.py's
-GATE_ARGS=()    # The command and its arguments, for pr_gate.py
+REPO_ROOT=""                         # Set by init_paths: the repository root
+GATE_MODULE="gatekeepers.pr.pr_gate" # pr_gate.py, installed in the .venv by install.sh
+PYTHON=""                            # Set by init_paths: the shared .venv's interpreter
+SHOW_HELP=false                      # -h/--help: this script's usage, then pr_gate.py's
+GATE_ARGS=()                         # The command and its arguments, for pr_gate.py
 
 #
 # @brief Print a message: output to stdout, errors to stderr.
@@ -117,16 +117,20 @@ parse_args() {
 }
 
 #
-# @brief Locate pr_gate.py and the shared .venv's Python, from this script's location.
-# @return 0 on success, 1 if the .venv is missing
+# @brief Locate the shared .venv's Python and check that it has the gate installed.
+# @return 0 on success, 1 if the .venv is missing or lacks the gatekeepers package
 #
 init_paths() {
     REPO_ROOT="$(find_repo_root)" || return 1
-    GATE_DIR="$(cd "$(dirname "${SCRIPT_PATH}")" && pwd)"
     PYTHON="${REPO_ROOT}/.venv/bin/python"
 
     if [[ ! -x "${PYTHON}" ]]; then
         log ERROR "%s not found; run ./install.sh from the repository root" "${PYTHON}"
+        return 1
+    fi
+    if ! "${PYTHON}" -c "import ${GATE_MODULE%.*}" >/dev/null 2>&1; then
+        log ERROR "%s is not installed in the .venv; run ./install.sh from the repository root" \
+            "${GATE_MODULE%.*}"
         return 1
     fi
     return 0
@@ -142,11 +146,11 @@ main() {
     if [[ "${SHOW_HELP}" == true ]]; then
         print_usage
         init_paths || return 1
-        exec "${PYTHON}" "${GATE_DIR}/pr_gate.py" --help
+        exec "${PYTHON}" -m "${GATE_MODULE}" --help
     fi
 
     init_paths || return 1
-    exec "${PYTHON}" "${GATE_DIR}/pr_gate.py" "${GATE_ARGS[@]}"
+    exec "${PYTHON}" -m "${GATE_MODULE}" "${GATE_ARGS[@]}"
 }
 
 main "$@"

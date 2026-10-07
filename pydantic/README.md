@@ -34,10 +34,10 @@ this agent shares with MCPAgent.
 Run these from the repository root. For `--mcp`, start the MCPAgent server first:
 `.venv/bin/python mcp/server.py`.
 
-The importable package is `pydantic_agent`, inside this folder. From `pydantic/`, you can also
-run `../.venv/bin/python -m pydantic_agent`. In PyCharm, mark `pydantic/` as a Sources Root so
-the package imports resolve. Keep this folder free of `__init__.py`: a package named `pydantic`
-would shadow the installed dependency.
+The importable package is `pydantic_agent`, inside this folder; `install.sh` installs it into the
+`.venv` in editable mode, so `.venv/bin/python -m pydantic_agent` also works from any folder, and
+PyCharm resolves its imports with the `.venv` as the interpreter. Keep this folder free of
+`__init__.py`: a package named `pydantic` would shadow the installed dependency.
 
 In the chat, `/history` prints the messages exchanged with the model, `/reset` clears them,
 and `exit` quits. A spinner shows what the agent is doing; with `-d` (`--debug`), tool calls are

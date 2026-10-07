@@ -9,7 +9,6 @@ import io
 import json
 import re
 import os
-import sys
 import tempfile
 import threading
 import time
@@ -17,8 +16,6 @@ import unittest
 from pathlib import Path
 from typing import Any, Callable, cast
 from unittest.mock import Mock, patch
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from rich.console import Console
 import pydantic as pydantic_dependency

@@ -25,7 +25,7 @@ from typing import Optional
 import httpx
 
 # Local imports
-import quiz
+from gatekeepers.pr import quiz
 
 
 UNIT = "pr-gate"  # The gate's systemd user unit; the only service the agents may control
@@ -153,7 +153,7 @@ def serve(host: str, port: int, poll: float, profile: Optional[str]) -> None:
         profile: The model profile for generation; None uses the default.
     """
     import uvicorn
-    from server import Poller, create_app
+    from gatekeepers.pr.server import Poller, create_app
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)-8s] %(message)s")
     model = quiz.resolve_model(profile or quiz.PROFILE)  # Fail now, not at the first push

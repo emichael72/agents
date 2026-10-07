@@ -28,7 +28,7 @@ from typing import Callable, Optional
 
 SAMPLE_SECONDS = 0.5
 # The repository root: the nearest folder above holding pyproject.toml
-REPO_DIR = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file())
+REPO_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file())
 REAL_FILESYSTEMS = {"ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "vfat", "exfat", "ntfs", "ntfs3", "f2fs",
                     "nfs", "nfs4", "cifs", "fuseblk"}
 SOFTWARE = [  # (name, command printing its version)
@@ -222,7 +222,7 @@ def processes() -> list[tuple[str, str]]:
 def software() -> list[tuple[str, str]]:
     """Python and the development tools' versions."""
     rows = [("python (running this tool)", f"{platform.python_version()} at {sys.executable}")]
-    venv_python = REPO_DIR / ".venv" / "bin" / "python"
+    venv_python = REPO_ROOT / ".venv" / "bin" / "python"
     if venv_python.exists():
         rows.append(("python (agents .venv)", f"{run([str(venv_python), '--version']).removeprefix('Python ')} "
                                               f"at {venv_python}"))

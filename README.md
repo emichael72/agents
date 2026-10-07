@@ -19,8 +19,9 @@ README. Run every command from the repository root; paths are relative to it.
 `install.sh` prepares everything the three agents need:
 
 - `.venv/`: one Python environment shared by MCPAgent and the Pydantic Agent, with both agents'
-  pinned requirements (`mcp/requirements.txt`, `pydantic/requirements.txt`). Neither agent is
-  installed as a package; both run from the source tree.
+  pinned requirements (`mcp/requirements.txt`, `pydantic/requirements.txt`), and the repository's
+  own packages (`mcpagent`, `pydantic_agent`, `gatekeepers`) installed editable from
+  `pyproject.toml`, so they import from anywhere and run from this checkout.
 - `vercel/node_modules/`: the Vercel Agent's packages, installed exactly as
   `vercel/package-lock.json` records (`npm ci`).
 
