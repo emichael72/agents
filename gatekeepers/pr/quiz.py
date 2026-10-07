@@ -42,7 +42,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 # Local imports
 from gatekeepers import REPO_ROOT
-from gatekeepers.pr import changes
+from gatekeepers.pr.changes import ChangeInspector
 
 GATE_DIR = Path(__file__).resolve().parent
 MODELS_FILE = REPO_ROOT / "context" / "models.json"
@@ -564,7 +564,7 @@ def quiz_context(info: dict[str, Any], build_report: str) -> str:
     what the server's build and tests ran. Both are untrusted text, cut to a bounded size.
     Args:
         info: The pull request, as returned by `pr_info`.
-        build_report: The build and test output (changes.check_build).
+        build_report: The build and test output (ChangeInspector.check_build).
     Returns:
         str: The sections, ready to go before the diff.
     """
@@ -657,7 +657,7 @@ def create_quiz(number: int, profile: Optional[str] = None, fixed: Optional[str]
     if not diff.strip() or len(diff) > MAX_DIFF_CHARS:
         raise ValueError(f"Diff must be nonempty and at most {MAX_DIFF_CHARS:,} characters.")
     publish_status(head, "pending", "Checking documentation and preparing the developer quiz", BASE_URL + "/")
-    inspection = changes.inspect_pr(gh, REPO, number, head, base, BUILD_COMMAND, TEST_TARGET, FAIL_ON_WARNINGS)
+    inspection = ChangeInspector(gh, REPO, BUILD_COMMAND, TEST_TARGET, FAIL_ON_WARNINGS).inspect(number, head, base)
     if fixed:
         quiz, source = Quiz.model_validate_json(Path(fixed).read_text()), "fixed fixture"
         if quiz.cosmetic and inspection["code_files"]:

@@ -19,7 +19,9 @@ from unittest.mock import patch
 IMPORT_DATA = tempfile.TemporaryDirectory()
 os.environ["QUIZ_DATA_DIR"] = IMPORT_DATA.name
 
-from gatekeepers.pr import changes, clone, pr_gate, quiz, server  # noqa: E402
+from gatekeepers.pr import pr_gate, quiz, server  # noqa: E402
+from gatekeepers.pr.changes import ChangeInspector  # noqa: E402
+from gatekeepers.pr.clone import LocalClone  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 FIXTURE = {"title": "C math quiz", "questions": [
@@ -54,7 +56,7 @@ class QuizTests(unittest.TestCase):
         self.mock_gh = self.gh.start()
         self.model = patch.object(quiz, "generate", return_value=(quiz.Quiz.model_validate(FIXTURE), "test model"))
         self.model.start()
-        self.inspect = patch.object(quiz.changes, "inspect_pr", return_value=dict(CODE_CHANGE))
+        self.inspect = patch.object(ChangeInspector, "inspect", return_value=dict(CODE_CHANGE))
         self.mock_inspect = self.inspect.start()
         self.row = quiz.create_quiz(1)
         self.qid = self.row["id"]
@@ -414,7 +416,7 @@ class PollerTests(unittest.TestCase):
         patches = [patch.object(quiz, "DATA", Path(self.temp.name)),
                    patch.object(quiz, "gh", return_value="diff --git a/pi.c b/pi.c"),
                    patch.object(quiz, "pr_info", return_value=copy.deepcopy(INFO)),
-                   patch.object(quiz.changes, "inspect_pr", return_value=dict(CODE_CHANGE)),
+                   patch.object(ChangeInspector, "inspect", return_value=dict(CODE_CHANGE)),
                    patch.object(quiz, "open_prs", return_value=[copy.deepcopy(INFO),
                                                                 dict(INFO, number=2, user={"login": "someone-else"})])]
         self.mocks = [p.start() for p in patches]
@@ -449,43 +451,44 @@ class ChangesTests(unittest.TestCase):
     def test_comments_and_formatting_are_cosmetic(self):
         after = ('/** @file pi.c\n * @brief Pi. */\n#include "pi.h"\n#define WIDTH 15\n'
                  'int print_pi( void ) { return printf( "%.15f", x )<0; }  // Print it\n')
-        self.assertTrue(changes.is_cosmetic("src/pi.c", self.BEFORE, after))
-        self.assertTrue(changes.is_cosmetic("README.md", "old", "new"))
+        self.assertTrue(ChangeInspector.is_cosmetic("src/pi.c", self.BEFORE, after))
+        self.assertTrue(ChangeInspector.is_cosmetic("README.md", "old", "new"))
 
     def test_code_literals_directives_and_other_files_are_not_cosmetic(self):
         for after in (self.BEFORE.replace("< 0", "<= 0"),            # Code
                       self.BEFORE.replace('"%.15f"', '"%.15f "'),  # Space inside a string literal
                       self.BEFORE.replace("#define WIDTH 15\nint", "#define WIDTH 15 int"),  # Directive end
                       self.BEFORE.replace('"%.15f"', '"/* %.15f */"')):  # Comment marker inside a literal
-            self.assertFalse(changes.is_cosmetic("src/pi.c", self.BEFORE, after), after)
-        self.assertFalse(changes.is_cosmetic("Makefile", "LDLIBS =", "LDLIBS = -lm"))
-        self.assertFalse(changes.is_cosmetic("src/new.c", None, "int x;"))
-        self.assertTrue(changes.is_cosmetic("src/new.h", None, "/* Only a comment */"))
+            self.assertFalse(ChangeInspector.is_cosmetic("src/pi.c", self.BEFORE, after), after)
+        self.assertFalse(ChangeInspector.is_cosmetic("Makefile", "LDLIBS =", "LDLIBS = -lm"))
+        self.assertFalse(ChangeInspector.is_cosmetic("src/new.c", None, "int x;"))
+        self.assertTrue(ChangeInspector.is_cosmetic("src/new.h", None, "/* Only a comment */"))
 
     @unittest.skipUnless(shutil.which("bwrap"), "bubblewrap is not installed")
     def test_build_and_tests_run_in_the_sandbox(self):
         with tempfile.TemporaryDirectory() as folder:
             tree = Path(folder)
+            inspector = ChangeInspector(quiz.gh, "owner/name")
             (tree / "Makefile").write_text("all:\n\techo built > out.txt\ncheck: all\n\tgrep -q built out.txt\n")
-            ok, report = changes.check_build(tree)
+            ok, report = inspector.check_build(tree)
             self.assertTrue(ok, report)
             self.assertIn("$ make && make check: succeeded", report)
             (tree / "Makefile").write_text("all:\n\ttrue\ncheck:\n\techo test failed; false\n")
-            ok, report = changes.check_build(tree)
+            ok, report = inspector.check_build(tree)
             self.assertFalse(ok)
             self.assertIn("test failed", report)
             # A compiler warning fails the check, unless warnings are allowed
             (tree / "w.c").write_text("int main(void) { int unused; return 0; }\n")
             (tree / "Makefile").write_text("all:\n\tcc -Wall -c w.c -o w.o\n")
-            ok, report = changes.check_build(tree)
+            ok, report = inspector.check_build(tree)
             self.assertFalse(ok)
             self.assertIn("built with 1 compiler warning(s), which fail the check", report)
             self.assertIn("w.c:1:", report.splitlines()[1])  # The warning is listed first
-            self.assertTrue(changes.check_build(tree, fail_on_warnings=False)[0])
+            self.assertTrue(ChangeInspector(quiz.gh, "owner/name", fail_on_warnings=False).check_build(tree)[0])
             (tree / "Makefile").write_text("all:\n\tcat /etc/os-release\n")  # The sandbox sees only the tree (and no host /etc)
-            self.assertFalse(changes.check_build(tree)[0])
+            self.assertFalse(inspector.check_build(tree)[0])
             (tree / "Makefile").unlink()
-            self.assertEqual(changes.check_build(tree), (True, "No Makefile: nothing to build."))
+            self.assertEqual(inspector.check_build(tree), (True, "No Makefile: nothing to build."))
 
     @unittest.skipUnless(shutil.which("doxygen"), "doxygen is not installed")
     def test_documentation_is_checked_on_the_whole_tree_but_reported_for_changed_files(self):
@@ -499,13 +502,13 @@ class ChangesTests(unittest.TestCase):
             (tree / "src" / "pi.c").write_text(source)
             (tree / "src" / "other.c").write_text(bare)
             # pi.c's function is documented in its header; other.c is not changed, so not reported
-            self.assertEqual(changes.check_docs(tree, ["src/pi.c"]),
+            self.assertEqual(ChangeInspector.check_docs(tree, ["src/pi.c"]),
                              (True, "All 1 changed C/C++ file(s) are documented."))
-            ok, report = changes.check_docs(tree, ["src/pi.c", "src/other.c"])
+            ok, report = ChangeInspector.check_docs(tree, ["src/pi.c", "src/other.c"])
             self.assertFalse(ok)
             self.assertIn("src/other.c:1: error: File has no @file", report)
             self.assertNotIn("pi.c", report)
-        self.assertEqual(changes.check_docs(Path("."), []), (True, "No C/C++ files changed."))
+        self.assertEqual(ChangeInspector.check_docs(Path("."), []), (True, "No C/C++ files changed."))
 
 
 class ServiceControlTests(unittest.TestCase):
@@ -557,9 +560,9 @@ class CloneSyncTests(unittest.TestCase):
         self.git("push", "-q", "origin", "main", cwd=repo)
 
     def test_new_commits_on_github_reach_a_clean_clone(self):
-        self.assertEqual(clone.sync_clone(str(self.clone))[0], "current")
+        self.assertEqual(LocalClone(str(self.clone)).sync()[0], "current")
         self.commit(self.other, "b.c", "Second")
-        outcome, message = clone.sync_clone(str(self.clone))
+        outcome, message = LocalClone(str(self.clone)).sync()
         self.assertEqual(outcome, "updated", message)
         self.assertIn("Second", message)
         self.assertTrue((self.clone / "b.c").exists())
@@ -567,17 +570,17 @@ class CloneSyncTests(unittest.TestCase):
     def test_work_in_progress_local_commits_and_other_branches_are_left_alone(self):
         self.commit(self.other, "b.c", "Second")
         (self.clone / "draft.c").write_text("int x;\n")  # An agent is working: even a new file counts
-        self.assertIn("changes in progress", clone.sync_clone(str(self.clone))[1])
+        self.assertIn("changes in progress", LocalClone(str(self.clone)).sync()[1])
         self.assertFalse((self.clone / "b.c").exists())
         (self.clone / "draft.c").unlink()
         self.git("checkout", "-q", "-b", "topic", cwd=self.clone)
-        self.assertIn("not on main", clone.sync_clone(str(self.clone))[1])
+        self.assertIn("not on main", LocalClone(str(self.clone)).sync()[1])
         self.git("checkout", "-q", "main", cwd=self.clone)
         (self.clone / "local.c").write_text("int y;\n")
         self.git("add", "local.c", cwd=self.clone)
         self.git("commit", "-q", "-m", "Local only", cwd=self.clone)
-        self.assertIn("commits that are not on GitHub", clone.sync_clone(str(self.clone))[1])
-        self.assertEqual(clone.sync_clone(str(Path(self.temp.name)))[0], "skipped")  # Not a clone
+        self.assertIn("commits that are not on GitHub", LocalClone(str(self.clone)).sync()[1])
+        self.assertEqual(LocalClone(str(Path(self.temp.name))).sync()[0], "skipped")  # Not a clone
 
     def test_the_poller_syncs_on_its_own_schedule(self):
         poller = server.Poller()
