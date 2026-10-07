@@ -49,10 +49,10 @@ PYTHON_VERIFY_MODULES=( # Imported
 )
 
 # The Vercel Agent's Node.js
-NODE_PROJECT_PATH="vercel"                                          # Holds package-lock.json
-NODE_REQUIRED_MIN_VER="22.18"                                       # Runs .ts files: no build step
-NPM_REQUIRED_MIN_VER="10.0"                                         # For a system Node.js
-NODE_VERIFY_PACKAGES=(ai @ai-sdk/openai-compatible @ai-sdk/mcp zod) # Must import after npm ci
+NODE_PROJECT_PATH="vercel"                              # Holds package-lock.json
+NODE_REQUIRED_MIN_VER="22.18"                           # Runs .ts files: no build step
+NPM_REQUIRED_MIN_VER="10.0"                             # For a system Node.js
+NODE_VERIFY_PACKAGES=(ai @ai-sdk/openai-compatible zod) # Must import after npm ci
 
 # Node.js fetched by install_local_node when the system's is missing or too old
 NODE_LOCAL_VERSION="22.23.3"             # The release fetched

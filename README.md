@@ -345,9 +345,6 @@ If `install.sh` fetched Node.js into `.node/`, use it for these commands: `.node
 vercel/agent.ts`, or put it first in `PATH` (`export PATH="$PWD/.node/bin:$PATH"`), which npm also
 needs.
 
-`--mcp` is also available, but it does not yet work against the MCPAgent server (an MCP protocol
-version mismatch); the vercel README explains why.
-
 ## Tests
 
 Each agent has offline tests: a scripted stand-in model, with the real tools. All three replay

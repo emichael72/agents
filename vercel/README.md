@@ -38,7 +38,6 @@ From the repository root:
 node vercel/agent.ts                                # interactive chat, local tools
 node vercel/agent.ts --prompt "Time now" --history  # one prompt + raw message dump
 node vercel/agent.ts --parallel                     # run a response's tool calls concurrently
-node vercel/agent.ts --mcp ""                       # same tools from MCPAgent's MCP server (see below)
 npm --prefix vercel test                            # offline tests
 npm --prefix vercel run typecheck                   # tsc --noEmit
 npm --prefix vercel run lint                        # Oxlint: likely bugs, not style (.oxlintrc.json)
@@ -53,7 +52,6 @@ and failures as `✗ tool: error` instead.
 | --- | --- |
 | `--profile NAME`, `--local`, `--openai` | Model profile from `../context/models.json`; default: its `"default"` (`local`) |
 | `--model`, `--base-url` | Override the profile's model or server for this run |
-| `--mcp URL` | Use an MCP server's tools; `--mcp ""` means `http://127.0.0.1:6275/` |
 | `--parallel` | Run the tool calls from one model response concurrently |
 
 ## How it maps to the other two
@@ -67,7 +65,6 @@ and failures as `✗ tool: error` instead.
 | Argument validation | `jsonschema.validate` | `jsonschema.validate` | zod, from the same JSON schema |
 | Tool failure | `isError` result | `ToolFailed` | thrown `Error` → `tool-error` |
 | Running a script | the server, `asyncio.create_subprocess_exec` | `subprocess.run` in a worker thread | async `execFile`, no threads |
-| MCP client | its own | `MCPToolset` | `@ai-sdk/mcp` `createMCPClient` |
 | Conversation history | list of Responses items | `result.all_messages()` | `response.messages` |
 | Loop cap | `max_tool_calls=8` | `UsageLimits(tool_calls_limit=8)` | `stopWhen: isStepCount(9)` |
 | One tool at a time | always | `parallel_tool_call_execution_mode` | `oneAtATime()` wrapper in `vercelagent/tools.ts` |
@@ -76,11 +73,3 @@ The AI SDK starts each tool as soon as its call arrives in the stream and has no
 so `vercelagent/tools.ts` chains `execute` calls through a promise queue unless `--parallel` is given. Node is
 single-threaded, but `execFile` is asynchronous, so in parallel mode the scripts still run as
 concurrent child processes while the event loop waits.
-
-## Known issue: `--mcp` with MCPAgent's server
-
-The AI SDK's MCP client sends its first request with the header `MCP-Protocol-Version: 2025-11-25`.
-MCPAgent's server only accepts `2025-03-26` and `2025-06-18` in that header and answers
-`400 Unsupported MCP protocol version`, even though its `initialize` handler would negotiate the
-session down to `2025-06-18`, which the AI SDK supports. pydantic-ai's client omits the header on
-that first request, so it is not affected.

@@ -97,7 +97,7 @@ export const localTools = loadTools();
 
 /**
  * Make tool calls run one at a time. The AI SDK starts each tool as soon as its call arrives,
- * with no sequential mode; MCPAgent's server rejects overlapping calls ("Busy").
+ * with no sequential mode; build scripts sharing a workspace should not overlap.
  */
 export function oneAtATime<TOOLS extends ToolSet>(tools: TOOLS): TOOLS {
   let queue: Promise<unknown> = Promise.resolve();

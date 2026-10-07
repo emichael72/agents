@@ -8,13 +8,11 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseArgs, styleText } from 'node:util';
-import { createMCPClient } from '@ai-sdk/mcp';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { isStepCount, ToolLoopAgent, type LanguageModel, type ModelMessage, type ToolSet } from 'ai';
 import ora, { type Ora } from 'ora';
 import { localTools, oneAtATime, REPO_ROOT } from './tools.ts';
 
-const MCP_URL = 'http://127.0.0.1:6275/'; // MCPAgent's server (python mcp/server.py)
 
 // Instructions (system prompt) and model profiles, shared by all three agents
 const CONTEXT_DIR = path.join(REPO_ROOT, 'context');
@@ -500,13 +498,11 @@ export async function ask(agent: Agent, prompt: string, history: ModelMessage[],
 
 /**
  * Make a tool's output readable for the terminal.
- * @param output Plain text, an MCP result ({ content: [{ type: 'text', text }] }), or JSON text such
- *   as MCPAgent's {"status", "logs", "summary"} result or an {"error": ...} failure.
+ * @param output Plain text, or JSON text such as MCPAgent's {"status", "logs", "summary"} result or
+ *   an {"error": ...} failure.
  * @returns The "logs" lines or the error message when the output is such JSON, else the text.
  */
 export function readable(output: unknown): string {
-  const content = (output as { content?: { type: string; text?: string }[] })?.content;
-  if (Array.isArray(content)) return readable(content.map((item) => item.text ?? '').join('\n'));
   if (typeof output !== 'string') return JSON.stringify(output);
   let data: unknown;
   try {
@@ -581,7 +577,6 @@ export async function main(): Promise<number> {
       openai: { type: 'boolean', default: false },
       model: { type: 'string' },
       'base-url': { type: 'string' },
-      mcp: { type: 'string' }, // URL, or "" for the default MCPAgent server
       prompt: { type: 'string' },
       history: { type: 'boolean', default: false },
       debug: { type: 'boolean', short: 'd', default: false },
@@ -595,7 +590,6 @@ export async function main(): Promise<number> {
   --local, --openai  Shortcuts for --profile local and --profile openai
   --model ID         Override the profile's model for this run
   --base-url URL     Override the profile's OpenAI-compatible base URL for this run
-  --mcp URL          Use tools from an MCP server instead of the local tools folder (--mcp "" = ${MCP_URL})
   --prompt TEXT      Run one prompt and exit
   --history          With --prompt, print the message history
   -d, --debug        Print the banner, tool calls and results as gray lines, instead of a spinner
@@ -609,20 +603,12 @@ export async function main(): Promise<number> {
   }
 
   if (values.debug) console.log(); // Blank line before the banner (hidden without debug, so the answer's own blank line is enough)
-  const mcpUrl = values.mcp === undefined ? undefined : values.mcp || MCP_URL;
-  let mcpClient: Awaited<ReturnType<typeof createMCPClient>> | undefined;
   try {
-    if (mcpUrl) {
-      mcpClient = await createMCPClient({ transport: { type: 'http', url: mcpUrl } }).catch((error) => {
-        throw new Error(`Cannot connect to MCP server ${mcpUrl}: ${errorMessage(error)}`);
-      });
-    }
     const profile = values.profile ?? (values.local ? 'local' : values.openai ? 'openai' : undefined);
     const settings = resolveModel(loadModels(), profile, { model: values.model, baseURL: values['base-url'] });
     if (settings.auto) settings.model = (await loadedModel(settings.baseURL, settings.apiKey)) ?? settings.model;
-    const tools = mcpClient ? await mcpClient.tools() : localTools;
-    const agent = buildAgent(buildModel(settings), tools, values.parallel, settings.timeout);
-    const toolCount = mcpUrl ? `${Object.keys(tools).length} tools from MCP server ${mcpUrl}` : `${Object.keys(tools).length} tools`;
+    const agent = buildAgent(buildModel(settings), localTools, values.parallel, settings.timeout);
+    const toolCount = `${Object.keys(localTools).length} tools`;
     new Output((text) => void process.stdout.write(text), undefined, values.debug).line(
       `${settings.name} model: ${settings.model} @ ${settings.baseURL}, ${toolCount} (${values.parallel ? 'parallel' : 'sequential'})`);
     await chat(agent, values.prompt, values.debug, values.history);
@@ -630,7 +616,5 @@ export async function main(): Promise<number> {
   } catch (error) {
     console.error(styleText('red', `Error: ${errorMessage(error)}`));
     return 1;
-  } finally {
-    await mcpClient?.close();
   }
 }

@@ -85,19 +85,18 @@ explain what happened". The tools are listed in [../tools/README.md](../tools/RE
 
 ## How it maps to the other two
 
-| Concern              | mcpagent                                                                       | pydantic                                               | vercel                                                |
-|----------------------|--------------------------------------------------------------------------------|--------------------------------------------------------|-------------------------------------------------------|
-| Agent loop           | `MCPAgent.ask()`, hand-written                                                 | `Agent.run_stream_events()`                            | `ToolLoopAgent.stream()`                              |
-| Instructions         | `../context/instructions.json`, named by `instructions_file` in `mcpagent.json`  | `../context/instructions.json` → `AgentContext.instructions()` | `../context/instructions.json` → `loadInstructions()` |
-| Model provider       | raw `aiohttp`, `/v1/responses`                                                 | `OpenAIChatModel`                                      | `@ai-sdk/openai-compatible`                           |
-| Tools                | `../tools/*/tool.json`, loaded by the server (`tools_dir`)                     | `../tools/*/tool.json` → `Tool.from_schema`            | `../tools/*/tool.json` → `z.fromJSONSchema`           |
-| Argument validation  | `jsonschema.validate`                                                          | `jsonschema.validate`                                  | zod, from the same JSON schema                        |
-| Tool failure         | `isError` result                                                               | `ToolFailed`                                           | thrown `Error` → `tool-error`                         |
-| Running a script     | the server, `asyncio.create_subprocess_exec`                                   | `subprocess.run` in a worker thread                    | async `execFile`, no threads                          |
-| MCP client           | its own                                                                        | `MCPToolset`                                           | `@ai-sdk/mcp` `createMCPClient`                       |
-| Conversation history | list of Responses items                                                        | `result.all_messages()`                                | `response.messages`                                   |
-| Loop cap             | `max_tool_calls=8`                                                             | `UsageLimits(tool_calls_limit=8)`                      | `stopWhen: isStepCount(9)`                            |
-| One tool at a time   | always                                                                         | `parallel_tool_call_execution_mode`                    | `oneAtATime()` wrapper in `vercelagent/tools.ts`      |
+| Concern              | mcpagent                                                                        | pydantic                                                       | vercel                                                |
+|----------------------|---------------------------------------------------------------------------------|----------------------------------------------------------------|-------------------------------------------------------|
+| Agent loop           | `MCPAgent.ask()`, hand-written                                                  | `Agent.run_stream_events()`                                    | `ToolLoopAgent.stream()`                              |
+| Instructions         | `../context/instructions.json`, named by `instructions_file` in `mcpagent.json` | `../context/instructions.json` → `AgentContext.instructions()` | `../context/instructions.json` → `loadInstructions()` |
+| Model provider       | raw `aiohttp`, `/v1/responses`                                                  | `OpenAIChatModel`                                              | `@ai-sdk/openai-compatible`                           |
+| Tools                | `../tools/*/tool.json`, loaded by the server (`tools_dir`)                      | `../tools/*/tool.json` → `Tool.from_schema`                    | `../tools/*/tool.json` → `z.fromJSONSchema`           |
+| Argument validation  | `jsonschema.validate`                                                           | `jsonschema.validate`                                          | zod, from the same JSON schema                        |
+| Tool failure         | `isError` result                                                                | `ToolFailed`                                                   | thrown `Error` → `tool-error`                         |
+| Running a script     | the server, `asyncio.create_subprocess_exec`                                    | `subprocess.run` in a worker thread                            | async `execFile`, no threads                          |
+| Conversation history | list of Responses items                                                         | `result.all_messages()`                                        | `response.messages`                                   |
+| Loop cap             | `max_tool_calls=8`                                                              | `UsageLimits(tool_calls_limit=8)`                              | `stopWhen: isStepCount(9)`                            |
+| One tool at a time   | always                                                                          | `parallel_tool_call_execution_mode`                            | `oneAtATime()` wrapper in `vercelagent/tools.ts`      |
 
 The server also runs one tool at a time: a `tools/call` that arrives while another is running is
 rejected with `Busy: another tool is currently running in this workspace`.
@@ -192,7 +191,7 @@ address of its own, so a new server port needs no second edit.
 
 - The root endpoint answers POST with JSON, notifications with an empty 202, and GET with 405.
   It negotiates MCP `2025-03-26` and `2025-06-18` only, and rejects other values in the
-  `MCP-Protocol-Version` header. This is why the vercel agent's `--mcp` cannot connect yet.
+  `MCP-Protocol-Version` header.
 - `/sse` is a custom diagnostic feed, not standard MCP SSE. STDIO support needs more work.
 - The server binds to localhost. Browser origins are limited to the default Inspector origins;
   other browser clients need `allowed_origins` in the server configuration.
