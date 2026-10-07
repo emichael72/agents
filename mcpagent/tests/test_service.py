@@ -174,7 +174,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(error, text)
             self.assertEqual(json.loads(text)['logs'], [pwd.getpwuid(os.getuid()).pw_name, '1', 'hello.c'])
             # Refused by the sandbox (the kernel)
-            for cwd, command in (('docs', 'touch x'), ('proj', 'touch locked/x'), ('proj', 'cat /etc/passwd'),
+            for cwd, command in (('docs', 'touch x'), ('proj', 'touch locked/x'), ('proj', 'cat /etc/os-release'),
                                  ('proj', 'ls /home'), ('proj', f'touch {tools}/x'), ('proj', 'touch /work/tools/x'),
                                  ('proj', 'git ls-remote https://github.com/x/y')):
                 error, text = await shell(cwd, command)

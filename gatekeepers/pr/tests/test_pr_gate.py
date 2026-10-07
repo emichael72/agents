@@ -488,7 +488,7 @@ class ChangesTests(unittest.TestCase):
             self.assertIn("built with 1 compiler warning(s), which fail the check", report)
             self.assertIn("w.c:1:", report.splitlines()[1])  # The warning is listed first
             self.assertTrue(changes.check_build(tree, fail_on_warnings=False)[0])
-            (tree / "Makefile").write_text("all:\n\tcat /etc/passwd\n")  # The sandbox sees only the tree
+            (tree / "Makefile").write_text("all:\n\tcat /etc/os-release\n")  # The sandbox sees only the tree (and no host /etc)
             self.assertFalse(changes.check_build(tree)[0])
             (tree / "Makefile").unlink()
             self.assertEqual(changes.check_build(tree), (True, "No Makefile: nothing to build."))
