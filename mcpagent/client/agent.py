@@ -41,20 +41,21 @@ from .client import MCPClient
 OPENAI_HOST = "api.openai.com"  # Only used to decide whether OpenAI-specific error hints apply
 
 
-def load_instructions(config_data: dict, config_file) -> str:
+def load_instructions(config_data: dict, config_file, key: str = "instructions") -> str:
     """
     Read the model's instructions from the file the client config names.
     Args:
         config_data: The parsed client config.
         config_file: The config's path; "instructions_file" is relative to its folder.
+        key: Which lines to read: "instructions", or "on_exit" (the prompt sent before exit).
     Returns:
-        str: The file's "instructions" lines joined with newlines, or "" if none is configured.
+        str: The lines joined with newlines, or "" if none are configured.
     """
     instructions_file = config_data.get("instructions_file")
     if not instructions_file:
         return ""
     path = Path(config_file).resolve().parent / instructions_file
-    return "\n".join(json.loads(path.read_text(encoding="utf-8"))["instructions"])
+    return "\n".join(json.loads(path.read_text(encoding="utf-8")).get(key, []))
 
 
 def load_models(config_data: dict, config_file) -> dict:
@@ -494,6 +495,33 @@ def memory_text(index: Optional[Path]) -> str:
             "and save new facts with it):\n" + "\n".join(lines))
 
 
+def identity_text(name: Optional[str], config_data: dict, config_file) -> str:
+    """
+    The identity lines that open the instructions, naming the agent.
+    Args:
+        name: The agent's name (context/agent.json's names); None when not configured.
+        config_data: The parsed client config.
+        config_file: The config's path.
+    Returns:
+        str: The lines with {name} filled in, and a blank line after them; "" without a name.
+    """
+    text = load_instructions(config_data, config_file, "identity")
+    return text.replace("{name}", name) + "\n\n" if name and text else ""
+
+
+def worth_saving(history: list) -> bool:
+    """
+    Whether a session may hold something to remember: a tool call, or more than one exchange.
+    Args:
+        history: The session's Responses API items.
+    Returns:
+        bool: True when the model should be asked to save before exit.
+    """
+    calls = sum(item.get("type") == "function_call" for item in history)
+    prompts = sum(item.get("role") == "user" for item in history)
+    return calls > 0 or prompts > 1
+
+
 def load_agent_settings(config_data: dict, config_file) -> dict:
     """
     Read the agent loop settings from the file the client config names.
@@ -774,7 +802,9 @@ async def run_agent(config_file, profile=None, model=None, base_url=None, prompt
                              if agent_file and index else None)
         agent = MCPAgent(mcp_client, base_url=settings["base_url"], model=settings["model"],
                          api_key=settings["api_key"], provider=settings["name"], timeout=settings["timeout"],
-                         instructions=load_instructions(mcp_client.config_data, config_file) + memory,
+                         instructions=identity_text(agent_settings.get("names", {}).get("mcpagent"),
+                                                    mcp_client.config_data, config_file)
+                         + load_instructions(mcp_client.config_data, config_file) + memory,
                          context=context, trace=output.line if trace else None,
                          max_tool_calls=int(agent_settings.get("max_tool_calls", 8)))
         await agent.connect()
@@ -785,6 +815,7 @@ async def run_agent(config_file, profile=None, model=None, base_url=None, prompt
             await display_answer(prompt)
             return 0
         output.line("Ask me to use a tool. /history shows messages, /reset clears them, exit quits.")
+        on_exit = load_instructions(mcp_client.config_data, config_file, "on_exit")
         session = PromptSession()
         while True:
             try:
@@ -792,6 +823,13 @@ async def run_agent(config_file, profile=None, model=None, base_url=None, prompt
             except (EOFError, KeyboardInterrupt):
                 return 0
             if prompt.lower() in {"exit", "quit", "q"}:
+                # One last turn to save what is worth remembering (save_on_exit); Ctrl+C skips it
+                if agent_settings.get("save_on_exit") and on_exit and worth_saving(agent.history):
+                    output.line("Before exiting: saving anything worth remembering (Ctrl+C skips).")
+                    try:
+                        await display_answer(on_exit)
+                    except Exception as error:
+                        console.print(f"Error: {error}", style="red", markup=False)
                 return 0
             if prompt == "/reset":
                 agent.history = []

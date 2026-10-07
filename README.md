@@ -71,7 +71,11 @@ change on its next start. None of this is hard-coded in the agents.
   lines.
 - `context/agent.json`: the agent loop: `max_tool_calls`, the most tool calls the model may make while
   answering one prompt; `0` (the setting now) means no limit, so stop a runaway answer with Ctrl+C.
-  `memory_index` names the memory index every agent loads (see "Memory" below).
+  `memory_index` names the memory index every agent loads (see "Memory" below), `save_on_exit`
+  turns on the save turn before exit, and `names` gives each agent its name (`mcp`, `dantic`,
+  `vercel`), which it answers with when asked.
+- `context/instructions.json` also holds `identity`, the line naming the agent at the top of its
+  instructions, and `on_exit`, the prompt of the save turn before exit.
 - `context/output.json`: the terminal layout: `width` (120) and `show_time` (true). See
   "Terminal output" below.
 - `context/clang-format.yaml`: the C/C++ style (4-space indents, function braces on their own
@@ -132,6 +136,11 @@ made, and the user's preferences. Any agent can read what another saved.
 - `.memory/index.md` lists the topics, one line each. Every agent loads it into its instructions
   at start-up (`memory_index` in `context/agent.json`), then reads only the notes it needs.
 - Never secrets: no keys, passwords or tokens.
+
+Before an interactive chat ends with `exit`, the agent gets one more turn to save anything lasting
+it has not saved yet (`save_on_exit` in `context/agent.json`, with the `on_exit` prompt in
+`context/instructions.json`). It is skipped after a single exchange with no tool call, by Ctrl+C,
+and in `--prompt` runs; when there is nothing to save, the model says so and calls no tool.
 
 The notes are local to this machine: git ignores `.memory/`. Delete a note, or the whole folder,
 to make the agents forget.

@@ -21,7 +21,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from rich.console import Console  # noqa: E402
 from pydantic_ai import ModelRetry  # noqa: E402
-from pydantic_ai.messages import ModelRequest, ToolReturnPart  # noqa: E402
+from pydantic_ai.messages import (ModelRequest, ModelResponse, TextPart, ToolCallPart, ToolReturnPart,  # noqa: E402
+                                  UserPromptPart)
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel  # noqa: E402
 
 import agent  # noqa: E402
@@ -152,6 +153,22 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             text = agent.memory_text(index)
             self.assertIn("- preferences: Prefers short answers", text)
             self.assertEqual(agent.memory_text(None), "")
+
+    def test_exit_saves_only_after_a_tool_call_or_several_exchanges(self):
+        self.assertIn("Nothing to save", agent.load_instructions(key="on_exit"))
+        self.assertTrue(json.loads(agent.AGENT_FILE.read_text())["save_on_exit"])
+        ask = ModelRequest(parts=[UserPromptPart("hi")])
+        answer = ModelResponse(parts=[TextPart("hello")])
+        call = ModelResponse(parts=[ToolCallPart("time", {})])
+        self.assertFalse(agent.worth_saving([]))
+        self.assertFalse(agent.worth_saving([ask, answer]))
+        self.assertTrue(agent.worth_saving([ask, answer, ask, answer]))
+        self.assertTrue(agent.worth_saving([ask, call, answer]))
+
+    def test_the_agent_is_named_dantic(self):
+        self.assertEqual(json.loads(agent.AGENT_FILE.read_text())["names"]["pydantic"], "dantic")
+        self.assertTrue(agent.identity_text("dantic").startswith("Your name is dantic."))
+        self.assertEqual(agent.identity_text(None), "")
 
     def test_instructions_come_from_the_shared_context_file(self):
         instructions = agent.load_instructions()

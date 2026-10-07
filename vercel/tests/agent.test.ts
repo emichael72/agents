@@ -1,13 +1,15 @@
 // Offline tests: a scripted mock model stands in for LM Studio; the local tools run for real.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { tool, type ToolSet } from 'ai';
+import { tool, type ModelMessage, type ToolSet } from 'ai';
 import { convertArrayToReadableStream, MockLanguageModelV4 } from 'ai/test';
 import { z } from 'zod';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ask, buildAgent, linkSegments, loadInstructions, loadModels, loadOutputSettings, memoryText, Output, resolveModel, wrap } from '../agent.ts';
+import {
+  ask, buildAgent, identityText, linkSegments, loadInstructions, loadModels, loadOutputSettings, memoryText, Output, resolveModel, worthSaving, wrap,
+} from '../agent.ts';
 import { loadTools, localTools, runScript } from '../tools.ts';
 
 const usage = {
@@ -54,8 +56,11 @@ const CALLS: [string, object][] = SCENARIO.calls.map((step) => [step.tool, step.
 
 test('local tools run for real and failures reach the model', async () => {
   const agent = buildAgent(scriptedModel(CALLS), localTools);
-  const answer = JSON.stringify((await ask(agent, SCENARIO.prompt, [], quiet)).at(-1));
+  const history = await ask(agent, SCENARIO.prompt, [], quiet);
+  const answer = JSON.stringify(history.at(-1));
   for (const step of SCENARIO.calls) assert.ok(answer.includes(step.output), step.output);
+  // The history keeps every step, the tool calls and their results too, not only the final answer
+  assert.deepEqual(history.map((message) => message.role), ['user', 'assistant', 'tool', 'assistant']);
 });
 
 test('each tool call prints next to its result', async () => {
@@ -152,6 +157,19 @@ test('instructions come from the shared context file', () => {
   const instructions = loadInstructions();
   assert.match(instructions, /^You are an agent/);
   assert.match(instructions, /allowed folder/);
+  assert.match(loadInstructions(undefined, 'on_exit'), /Nothing to save/);
+  assert.match(identityText('vercel'), /^Your name is vercel\./);
+  assert.equal(identityText(undefined), '');
+});
+
+test('exit saves only after a tool call or several exchanges', () => {
+  const user: ModelMessage = { role: 'user', content: 'hi' };
+  const reply: ModelMessage = { role: 'assistant', content: 'hello' };
+  const result: ModelMessage = { role: 'tool', content: [] };
+  assert.equal(worthSaving([]), false);
+  assert.equal(worthSaving([user, reply]), false);
+  assert.equal(worthSaving([user, reply, user, reply]), true);
+  assert.equal(worthSaving([user, reply, result, reply]), true);
 });
 
 test('history carries across turns', async () => {

@@ -34,7 +34,8 @@ from prompt_toolkit.formatted_text import ANSI
 from pydantic_ai import Agent, AgentRunResultEvent, UsageLimits
 from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.messages import (FunctionToolCallEvent, FunctionToolResultEvent, PartDeltaEvent,
-                                  PartStartEvent, TextPart, TextPartDelta, ToolReturnPart)
+                                  PartStartEvent, TextPart, TextPartDelta, ToolCallPart, ToolReturnPart,
+                                  UserPromptPart)
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -63,15 +64,43 @@ LIMITS = (UsageLimits(tool_calls_limit=MAX_TOOL_CALLS, request_limit=2 * MAX_TOO
 console = Console(highlight=False, soft_wrap=True)  # Never re-wrap lines
 
 
-def load_instructions(path: Path = INSTRUCTIONS_FILE) -> str:
+def load_instructions(path: Path = INSTRUCTIONS_FILE, key: str = "instructions") -> str:
     """
     Read the shared instructions file.
     Args:
         path: The JSON file (default: agents/context/instructions.json).
+        key: Which lines to read: "instructions", or "on_exit" (the prompt sent before exit).
     Returns:
-        str: Its "instructions" lines, joined with newlines.
+        str: Those lines, joined with newlines ("" if the file has none).
     """
-    return "\n".join(json.loads(path.read_text(encoding="utf-8"))["instructions"])
+    return "\n".join(json.loads(path.read_text(encoding="utf-8")).get(key, []))
+
+
+def identity_text(name: str | None, path: Path = INSTRUCTIONS_FILE) -> str:
+    """
+    The identity lines that open the instructions, naming the agent.
+    Args:
+        name: The agent's name (context/agent.json's names); None when not configured.
+        path: The instructions file.
+    Returns:
+        str: The lines with {name} filled in, and a blank line after them; "" without a name.
+    """
+    text = load_instructions(path, "identity")
+    return text.replace("{name}", name) + "\n\n" if name and text else ""
+
+
+def worth_saving(history: list) -> bool:
+    """
+    Whether a session may hold something to remember: a tool call, or more than one exchange.
+    Args:
+        history: The session's pydantic-ai messages.
+    Returns:
+        bool: True when the model should be asked to save before exit.
+    """
+    parts = [part for message in history for part in message.parts]
+    calls = sum(isinstance(part, ToolCallPart) for part in parts)
+    prompts = sum(isinstance(part, UserPromptPart) for part in parts)
+    return calls > 0 or prompts > 1
 
 
 def memory_text(index: Path | None) -> str:
@@ -103,8 +132,10 @@ def build_agent(model: Model, mcp_url: str | None = None) -> Agent:
         Agent: The pydantic-ai agent.
     """
     toolset = MCPToolset(mcp_url, tool_error_behavior="failed") if mcp_url else local_toolset
-    index = json.loads(AGENT_FILE.read_text(encoding="utf-8")).get("memory_index")
-    instructions = load_instructions() + memory_text(CONTEXT_DIR.parent / index if index else None)
+    settings = json.loads(AGENT_FILE.read_text(encoding="utf-8"))
+    index = settings.get("memory_index")
+    instructions = (identity_text(settings.get("names", {}).get("pydantic")) + load_instructions()
+                    + memory_text(CONTEXT_DIR.parent / index if index else None))
     return Agent(model, instructions=instructions, toolsets=[toolset])
 
 
@@ -524,6 +555,8 @@ async def chat(agent: Agent, prompt: str | None, trace: bool, show_history: bool
                 print_history(history)
             return 0
         Output(console).line("Ask me to use a tool. /history shows messages, /reset clears them, exit quits.")
+        save_on_exit = json.loads(AGENT_FILE.read_text(encoding="utf-8")).get("save_on_exit")
+        on_exit = load_instructions(key="on_exit")
         session = PromptSession()
         while True:
             try:
@@ -531,6 +564,13 @@ async def chat(agent: Agent, prompt: str | None, trace: bool, show_history: bool
             except (EOFError, KeyboardInterrupt):
                 return 0
             if prompt.lower() in {"exit", "quit", "q"}:
+                # One last turn to save what is worth remembering (save_on_exit); Ctrl+C skips it
+                if save_on_exit and on_exit and worth_saving(history):
+                    Output(console).line("Before exiting: saving anything worth remembering (Ctrl+C skips).")
+                    try:
+                        await ask(agent, on_exit, history, trace, parallel)
+                    except Exception as error:
+                        console.print(f"\nError: {error}", style="red", markup=False)
                 return 0
             if prompt == "/reset":
                 history = []

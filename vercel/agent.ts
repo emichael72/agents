@@ -25,7 +25,8 @@ const AGENT_FILE = path.join(CONTEXT_DIR, 'agent.json'); // Agent loop settings
 // Tool calls per prompt, shared with the other agents (context/agent.json). Each step is one model
 // call plus the tools it requested, so this allows at least max_tool_calls calls and a final answer.
 // 0 means no limit: the loop then ends only when the model answers without calling a tool.
-const AGENT_SETTINGS = JSON.parse(readFileSync(AGENT_FILE, 'utf8')) as { max_tool_calls?: number; memory_index?: string };
+const AGENT_SETTINGS = JSON.parse(readFileSync(AGENT_FILE, 'utf8')) as
+  { max_tool_calls?: number; memory_index?: string; save_on_exit?: boolean; names?: Record<string, string> };
 const MAX_TOOL_CALLS = AGENT_SETTINGS.max_tool_calls ?? 8;
 // The memory index (relative to the repository), loaded into the instructions
 const MEMORY_INDEX = AGENT_SETTINGS.memory_index && path.join(CONTEXT_DIR, '..', AGENT_SETTINGS.memory_index);
@@ -111,9 +112,35 @@ export function buildModel(settings: ModelSettings): LanguageModel {
                                   includeUsage: true })(settings.model);
 }
 
-/** Read the shared instructions file and join its "instructions" lines with newlines. */
-export function loadInstructions(file = INSTRUCTIONS_FILE): string {
-  return (JSON.parse(readFileSync(file, 'utf8')) as { instructions: string[] }).instructions.join('\n');
+/**
+ * Read the shared instructions file.
+ * @param file The JSON file (default: agents/context/instructions.json).
+ * @param key Which lines to read: 'instructions', or 'on_exit' (the prompt sent before exit).
+ * @returns Those lines, joined with newlines ('' if the file has none).
+ */
+export function loadInstructions(file = INSTRUCTIONS_FILE, key = 'instructions'): string {
+  return ((JSON.parse(readFileSync(file, 'utf8')) as Record<string, string[] | undefined>)[key] ?? []).join('\n');
+}
+
+/**
+ * The identity lines that open the instructions, naming the agent.
+ * @param name The agent's name (context/agent.json's names); undefined when not configured.
+ * @param file The instructions file.
+ * @returns The lines with {name} filled in, and a blank line after them; '' without a name.
+ */
+export function identityText(name?: string, file = INSTRUCTIONS_FILE): string {
+  const text = loadInstructions(file, 'identity');
+  return name && text ? text.replaceAll('{name}', name) + '\n\n' : '';
+}
+
+/**
+ * Whether a session may hold something to remember: a tool call, or more than one exchange.
+ * @param history The session's messages.
+ * @returns True when the model should be asked to save before exit.
+ */
+export function worthSaving(history: ModelMessage[]): boolean {
+  const prompts = history.filter((message) => message.role === 'user').length;
+  return history.some((message) => message.role === 'tool') || prompts > 1;
 }
 
 /**
@@ -140,7 +167,7 @@ export function buildAgent(model: LanguageModel, tools: ToolSet, parallel = fals
   return new ToolLoopAgent({
     model,
     timeout: { stepMs: timeoutSeconds * 1000 }, // one model call plus the tools it requested
-    instructions: loadInstructions() + memoryText(MEMORY_INDEX),
+    instructions: identityText(AGENT_SETTINGS.names?.vercel) + loadInstructions() + memoryText(MEMORY_INDEX),
     tools: parallel ? tools : oneAtATime(tools),
     stopWhen: MAX_STEPS ? isStepCount(MAX_STEPS) : () => false,
   });
@@ -402,7 +429,8 @@ export async function ask(agent: Agent, prompt: string, history: ModelMessage[],
     if (usage.inputTokens || usage.outputTokens) {
       output.addUsage(usage.inputTokens ?? 0, usage.outputTokens ?? 0, (await result.steps).length);
     }
-    return [...messages, ...(await result.response).messages];
+    // Every step's messages, the tool calls and results too: result.response holds only the last step's
+    return [...messages, ...(await result.steps).flatMap((step) => step.response.messages)];
   } finally {
     for (const line of pendingCalls.values()) output.line(line); // Calls that never got a result
     output.finish();
@@ -443,12 +471,24 @@ async function chat(agent: Agent, prompt: string | undefined, trace: boolean, sh
   }
   console.log(gray('Ask me to use a tool. /history shows messages, /reset clears them, exit quits.'));
   const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: gray('You > ') });
+  const onExit = loadInstructions(INSTRUCTIONS_FILE, 'on_exit');
   try {
     rl.prompt();
     // Iterating queues lines that arrive while the agent is busy (e.g. piped input).
     for await (const raw of rl) {
       const line = raw.trim();
-      if (['exit', 'quit', 'q'].includes(line.toLowerCase())) return;
+      if (['exit', 'quit', 'q'].includes(line.toLowerCase())) {
+        // One last turn to save what is worth remembering (save_on_exit); Ctrl+C skips it
+        if (AGENT_SETTINGS.save_on_exit && onExit && worthSaving(history)) {
+          console.log(gray('Before exiting: saving anything worth remembering (Ctrl+C skips).'));
+          try {
+            await ask(agent, onExit, history, { trace });
+          } catch (error) {
+            console.error(styleText('red', `\nError: ${errorMessage(error)}`));
+          }
+        }
+        return;
+      }
       if (line === '/reset') {
         history = [];
         console.log(gray('History cleared.'));

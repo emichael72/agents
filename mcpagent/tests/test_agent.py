@@ -30,7 +30,7 @@ from mcpagent import MCPClient, MCPService
 from mcpagent.client.client import DEFAULT_CONFIG as CLIENT_CONFIG
 from mcpagent.server.service import DEFAULT_CONFIG as SERVER_CONFIG
 from mcpagent.client.agent import (MCPAgent, Output, load_instructions, load_models, load_output_settings,
-                                   resolve_model, wrap)
+                                   resolve_model, identity_text, load_agent_settings, worth_saving, wrap)
 
 
 # The scripted turn every agent's tests replay
@@ -328,6 +328,17 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(instructions.startswith('You are an agent'))
         self.assertIn('allowed folder', instructions)
         self.assertEqual(load_instructions({}, config_file), '')  # no instructions_file configured
+        self.assertIn('Nothing to save', load_instructions(self.shipped_config(), config_file, 'on_exit'))
+        name = load_agent_settings(self.shipped_config(), config_file)['names']['mcpagent']
+        self.assertEqual(name, 'mcp')
+        self.assertTrue(identity_text(name, self.shipped_config(), config_file).startswith('Your name is mcp.'))
+
+    def test_exit_saves_only_after_a_tool_call_or_several_exchanges(self):
+        ask, answer = {'role': 'user', 'content': 'hi'}, message('hello')
+        self.assertFalse(worth_saving([]))
+        self.assertFalse(worth_saving([ask, answer]))
+        self.assertTrue(worth_saving([ask, answer, ask, answer]))
+        self.assertTrue(worth_saving([ask, call('time', {}), answer]))
 
     async def test_missing_key_and_unknown_profile(self):
         config = self.shipped_models()
