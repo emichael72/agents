@@ -7,8 +7,8 @@ TOOL_DIR="$(cd "$(dirname "$0")" && pwd)"
 PYTHON="$(cd "$TOOL_DIR/../.." && pwd)/.venv/bin/python"
 
 if [ ! -x "$PYTHON" ]; then
-  echo "Error: $PYTHON not found; run ./install.sh from the repository root"
-  exit 1
+    echo "Error: $PYTHON not found; run ./install.sh from the repository root"
+    exit 1
 fi
 
 exec "$PYTHON" "$TOOL_DIR/pr_gate.py" "$@"
