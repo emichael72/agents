@@ -23,7 +23,6 @@ import aiohttp
 # Local imports
 from mcpagent import (
     ConfigType,
-    DebugGuru,
     EventCallbackType,
     HTTPConfigType,
     JSONRPCResponseCoroType,
@@ -47,8 +46,7 @@ class MCPClientConnection:
     def __init__(self, server_id: str, transport: MCPTransportType,
                  config: ConfigType,
                  capabilities: Optional[dict] = None,
-                 log_level: Optional[int] = logging.DEBUG,
-                 debug_guru: Optional[DebugGuru] = None) -> None:
+                 log_level: Optional[int] = logging.DEBUG) -> None:
         """
         Manages a single MCP server connection.
         Args:
@@ -64,7 +62,6 @@ class MCPClientConnection:
                     env (Optional[dict[str, str]]): Environment variables for the subprocess.
             capabilities (Optional[dict]): Optional capabilities that declare server-specific requirements.
             log_level (Optional[int]): Logging level for this connection.
-            debug_guru (Optional[DebugGuru]): Optional debugging helper instance.
         """
         self._server_id: str = server_id
         self._transport: MCPTransportType = transport
@@ -74,7 +71,6 @@ class MCPClientConnection:
         self._request_ids = itertools.count(1)
         self.protocol_version = None
         self._session_id: Optional[Union[str, int]] = None  # May be sent by a service
-        self._debug_guru: Optional[DebugGuru] = debug_guru
 
         # Configure logger
         self._logger = MCPAgentLogger("Connection")
@@ -313,29 +309,9 @@ class MCPClientConnection:
                     assert isinstance(self._config, HTTPConfigType)
 
                     url = self._config.url
-                    if self._debug_guru:
-                        if self._debug_guru:
-                            debug_info = {"url": url, "header_names": list(headers), "payload": payload}
-                            self._debug_guru.show_box(
-                                title=f"Request to '{self._server_id}'",
-                                debug_data=debug_info
-                            )
                     async with self._http_session.post(url, json=payload, headers=headers,
                                                        timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
-                        try:
-                            resp.raise_for_status()
-                        except aiohttp.ClientResponseError as e:
-                            if self._debug_guru:
-                                self._debug_guru.show_box(
-                                    title=f"HTTP error from '{self._server_id}'",
-                                    debug_data={
-                                        "status": resp.status,
-                                        "url": str(resp.url),
-                                        "message": str(e),
-                                        "body": await resp.text()
-                                    }
-                                )
-                            raise
+                        resp.raise_for_status()
 
                         # Special case: initialize via SSE
                         if method == "initialize" and self._capabilities.get("initialize_via") == "sse":
@@ -350,11 +326,7 @@ class MCPClientConnection:
                             self._session_id = resp.headers.get("Mcp-Session-Id")
 
                         # Normal synchronous response
-                        data = await resp.json()
-
-                        if self._debug_guru:
-                            self._debug_guru.show_box(title=f"Response from '{self._server_id}'", debug_data=data)
-                        return data
+                        return await resp.json()
 
                 elif self._transport == MCPTransportType.STDIO:
                     if not self._writer or not self._reader:

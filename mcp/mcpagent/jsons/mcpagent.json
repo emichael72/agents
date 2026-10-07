@@ -25,7 +25,6 @@
   },
   "client": {
     "log_level": "ERROR",
-    "debug_json_box": false,
     "instructions_file": "context/instructions.json",
     "models_file": "context/models.json",
     "output_file": "context/output.json",

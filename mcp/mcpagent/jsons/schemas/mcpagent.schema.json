@@ -90,11 +90,6 @@
           ],
           "description": "Logging level for the MCP client."
         },
-        "debug_json_box": {
-          "type": "boolean",
-          "description": "Show extended JSON debugging information.",
-          "default": false
-        },
         "instructions_file": {
           "type": "string",
           "description": "JSON file whose \"instructions\" lines form the model's instructions."

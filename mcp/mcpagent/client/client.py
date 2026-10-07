@@ -33,7 +33,6 @@ from typing import Any, Optional, Union
 # Local imports
 from mcpagent import (
     ConfigType,
-    DebugGuru,
     EventCallbackType,
     HTTPConfigType,
     ListenEventsReturnType,
@@ -64,15 +63,9 @@ class MCPClient:
         self._health_check_task: Optional[asyncio.Task] = None
         self._logger = MCPAgentLogger("Client")
         self._log_level: Optional[int] = None
-        self._debug_guru: Optional[DebugGuru] = None
 
         # Load configuration and optionally validate using a schema
         self._config_data: dict[str, Any] = self._load_config(config_file=config_file)
-
-        # See if we're allowed to show JSON debug box (terminal rich panel)
-        self._debug_json_box: bool = self._config_data.get("debug_json_box", False)
-        if self._debug_json_box:
-            self._debug_guru = DebugGuru()
 
         # Logger configuration
         level_str = str(self._config_data.get("log_level", "WARNING")).upper()
@@ -257,8 +250,7 @@ class MCPClient:
         # Create new connection and delegate our log level
         conn: MCPClientConnection = MCPClientConnection(server_id=server_id, transport=transport,
                                                         config=config, log_level=self._log_level,
-                                                        capabilities=capabilities,
-                                                        debug_guru=self._debug_guru)
+                                                        capabilities=capabilities)
         self._servers[normalized_id] = {
             "conn": conn,
             "health_check_interval": health_check_interval,

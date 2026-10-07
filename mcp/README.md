@@ -29,7 +29,6 @@ mcpagent/client/output.py             Output: the terminal layout shared by the 
 mcpagent/client/client.py             MCP client for multiple servers
 mcpagent/client/connection.py         transport, handshake and session handling
 mcpagent/client/types.py              client types
-mcpagent/client/debug.py              DebugGuru: JSON-RPC traffic in Rich panels
 mcpagent/server/__main__.py           server module entry point (python -m mcpagent.server)
 mcpagent/server/service.py            MCP HTTP server: tool discovery, validation and commands
 mcpagent/server/types.py              server types
