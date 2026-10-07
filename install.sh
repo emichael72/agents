@@ -503,6 +503,7 @@ install_python_packages() {
     local venv_full_path="$1"
     local pip=("${venv_full_path}/bin/python" -m pip install)
     local requirements_file
+    local site_packages pth_file
 
     find_requirements_files || return 1
     for requirements_file in "${PYTHON_REQUIREMENTS_FILES[@]}"; do
@@ -515,6 +516,20 @@ install_python_packages() {
     # Editable, so the packages run from this checkout and find its shared folders
     print_status_label "Installing the repository's packages (editable)"
     run_logged "pip install -e ." "${pip[@]}" --no-deps -e . || return 1
+    # Also list the source folders in a .pth file, for IDEs that cannot follow the editable
+    # install's import hook (PyCharm)
+    if ! site_packages="$("${venv_full_path}/bin/python" -c \
+        'import sysconfig; print(sysconfig.get_path("purelib"))')"; then
+        print_status_label_results "ERROR"
+        log ERROR "Cannot find the site-packages folder of %s." "${venv_full_path}"
+        return 1
+    fi
+    pth_file="${site_packages}/agents_sources.pth"
+    if ! printf '%s\n' "$(pwd)" "$(pwd)/mcp" "$(pwd)/pydantic" >"${pth_file}"; then
+        print_status_label_results "ERROR"
+        log ERROR "Cannot write source paths to %s." "${pth_file}"
+        return 1
+    fi
     print_status_label_results "OK"
 
     print_status_label "Checking installed packages are consistent"

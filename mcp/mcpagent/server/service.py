@@ -438,7 +438,8 @@ class MCPService:
         self._log_line(msg="Handled 'initialize'", level="debug")
         return info
 
-    async def _on_ping(self, _params: dict[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    async def _on_ping(_params: dict[str, Any]) -> dict[str, Any]:
         """
         ping: an empty result.
         Args:
@@ -979,7 +980,7 @@ class MCPService:
             self._mcp_config.advertise_ip = advertise_ip
 
             # Show welcome message and usage examples
-            self._greetings(host=advertise_ip, port=self._mcp_config.port,
+            self._greetings(host=advertise_ip, port=self._mcp_server_port,
                             server_name=self._mcp_server_name, show_examples=self._show_usage_examples,
                             host_bind_address=self._mcp_server_bind_address)
 

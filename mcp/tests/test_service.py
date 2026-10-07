@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from typing import Any
 from unittest.mock import patch
 
 from aiohttp.test_utils import TestClient, TestServer
@@ -85,7 +86,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             allowed = Path(folder) / 'paths.json'
             allowed.write_text(json.dumps({'paths': {'sample': folder}}))
 
-            async def check(paths):
+            async def check(paths: str) -> dict[str, Any]:
                 with patch.dict(os.environ, {'FS_GATE_PATHS': str(allowed)}):
                     return (await self.rpc('tools/call', {'name': 'doxy', 'arguments': {'paths': paths}}))['result']
 
@@ -423,6 +424,7 @@ class ConfigLoadingTests(unittest.TestCase):
         self.assertEqual(MCPAgentConfig.repo_path('/abs/file.json'), Path('/abs/file.json'))
         self.assertEqual(MCPAgentConfig.repo_path('~/file.json'), Path.home() / 'file.json')
 
+    # noinspection HttpUrlsUsage
     def test_http_server_without_config_uses_the_server_section(self):
         entry = {'server_id': 'tools', 'description': 'Tools', 'transport': 'HTTP'}
 
@@ -435,7 +437,7 @@ class ConfigLoadingTests(unittest.TestCase):
                 self.assertEqual(url({'server': server, 'client': {'servers': [dict(entry)]}}), f'http://{host}:7000/')
         with self.assertRaisesRegex(RuntimeError, 'mcp_server_port'):  # The port is set only in the config
             url({'server': {}, 'client': {'servers': [dict(entry)]}})
-        remote = dict(entry, config={'url': 'http://remote:1/'})  # An explicit address needs no server section
+        remote = {**entry, 'config': {'url': 'http://remote:1/'}}  # An explicit address needs no server section
         self.assertEqual(url({'client': {'servers': [remote]}}), 'http://remote:1/')
         with self.assertRaisesRegex(RuntimeError, 'no "server" section'):
             url({'client': {'servers': [dict(entry)]}})

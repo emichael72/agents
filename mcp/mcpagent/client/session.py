@@ -89,21 +89,23 @@ class AgentSession:
         Read the config and the shared context, build the agent and connect it to its MCP servers.
         """
         mcp_client = MCPClient(self.config_file)
-        self.shared = AgentContext(mcp_client.config_data)
-        self.output = Output(self.console, self.shared.output_settings(), debug=self.trace)
+        shared = AgentContext(mcp_client.config_data)
+        self.shared = shared
+        self.output = Output(self.console, shared.output_settings(), debug=self.trace)
         model = ModelProfiles.load(mcp_client.config_data).resolve(self.profile, model=self.model,
                                                                     base_url=self.base_url)
-        self.settings = self.shared.agent_settings()
-        self.agent = MCPAgent(mcp_client, base_url=model["base_url"], model=model["model"],
-                              api_key=model["api_key"], provider=model["name"], timeout=model["timeout"],
-                              error_hints=model["error_hints"],
-                              instructions=self.shared.system_prompt(self.settings),
-                              context=self.context, trace=self.output.line,  # Debug lines, else the spinner
-                              max_tool_calls=int(self.settings.get("max_tool_calls", 8)))
-        await self.agent.connect()
-        servers = len({server for server, _, _ in self.agent.routes.values()})
-        tools = f"{len(self.agent.routes)} tools" + (f" from {servers} servers" if servers > 1 else "")
-        self.output.line(f"{self.agent.provider} model: {self.agent.model} @ {self.agent.base_url}, {tools} (sequential)")
+        self.settings = shared.agent_settings()
+        agent = MCPAgent(mcp_client, base_url=model["base_url"], model=model["model"],
+                         api_key=model["api_key"], provider=model["name"], timeout=model["timeout"],
+                         error_hints=model["error_hints"],
+                         instructions=shared.system_prompt(self.settings),
+                         context=self.context, trace=self.output.line,  # Debug lines, else the spinner
+                         max_tool_calls=int(self.settings.get("max_tool_calls", 8)))
+        self.agent = agent
+        await agent.connect()
+        servers = len({server for server, _, _ in agent.routes.values()})
+        tools = f"{len(agent.routes)} tools" + (f" from {servers} servers" if servers > 1 else "")
+        self.output.line(f"{agent.provider} model: {agent.model} @ {agent.base_url}, {tools} (sequential)")
 
     async def _answer(self, prompt: str) -> None:
         """

@@ -27,11 +27,10 @@ class ExceptionReport:
         self.file_name = "<unknown>"
         self.line_number = -1
         traceback = error.__traceback__
-        if traceback is not None:
-            while traceback.tb_next is not None:  # The innermost frame raised it
-                traceback = traceback.tb_next
+        while traceback is not None:  # Keep the origin of the innermost frame
             self.file_name = os.path.basename(traceback.tb_frame.f_code.co_filename)
             self.line_number = traceback.tb_lineno
+            traceback = traceback.tb_next
 
     def print(self) -> None:
         """

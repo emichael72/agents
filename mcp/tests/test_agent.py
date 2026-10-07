@@ -103,7 +103,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         await self.model_server.start_server()
         self.addAsyncCleanup(self.model_server.close)
         self.model_url = str(self.model_server.make_url('/v1'))
-        # OpenAI's error hints, as the openai profile sets, though the stand-in server is local
+        # OpenAI's error hints, as the OpenAI profile sets, though the stand-in server is local
         self.agent = MCPAgent(MCPClient(self.config), base_url=self.model_url, model='gpt-4.1-mini',
                                api_key='test-key-not-real', error_hints='openai', trace=self.traces.append,
                                max_tool_calls=2)
