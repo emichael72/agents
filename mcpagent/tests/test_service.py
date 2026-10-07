@@ -317,6 +317,25 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue((await ed(args))[0], args)
             self.assertFalse((Path(folder) / '.git' / 'config').exists())
 
+            # hex only reads: any file, binary too, in a read-only folder as well
+            (Path(folder) / 'blob.bin').write_bytes(bytes(range(40)))
+            error, text = await ed({'path': 'sample/blob.bin', 'action': 'hex', 'offset': 16, 'length': 18})
+            self.assertFalse(error, text)
+            self.assertEqual(json.loads(text)['logs'], [  # The server returns the output lines as logs
+                'sample/blob.bin: bytes 16-33 (0x10-0x21) of 40',
+                '00000010  10 11 12 13 14 15 16 17  18 19 1a 1b 1c 1d 1e 1f  |................|',
+                '00000020  20 21                                             | !|',
+                '(6 more bytes; continue with offset 34)'])
+            error, text = await ed({'path': 'sample/blob.bin', 'action': 'hex', 'offset': -2})
+            self.assertIn('00000026  26 27', text)
+            self.assertNotIn('more bytes', text)
+            error, text = await ed({'path': 'tools/ed/ed.py', 'action': 'hex', 'length': 16})
+            self.assertFalse(error, text)
+            self.assertIn('|#!/usr/bin/env p|', text)
+            for args in ({'offset': 40}, {'length': 0}, {'length': 5000}):
+                self.assertTrue((await ed({'path': 'sample/blob.bin', 'action': 'hex', **args}))[0], args)
+            self.assertTrue((await ed({'path': 'sample/../escape.bin', 'action': 'hex'}))[0])
+
     def test_tool_manifests_are_discovered(self):
         with tempfile.TemporaryDirectory() as folder:
             (Path(folder) / "hello").mkdir()

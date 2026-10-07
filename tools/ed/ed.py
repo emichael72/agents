@@ -4,12 +4,14 @@ Module: ed.py
 
 Description:
     Edits text files for the agents, inside the allowed folders with write access
-    (context/paths.json, checked by gatekeepers/fs/fs_gate.py). Four actions:
+    (context/paths.json, checked by gatekeepers/fs/fs_gate.py), and shows any file as hex. Five actions:
       - replace: replace exact text (`old` with `new`); `old` must match once, unless `all` is set.
       - lines:   replace lines `start`..`end` (as `cat -n` in the shell numbers them) with `new`; an empty
                  `new` deletes them.
       - insert:  insert `new` after line `line` (0 inserts at the top).
       - write:   create the file, or replace all of it, with `new`.
+      - hex:     read only: show `length` bytes from `offset` as a hex dump (offset, 16 bytes in hex,
+                 then the printable characters), for looking into binary files.
     After an edit it shows the changed lines, numbered, with CONTEXT lines around them.
 
     Key design points:
@@ -20,6 +22,8 @@ Description:
       - Writes are atomic (a temporary file renamed over the original) and keep the file's
         permissions and line endings (LF or CRLF).
       - Only UTF-8 text files up to MAX_BYTES; a failed match changes nothing.
+      - hex needs only read access and reads just the bytes it shows (at most HEX_MAX), so it
+        works on any readable file, of any size.
 """
 
 import os
@@ -32,10 +36,13 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "gatekeepers" / "fs"))
 import fs_gate  # noqa: E402
 
-ACTIONS = ("replace", "lines", "insert", "write")
-OPTIONS = ("action", "old", "new", "all", "start", "end", "line")
+ACTIONS = ("replace", "lines", "insert", "write", "hex")
+OPTIONS = ("action", "old", "new", "all", "start", "end", "line", "offset", "length")
 MAX_BYTES = 2_000_000
 CONTEXT = 3
+HEX_LENGTH = 256  # Bytes hex shows by default
+HEX_MAX = 4096  # The most bytes hex shows at once
+HEX_ROW = 16
 
 
 def target_file(path: str, action: str) -> tuple[Path, str]:
@@ -140,20 +147,64 @@ def line_number(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
 
 
+def hex_view(path: str, offset: Optional[int] = None, length: Optional[int] = None) -> str:
+    """
+    Show part of a file as a hex dump, like hexdump -C: each row is the offset, 16 bytes in hex
+    and the same bytes as text (printable ASCII, "." for the rest).
+    Args:
+        path: <allowed name>/<file>; read access is enough.
+        offset: The first byte (0-based, default 0); negative counts from the end (-16 = the last 16 bytes).
+        length: How many bytes (default HEX_LENGTH, at most HEX_MAX).
+    Returns:
+        str: A header with the range shown and the file's size, then the rows.
+    Raises:
+        ValueError: If the path is refused, or offset or length is out of range.
+    """
+    target, shown = fs_gate.resolve(path, "file", "r")
+    size = target.stat().st_size
+    length = HEX_LENGTH if length is None else length
+    if not 1 <= length <= HEX_MAX:
+        raise ValueError(f"length must be from 1 to {HEX_MAX} bytes.")
+    start = offset or 0
+    if start < 0:
+        start = max(0, size + start)
+    if start >= size and size:
+        raise ValueError(f"offset {offset} is past the end of '{shown}' ({size:,} bytes).")
+    with target.open("rb") as f:
+        f.seek(start)
+        data = f.read(length)
+    if not data:
+        return f"{shown}: empty file"
+    end = start + len(data) - 1
+    rows = [f"{shown}: bytes {start:,}-{end:,} (0x{start:x}-0x{end:x}) of {size:,}"]
+    for at in range(0, len(data), HEX_ROW):
+        chunk = data[at:at + HEX_ROW]
+        hexes = " ".join(f"{b:02x}" for b in chunk)
+        if len(chunk) > 8:
+            hexes = hexes[:23] + " " + hexes[23:]  # A gap after the 8th byte, as hexdump -C
+        text = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
+        rows.append(f"{start + at:08x}  {hexes:<48}  |{text}|")
+    if end + 1 < size:
+        rows.append(f"({size - end - 1:,} more bytes; continue with offset {end + 1})")
+    return "\n".join(rows)
+
+
 def edit(path: str, action: str = "replace", old: Optional[str] = None, new: Optional[str] = None,
          replace_all: bool = False, start: Optional[int] = None, end: Optional[int] = None,
-         line: Optional[int] = None) -> str:
+         line: Optional[int] = None, offset: Optional[int] = None, length: Optional[int] = None) -> str:
     """
-    Apply one edit and describe it.
+    Apply one edit and describe it, or with hex, show part of a file.
     Args:
         path: <allowed name>/<file>.
-        action: "replace", "lines", "insert" or "write".
+        action: "replace", "lines", "insert", "write" or "hex".
         old: replace: the exact text to find.
         new: The new text (replace, lines, insert, write).
         replace_all: replace: change every occurrence of old.
         start: lines: the first line to replace.
         end: lines: the last line to replace (default: start).
         line: insert: the line to insert after (0 for the top).
+        offset: hex: the first byte; negative counts from the end.
+        length: hex: how many bytes.
     Returns:
         str: What changed, then the changed lines with context.
     Raises:
@@ -161,6 +212,8 @@ def edit(path: str, action: str = "replace", old: Optional[str] = None, new: Opt
     """
     if action not in ACTIONS:
         raise ValueError(f"Unknown action '{action}'. Use one of: {', '.join(ACTIONS)}.")
+    if action == "hex":
+        return hex_view(path, offset, length)  # Read only: nothing below runs
     target, shown = target_file(path, action)
     text = read_text(target, shown)
     newline = "\r\n" if "\r\n" in text else "\n"
@@ -265,7 +318,8 @@ def main(argv: Optional[list[str]] = None) -> str:
             raise ValueError(f"{name} must be a whole number.") from None
 
     return edit(o["path"], o.get("action", "replace"), o.get("old"), o.get("new"),
-                o.get("all", "").lower() in ("true", "1", "yes"), number("start"), number("end"), number("line"))
+                o.get("all", "").lower() in ("true", "1", "yes"), number("start"), number("end"), number("line"),
+                number("offset"), number("length"))
 
 
 if __name__ == "__main__":

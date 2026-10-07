@@ -14,7 +14,7 @@ added here is available to all of them without code changes:
 | `time` | Bash / `date` | `timezone` (optional, IANA name) | The current date and time |
 | `sysinfo` | Python | `section` (optional) | The system, CPU utilization and load, memory, disks, network, GPU, busiest processes and software versions (Python, gcc, ...) |
 | `shell` | Python / `bwrap` | `cwd`, `command` | Runs a command line (ls, cat, grep, find, sed, make, gcc, git, ... joined with `\|`, `&&`, `;`) in an allowed folder, inside a sandbox; `help` lists the commands |
-| `ed` | Python | `path`, `action`, `old`, `new`, `all`, `start`, `end`, `line` (by action) | Edits a file: replace exact text, replace or delete lines, insert, or write a whole file; shows the changed lines |
+| `ed` | Python | `path`, `action`, `old`, `new`, `all`, `start`, `end`, `line` (by action) | Edits a file: replace exact text, replace or delete lines, insert, or write a whole file; shows the changed lines. `hex` (`offset`, `length`) only reads: part of any file as a hex dump |
 | `mr` | Python / `git`, `gh` | `path`, `title`, `body`, `branch` (optional) | Opens a merge request: formats the changed C/C++ files, puts the changes on a new branch, pushes it and opens a pull request into the default branch; returns the gate's quiz link |
 | `memory` | Python | `action` (save, read, forget), `topic`, `text`, `summary`, `replace` | The agents' notes between runs, in `.memory/`; the index is loaded into every agent's instructions |
 | `doxy` | Bash / `doxygen` | `paths` (files or folders, space-separated) | Doxygen documentation problems as `file:line: message`, or "All documented" |
