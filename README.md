@@ -324,7 +324,6 @@ The same agent with pydantic-ai running the loop; the tools run in-process. See
 .venv/bin/python pydantic/agent.py                                # interactive chat
 .venv/bin/python pydantic/agent.py --prompt "Time now" --history  # one prompt + raw message dump
 .venv/bin/python pydantic/agent.py --parallel                     # run a response's tool calls concurrently
-.venv/bin/python pydantic/agent.py --mcp                          # tools from the MCPAgent server
 .venv/bin/python -m unittest discover -s pydantic/tests           # offline tests
 ```
 
