@@ -20,9 +20,8 @@ from jsonschema import ValidationError, validate
 from pydantic_ai import ModelRetry, Tool, ToolFailed
 from pydantic_ai.toolsets import FunctionToolset
 
-from pydantic_agent import REPO_ROOT
+from pydantic_agent import TOOLS_DIR
 
-TOOLS_DIR = REPO_ROOT / "tools"
 SCRIPT_TIMEOUT = 30
 AGENT_NAME = "Pydantic Agent"  # Lets tools such as pr and pr_gate say which agent ran them
 

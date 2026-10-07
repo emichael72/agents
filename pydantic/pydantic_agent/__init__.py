@@ -17,3 +17,5 @@ CONTEXT_DIR = REPO_ROOT / "context"  # Shared by all three agents
 INSTRUCTIONS_FILE = CONTEXT_DIR / "instructions.json"
 AGENT_FILE = CONTEXT_DIR / "agent.json"  # Agent loop settings
 OUTPUT_FILE = CONTEXT_DIR / "output.json"  # Terminal layout
+MODELS_FILE = CONTEXT_DIR / "models.json"  # Model profiles
+TOOLS_DIR = REPO_ROOT / "tools"  # One <tool>/tool.json per tool

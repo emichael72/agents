@@ -17,9 +17,7 @@ from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from pydantic_agent import CONTEXT_DIR
-
-MODELS_FILE = CONTEXT_DIR / "models.json"
+from pydantic_agent import MODELS_FILE
 
 
 class ModelProfiles:

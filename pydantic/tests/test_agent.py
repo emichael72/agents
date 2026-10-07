@@ -24,12 +24,12 @@ from pydantic_ai.messages import (ModelRequest, ModelResponse, TextPart, ToolCal
                                   UserPromptPart)
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
-from pydantic_agent import AGENT_FILE, CONTEXT_DIR, REPO_ROOT
+from pydantic_agent import AGENT_FILE, CONTEXT_DIR, REPO_ROOT, TOOLS_DIR
 from pydantic_agent.context import AgentContext
 from pydantic_agent.output import Output
 from pydantic_agent.profiles import ModelProfiles
 from pydantic_agent.session import AgentSession
-from pydantic_agent.toolset import TOOLS_DIR, LocalTools
+from pydantic_agent.toolset import LocalTools
 
 # The scripted turn every agent's tests replay (tests/scenario.json)
 SCENARIO = json.loads((REPO_ROOT / "tests" / "scenario.json").read_text())
