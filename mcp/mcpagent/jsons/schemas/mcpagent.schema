@@ -26,6 +26,7 @@
 	"definitions": {
 		"server": {
 			"type": "object",
+			"required": ["mcp_server_port"],
 			"properties": {
 				"project_name": {
 					"type": "string",

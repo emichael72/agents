@@ -113,10 +113,8 @@ def client_settings(config_data: dict[str, Any], config_file: str | Path) -> dic
         dict[str, Any]: A copy of the section, as MCPClient uses it.
     Raises:
         RuntimeError: If the configuration has no "client" section, or an HTTP entry needs the
-            "server" section and there is none.
+            "server" section's port and there is none.
     """
-    from mcpagent.server.types import DEFAULT_PORT  # The server package imports this module
-
     client = copy.deepcopy(_section(config_data, "client", config_file))
     for entry in client.get("servers", []):
         if entry.get("transport", "").upper() != "HTTP" or "config" in entry:
@@ -124,7 +122,9 @@ def client_settings(config_data: dict[str, Any], config_file: str | Path) -> dic
         server = _section(config_data, "server", config_file)
         host = server.get("mcp_server_bind_address") or "127.0.0.1"
         host = "127.0.0.1" if host == "0.0.0.0" else host  # Reach a server bound to all interfaces locally
-        port = server.get("mcp_server_port", DEFAULT_PORT)
+        port = server.get("mcp_server_port")
+        if port is None:
+            raise RuntimeError(f'Configuration {config_file} has no "mcp_server_port" in its server section')
         # noinspection HttpUrlsUsage
         url = f"http://{host}:{port}/"
         entry["config"] = {"url": url, "sse_url": url + "sse"}

@@ -92,15 +92,18 @@ class MCPService:
             self._tools_data = {**discovered, **self._tools_data}
             self._project_data["tools"] = self._tools_data
 
-        # Port and optional host bind address
-        self._mcp_server_port: int = self._project_data.get("mcp_server_port", self._mcp_config.port)
-        self._mcp_config.port = self._mcp_server_port
+        # Port (the schema requires it) and optional host bind address
+        port = self._project_data.get("mcp_server_port")
+        if not isinstance(port, int):
+            raise RuntimeError('The server settings have no "mcp_server_port"')
+        self._mcp_server_port: int = port
+        self._mcp_config.port = port
         self._mcp_server_bind_address: Optional[str] = self._project_data.get("mcp_server_bind_address")
 
         @web.middleware
         async def check_origin(request, handler):
             origin = request.headers.get("Origin")
-            allowed = self._project_data.get("allowed_origins", [
+            allowed = self._project_data.get("allowed_origins", [  # By default, MCP Inspector's web UI
                 "http://localhost:6274", "http://127.0.0.1:6274"
             ])
             if origin and origin not in allowed:

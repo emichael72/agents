@@ -9,15 +9,13 @@ Description:
 from dataclasses import dataclass
 from typing import Any, Optional
 
-DEFAULT_PORT = 6274  # Used when the server config does not set mcp_server_port
-
 
 @dataclass
 class MCPServiceConfigType:
     """ Configuration for the MCP server connection. """
     host: Optional[str] = None
     advertise_ip: Optional[str] = None
-    port: int = DEFAULT_PORT
+    port: Optional[int] = None  # The server settings' mcp_server_port
     readonly: bool = False
 
 

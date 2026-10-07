@@ -20,7 +20,6 @@ from mcpagent import MCPClient, MCPService
 from mcpagent.config import (DEFAULT_CONFIG, JSONS_DIR, REPO_ROOT, SCHEMA_DIR, SCHEMA_FILE, client_settings,
                              load_config, repo_path, server_settings)
 from mcpagent.server.__main__ import start_mcp_server
-from mcpagent.server.types import DEFAULT_PORT
 
 
 class ServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -435,7 +434,8 @@ class ConfigLoadingTests(unittest.TestCase):
             with self.subTest(bind=bind):
                 server = {'mcp_server_port': 7000, **({'mcp_server_bind_address': bind} if bind else {})}
                 self.assertEqual(url({'server': server, 'client': {'servers': [dict(entry)]}}), f'http://{host}:7000/')
-        self.assertEqual(url({'server': {}, 'client': {'servers': [dict(entry)]}}), f'http://127.0.0.1:{DEFAULT_PORT}/')
+        with self.assertRaisesRegex(RuntimeError, 'mcp_server_port'):  # The port is set only in the config
+            url({'server': {}, 'client': {'servers': [dict(entry)]}})
         remote = dict(entry, config={'url': 'http://remote:1/'})  # An explicit address needs no server section
         self.assertEqual(url({'client': {'servers': [remote]}}), 'http://remote:1/')
         with self.assertRaisesRegex(RuntimeError, 'no "server" section'):
@@ -452,6 +452,8 @@ class ConfigLoadingTests(unittest.TestCase):
                     load_config(config_file)
         with self.assertRaisesRegex(RuntimeError, 'Schema validation failed'):
             load_config(self.write({'other': {}}))  # Only the two sections
+        with self.assertRaisesRegex(RuntimeError, "'mcp_server_port' is a required property"):
+            load_config(self.write({'server': {}}))
 
     def test_broken_or_missing_schema_stops_loading(self):
         config_file = self.write({})
