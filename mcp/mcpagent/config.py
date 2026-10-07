@@ -15,14 +15,7 @@ from typing import Any
 
 from jsonschema import ValidationError, validate
 
-# The configuration and its schema, shared by the client and the server.
-JSONS_DIR = Path(__file__).resolve().parent / "jsons"
-SCHEMA_DIR = JSONS_DIR / "schemas"
-DEFAULT_CONFIG = JSONS_DIR / "mcpagent.json"
-SCHEMA_FILE = SCHEMA_DIR / "mcpagent.schema.json"
-
-# The repository root: the nearest folder above this file holding pyproject.toml
-REPO_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file())
+from mcpagent import DEFAULT_CONFIG, REPO_ROOT, SCHEMA_FILE
 
 
 class MCPAgentConfig:

@@ -22,9 +22,8 @@ from rich.console import Console
 
 # Local imports
 from mcpagent.common.errors import ExceptionReport
-from mcpagent import __version__
+from mcpagent import DEFAULT_CONFIG, __version__
 from mcpagent.client.session import AgentSession
-from mcpagent.config import DEFAULT_CONFIG
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

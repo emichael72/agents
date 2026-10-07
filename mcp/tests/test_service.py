@@ -17,8 +17,10 @@ from typing import Any
 from unittest.mock import patch
 
 from aiohttp.test_utils import TestClient, TestServer
-from mcpagent import MCPClient, MCPService
-from mcpagent.config import DEFAULT_CONFIG, JSONS_DIR, REPO_ROOT, SCHEMA_DIR, SCHEMA_FILE, MCPAgentConfig
+from mcpagent import DEFAULT_CONFIG, JSONS_DIR, REPO_ROOT, SCHEMA_DIR, SCHEMA_FILE
+from mcpagent.client.client import MCPClient
+from mcpagent.server.service import MCPService
+from mcpagent.config import MCPAgentConfig
 
 
 class ServiceTests(unittest.IsolatedAsyncioTestCase):

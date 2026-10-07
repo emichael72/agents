@@ -21,18 +21,18 @@ from typing import Any, AsyncGenerator, Optional, Union
 import aiohttp
 
 # Local imports
-from mcpagent import (
+from mcpagent.client.types import (
     ConfigType,
     EventCallbackType,
     HTTPConfigType,
     JSONRPCResponseCoroType,
     JSONRPCResponseTaskType,
     ListenEventsReturnType,
-    MCPAgentLogger,
     MCPTransportType,
     ResponseCallbackType,
     STDIOConfigType,
 )
+from mcpagent.common.logger import MCPAgentLogger
 
 
 class MCPClientConnection:

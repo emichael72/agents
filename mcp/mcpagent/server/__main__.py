@@ -18,7 +18,8 @@ from rich.console import Console
 
 # Local imports
 from mcpagent.common.errors import ExceptionReport
-from mcpagent import MCPService, __version__
+from mcpagent import __version__
+from mcpagent.server.service import MCPService
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

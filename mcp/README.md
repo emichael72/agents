@@ -13,7 +13,7 @@ is named `mcpagent`, inside the `mcp/` project folder.
 ```
 client.py                            client launcher (python mcp/client.py from the repository root)
 server.py                            server launcher (python mcp/server.py from the repository root)
-mcpagent/__init__.py                  the package's public names and __version__
+mcpagent/__init__.py                  package root: __version__, REPO_ROOT and the config and schema paths
 mcpagent/config.py                    MCPAgentConfig: loads and validates the config; its sections
 mcpagent/jsons/mcpagent.json          the config: "server" (port, tools_dir) and "client" (MCP servers,
                                       shared context/*.json)

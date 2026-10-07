@@ -5,41 +5,18 @@ Description:
     Package root of mcpagent: an MCP server that exposes scripts as tools, and an MCP client
     with an agent that lets a model use them.
 
-    Defines `__version__` and re-exports the public classes and types, so callers can write
-    `from mcpagent import MCPClient, MCPService, ...`. Internal client modules import from
-    this namespace, so the types and the logger must be exported before the connection and
-    client classes are imported.
+    It holds `__version__` and the locations the package's modules share: the repository root,
+    and the configuration and its schema. The classes live in their modules; import them from
+    there, e.g. `from mcpagent.client.client import MCPClient` or
+    `from mcpagent.server.service import MCPService`.
 """
-__version__ = "1.0.2"  # Defined before the imports below, which read it
+from pathlib import Path
 
-from mcpagent.client.types import (
-    ConfigType,
-    EventCallbackType,
-    HTTPConfigType,
-    JSONRPCResponseCoroType,
-    JSONRPCResponseTaskType,
-    ListenEventsReturnType,
-    MCPTransportType,
-    RequestReturnType,
-    ResponseCallbackType,
-    STDIOConfigType,
-)
-from mcpagent.common.logger import MCPAgentLogger
-from mcpagent.client.connection import MCPClientConnection
-from mcpagent.client.client import MCPClient
-from mcpagent.server.service import MCPService
+__version__ = "1.0.2"
 
-__all__ = [
-    "__version__",
-
-    # Client
-    "MCPClient", "MCPClientConnection", "MCPAgentLogger",
-
-    # Server
-    "MCPService",
-
-    # Client types
-    "MCPTransportType", "HTTPConfigType", "STDIOConfigType", "ConfigType",
-    "ResponseCallbackType", "EventCallbackType", "RequestReturnType", "ListenEventsReturnType",
-    "JSONRPCResponseCoroType", "JSONRPCResponseTaskType",
-]
+# The repository root: the nearest folder above holding pyproject.toml
+REPO_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file())
+JSONS_DIR = Path(__file__).resolve().parent / "jsons"  # The configuration and its schema
+SCHEMA_DIR = JSONS_DIR / "schemas"
+DEFAULT_CONFIG = JSONS_DIR / "mcpagent.json"  # Shared by the client and the server
+SCHEMA_FILE = SCHEMA_DIR / "mcpagent.schema.json"

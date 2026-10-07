@@ -66,8 +66,9 @@ class AgentSession:
         Returns:
             Agent: The pydantic-ai agent.
         """
-        self.tools = LocalTools.load()
-        return Agent(model, instructions=self.context.system_prompt(self.settings), toolsets=[self.tools])
+        tools = LocalTools.load()
+        self.tools = tools
+        return Agent(model, instructions=self.context.system_prompt(self.settings), toolsets=[tools])
 
     async def run(self, profile: Optional[str] = None, model: Optional[str] = None, base_url: Optional[str] = None,
                   prompt: Optional[str] = None, show_history: bool = False) -> int:

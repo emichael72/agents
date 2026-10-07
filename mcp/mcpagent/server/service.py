@@ -38,7 +38,8 @@ from rich.console import Console
 from rich.text import Text
 
 # Local imports
-from mcpagent.config import DEFAULT_CONFIG, REPO_ROOT, MCPAgentConfig
+from mcpagent import DEFAULT_CONFIG, REPO_ROOT
+from mcpagent.config import MCPAgentConfig
 from mcpagent.common.logger import MCPAgentLogger
 from mcpagent.server.types import MCPServiceConfigType, MCPServiceToolType, RPCError
 

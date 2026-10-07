@@ -31,19 +31,19 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 # Local imports
-from mcpagent import (
+from mcpagent import __version__  # Sent to servers in the initialize handshake
+from mcpagent.client.connection import MCPClientConnection
+from mcpagent.client.types import (
     ConfigType,
     EventCallbackType,
     HTTPConfigType,
     ListenEventsReturnType,
-    MCPAgentLogger,
-    MCPClientConnection,
     MCPTransportType,
     RequestReturnType,
     ResponseCallbackType,
     STDIOConfigType,
-    __version__,  # Sent to servers in the initialize handshake
 )
+from mcpagent.common.logger import MCPAgentLogger
 from mcpagent.config import MCPAgentConfig
 
 

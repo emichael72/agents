@@ -22,8 +22,10 @@ from aiohttp import web
 from aiohttp.test_utils import TestServer
 from rich.console import Console
 
-from mcpagent import MCPClient, MCPService
-from mcpagent.config import REPO_ROOT, MCPAgentConfig
+from mcpagent import REPO_ROOT
+from mcpagent.client.client import MCPClient
+from mcpagent.server.service import MCPService
+from mcpagent.config import MCPAgentConfig
 from mcpagent.client.agent import MCPAgent
 from mcpagent.client.context import AgentContext
 from mcpagent.client.output import Output
