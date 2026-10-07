@@ -41,13 +41,18 @@ OPTIONS = ("action", "topic", "text", "summary", "replace")
 
 def folder() -> Path:
     """
-    The memory folder, which must allow reading and writing.
+    The memory folder, which must allow reading and writing. It is created on first use (it is
+    ignored by git, so a fresh checkout has none), but only as the folder paths.json names.
     Returns:
         Path: The folder.
     Raises:
         ValueError: If paths.json has no writable "memory" folder.
     """
-    return fs_gate.resolve(FOLDER, "dir", "rw")[0]
+    allowed = fs_gate.load_allowed()
+    entry = allowed.get(FOLDER)
+    if entry is not None and "w" in entry.access and not entry.path.exists():
+        entry.path.mkdir(parents=True)
+    return fs_gate.resolve(FOLDER, "dir", "rw", allowed)[0]
 
 
 def topic_name(topic: Optional[str]) -> str:

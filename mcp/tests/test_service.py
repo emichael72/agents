@@ -260,7 +260,6 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_memory_saves_reads_and_forgets_topics(self):
         with tempfile.TemporaryDirectory() as folder:
             allowed = Path(folder) / 'paths.json'
-            (Path(folder) / 'memory').mkdir()
             allowed.write_text(json.dumps({'paths': {'memory': {'path': str(Path(folder) / 'memory'), 'access': 'rw'}}}))
 
             async def memory(args):
@@ -268,7 +267,9 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                     result = (await self.rpc('tools/call', {'name': 'memory', 'arguments': args}))['result']
                 return result['isError'], json.loads(result['content'][0]['text'])['logs']
 
+            self.assertFalse((Path(folder) / 'memory').exists())  # Like .memory in a fresh checkout
             self.assertEqual((await memory({'action': 'read'}))[1], ['The memory is empty.'])
+            self.assertTrue((Path(folder) / 'memory').is_dir())  # Created on first use
             await memory({'action': 'save', 'topic': 'User Preferences', 'text': 'Prefers short answers'})
             await memory({'action': 'save', 'topic': 'user-preferences', 'text': 'Tests every new option'})
             error, logs = await memory({'action': 'read', 'topic': 'user-preferences'})
