@@ -164,7 +164,7 @@ test('by default only the answer and the timing line print', () => {
   output.finish();
   output.note('History cleared.');
   assert.deepEqual(printed.replace(/\x1b\[[0-9;]*m/g, '').split('\n'),
-                   ['', 'Two files.', '', 'Response time: 0.0s', 'History cleared.', '']);
+                   ['', 'Two files.', 'Response time: 0.0s', '', 'History cleared.', '']);
 });
 
 test('text around hidden tool calls has one blank line between', () => {
@@ -177,8 +177,8 @@ test('text around hidden tool calls has one blank line between', () => {
     output.line('← shell: ok');
     if (moreText) output.text('It builds cleanly.');
     output.finish();
-    const expected = ['', 'Let me check the build.', '', ...(moreText ? ['It builds cleanly.', ''] : [])];
-    assert.deepEqual(printed.replace(/\x1b\[[0-9;]*m/g, '').split('\n'), [...expected, 'Response time: 0.0s', '']);
+    const expected = ['', 'Let me check the build.', ...(moreText ? ['', 'It builds cleanly.'] : [])];
+    assert.deepEqual(printed.replace(/\x1b\[[0-9;]*m/g, '').split('\n'), [...expected, 'Response time: 0.0s', '', '']);
   }
 });
 
@@ -230,7 +230,7 @@ test('lines and the streamed answer wrap to the width, and the response is timed
   const body = plain.split('\n').filter((line) => line && !line.startsWith('Response time'));
   assert.ok(body.every((line) => line.length <= 30));
   assert.equal(body.join(' '), answer);
-  assert.match(plain, /\n\nResponse time: \d+\.\ds\n$/);
+  assert.match(plain, /[^\n]\nResponse time: \d+\.\ds\n\n$/);
 });
 
 test('layout settings come from the shared context file', () => {
@@ -243,7 +243,7 @@ test('token counts follow the response time', () => {
   output.addUsage(1200, 34);
   output.addUsage(1300, 56, 2);
   output.finish();
-  assert.match(printed.replace(/\x1b\[[0-9;]*m/g, ''), /Response time: \d+\.\ds · tokens: 2,500 in, 90 out \(3 model calls\)\n$/);
+  assert.match(printed.replace(/\x1b\[[0-9;]*m/g, ''), /Response time: \d+\.\ds · tokens: 2,500 in, 90 out · 3 model calls\n\n$/);
 });
 
 test('links split into shown text and address', () => {

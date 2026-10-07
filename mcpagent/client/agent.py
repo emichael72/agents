@@ -739,19 +739,24 @@ class Output:
         self.word = self.spaces = ""
 
     def finish(self) -> None:
-        """Close the response, and print how long it took since `start` and the tokens it used."""
+        """
+        Close the response: the line with how long it took since `start` and the tokens it used goes
+        right under the answer, and a blank line after it sets the response off from the next prompt.
+        """
         self.stop_spinner()
-        self.end()
+        self.end(blank=False)
+        self.blank_owed = False  # The timing line belongs to the answer: no blank line between them
         parts = [f"Response time: {time.monotonic() - self.started:.1f}s"] if self.show_time else []
         if self.show_tokens:
             if self.usage:
                 calls = self.usage["requests"]
-                parts.append(f"tokens: {self.usage['input']:,} in, {self.usage['output']:,} out "
-                             f"({calls} model call{'s' if calls != 1 else ''})")
+                parts.append(f"tokens: {self.usage['input']:,} in, {self.usage['output']:,} out")
+                parts.append(f"{calls} model call{'s' if calls != 1 else ''}")
             else:
                 parts.append("tokens: not reported")
         if parts:
             self.note(" · ".join(parts))
+        self.out.print()
 
     def _render(self, text: str) -> Text:
         """

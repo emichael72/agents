@@ -230,7 +230,7 @@ class OutputTests(unittest.TestCase):
         output.finish()
         output.note("History cleared.")
         plain = re.sub(r"\x1b\[[0-9;]*m", "", printed.getvalue())
-        self.assertEqual(plain.splitlines()[1:], ["Two files.", "", "Response time: 0.0s", "History cleared."])
+        self.assertEqual(plain.splitlines()[1:], ["Two files.", "Response time: 0.0s", "", "History cleared."])
 
     def test_text_around_hidden_tool_calls_has_one_blank_line_between(self):
         for more_text in (True, False):
@@ -243,8 +243,8 @@ class OutputTests(unittest.TestCase):
             if more_text:
                 output.text("It builds cleanly.")
             output.finish()
-            expected = ["", "Let me check the build.", ""] + (["It builds cleanly.", ""] if more_text else [])
-            self.assertEqual(printed.getvalue().splitlines(), expected + ["Response time: 0.0s"])
+            expected = ["", "Let me check the build."] + (["", "It builds cleanly."] if more_text else [])
+            self.assertEqual(printed.getvalue().splitlines(), expected + ["Response time: 0.0s", ""])
 
     def test_lines_wrap_with_an_indent_and_keep_long_words_whole(self):
         url = "http://minion:8000/q/" + "x" * 40
@@ -264,7 +264,7 @@ class OutputTests(unittest.TestCase):
         self.assertTrue(all(len(line) <= 30 for line in body))
         self.assertEqual(" ".join(body), answer)
         self.assertEqual(lines[0], "")  # Blank line before the answer
-        self.assertRegex(self.printed.getvalue(), r"\n\nResponse time: \d+\.\ds\n$")
+        self.assertRegex(self.printed.getvalue(), r"[^\n]\nResponse time: \d+\.\ds\n\n$")
 
     def test_token_counts_follow_the_response_time(self):
         printed = io.StringIO()
@@ -272,7 +272,7 @@ class OutputTests(unittest.TestCase):
         output.add_usage(1200, 34)
         output.add_usage(1300, 56, requests=2)
         output.finish()
-        self.assertRegex(printed.getvalue(), r"Response time: \d+\.\ds · tokens: 2,500 in, 90 out \(3 model calls\)\n$")
+        self.assertRegex(printed.getvalue(), r"Response time: \d+\.\ds · tokens: 2,500 in, 90 out · 3 model calls\n\n$")
         printed.truncate(0), printed.seek(0)
         output.start()
         output.finish()

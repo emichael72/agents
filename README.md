@@ -152,9 +152,12 @@ default, a dark gray spinner runs while the model thinks (`Thinking…`) or a to
 shell…`), and only the answer and the response time are printed:
 
 ```text
-It's 17:03 JST (UTC+9) in Tokyo, Wednesday.
+You > What time is it in Tokyo?
 
-Response time: 3.0s · tokens: 3,557 in, 48 out (2 model calls)
+It's 17:03 JST (UTC+9) in Tokyo, Wednesday.
+Response time: 3.0s · tokens: 3,557 in, 48 out · 2 model calls
+
+You >
 ```
 
 `-d` (`--debug`) shows everything instead of the spinner, the banner and every tool call and result:
@@ -166,8 +169,7 @@ Local model server model: qwen/qwen3-coder-30b @ http://boba:1234/v1, 12 tools (
   PR #1 'Compute pi using the C math library' by emichael72 at 135c35a: quiz waiting, merge blocked: …
 
 The quiz service is running. Pull request #1 is still waiting for its quiz, so its merge is blocked.
-
-Response time: 6.3s · tokens: 4,313 in, 53 out (2 model calls)
+Response time: 6.3s · tokens: 4,313 in, 53 out · 2 model calls
 ```
 
 1. **Only the model's answer is in the terminal's normal color.** Everything else (the spinner, and
@@ -181,8 +183,9 @@ Response time: 6.3s · tokens: 4,313 in, 53 out (2 model calls)
    address as itself, both as clickable OSC 8 links (VS Code's terminal, iTerm2, GNOME Terminal and
    others), in the answer and in the gray tool lines. A link is never split while the answer
    streams. `"links": false` turns this off; piped output is always plain.
-4. **The answer has exactly one blank line before and after it.** A tool call prints together with
-   its result, in the order they ran (with `-d`).
+4. **The answer has one blank line before it, and the response time right under it**, then one
+   blank line before the next prompt. Text the model writes between tool calls is set off by one
+   blank line. A tool call prints together with its result, in the order they ran (with `-d`).
 5. **Each response ends with its time and tokens**: `Response time: N.Ns` from sending the prompt
    to the end of the answer, tools included; then the tokens the model calls used, as the server
    reports them: *in* (sent to the model: instructions, tool list, history, tool results, added

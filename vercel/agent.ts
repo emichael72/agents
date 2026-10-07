@@ -371,19 +371,24 @@ export class Output {
     this.word = this.spaces = '';
   }
 
-  /** Close the response, and print how long it took since `start` and the tokens it used. */
+  /**
+   * Close the response: the line with how long it took since `start` and the tokens it used goes
+   * right under the answer, and a blank line after it sets the response off from the next prompt.
+   */
   finish(): void {
     this.stopSpinner();
-    this.end();
+    this.end(false);
+    this.blankOwed = false; // The timing line belongs to the answer: no blank line between them
     const parts = this.showTime ? [`Response time: ${((performance.now() - this.started) / 1000).toFixed(1)}s`] : [];
     if (this.showTokens) {
       const usage = this.usage;
       parts.push(usage
-        ? `tokens: ${usage.input.toLocaleString('en-US')} in, ${usage.output.toLocaleString('en-US')} out ` +
-          `(${usage.requests} model call${usage.requests === 1 ? '' : 's'})`
+        ? `tokens: ${usage.input.toLocaleString('en-US')} in, ${usage.output.toLocaleString('en-US')} out · ` +
+          `${usage.requests} model call${usage.requests === 1 ? '' : 's'}`
         : 'tokens: not reported');
     }
     if (parts.length) this.note(parts.join(' · '));
+    this.write('\n');
   }
 
   /** Show the text's Markdown links and web addresses as clickable OSC 8 links, when links are on. */

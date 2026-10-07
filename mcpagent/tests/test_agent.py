@@ -401,7 +401,7 @@ class OutputTests(unittest.TestCase):
         output.finish()
         output.note("History cleared.")
         plain = re.sub(r"\x1b\[[0-9;]*m", "", printed.getvalue())
-        self.assertEqual(plain.splitlines()[1:], ["Two files.", "", "Response time: 0.0s", "History cleared."])
+        self.assertEqual(plain.splitlines()[1:], ["Two files.", "Response time: 0.0s", "", "History cleared."])
 
     def test_text_around_hidden_tool_calls_has_one_blank_line_between(self):
         for more_text in (True, False):
@@ -414,15 +414,15 @@ class OutputTests(unittest.TestCase):
             if more_text:
                 output.text("It builds cleanly.")
             output.finish()
-            expected = ["", "Let me check the build.", ""] + (["It builds cleanly.", ""] if more_text else [])
-            self.assertEqual(printed.getvalue().splitlines(), expected + ["Response time: 0.0s"])
+            expected = ["", "Let me check the build."] + (["", "It builds cleanly."] if more_text else [])
+            self.assertEqual(printed.getvalue().splitlines(), expected + ["Response time: 0.0s", ""])
 
     def test_token_counts_follow_the_response_time(self):
         printed = io.StringIO()
         output = Output(Console(file=printed), {'width': 120, 'show_time': True, 'show_tokens': True})
         output.add_usage(1200, 34)
         output.finish()
-        self.assertRegex(printed.getvalue(), r'Response time: \d+\.\ds · tokens: 1,200 in, 34 out \(1 model call\)\n$')
+        self.assertRegex(printed.getvalue(), r'Response time: \d+\.\ds · tokens: 1,200 in, 34 out · 1 model call\n\n$')
 
     def test_lines_and_streamed_answer_wrap_and_the_response_is_timed(self):
         printed = io.StringIO()
@@ -435,7 +435,7 @@ class OutputTests(unittest.TestCase):
         body = [line for line in printed.getvalue().split('\n') if line and not line.startswith('Response time')]
         self.assertTrue(all(len(line) <= 30 for line in body))
         self.assertEqual(' '.join(body), answer)
-        self.assertRegex(printed.getvalue(), r'\n\nResponse time: \d+\.\ds\n$')
+        self.assertRegex(printed.getvalue(), r'[^\n]\nResponse time: \d+\.\ds\n\n$')
 
 
 if __name__ == '__main__':
