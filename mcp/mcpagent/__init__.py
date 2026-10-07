@@ -12,7 +12,7 @@ Description:
 """
 __version__ = "1.0.2"  # Defined before the imports below, which read it
 
-from .client.types import (
+from mcpagent.client.types import (
     ConfigType,
     EventCallbackType,
     HTTPConfigType,
@@ -24,11 +24,11 @@ from .client.types import (
     ResponseCallbackType,
     STDIOConfigType,
 )
-from .common.logger import MCPAgentLogger
-from .client.debug import DebugGuru
-from .client.connection import MCPClientConnection
-from .client.client import MCPClient
-from .server.service import MCPService
+from mcpagent.common.logger import MCPAgentLogger
+from mcpagent.client.debug import DebugGuru
+from mcpagent.client.connection import MCPClientConnection
+from mcpagent.client.client import MCPClient
+from mcpagent.server.service import MCPService
 
 __all__ = [
     "__version__",

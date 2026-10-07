@@ -39,7 +39,7 @@ from colorama import Fore, Style
 # Local imports
 from mcpagent.config import DEFAULT_CONFIG, REPO_ROOT, MCPAgentConfig
 from mcpagent.common.logger import MCPAgentLogger
-from .types import MCPServiceConfigType, MCPServiceToolType, RPCError
+from mcpagent.server.types import MCPServiceConfigType, MCPServiceToolType, RPCError
 
 
 MAX_BATCH_MCP_COMMANDS = 64

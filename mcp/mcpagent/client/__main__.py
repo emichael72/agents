@@ -22,8 +22,8 @@ from colorama import Fore, Style, init
 
 # Local imports
 from mcpagent.common.errors import ExceptionReport
-from .. import __version__
-from .session import AgentSession
+from mcpagent import __version__
+from mcpagent.client.session import AgentSession
 from mcpagent.config import DEFAULT_CONFIG
 
 

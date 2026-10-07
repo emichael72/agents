@@ -19,8 +19,8 @@ from typing import Any, Callable, Optional
 import aiohttp
 from jsonschema import ValidationError, validate
 
-from .client import MCPClient
-from .output import Output
+from mcpagent.client.client import MCPClient
+from mcpagent.client.output import Output
 
 
 class Reply:

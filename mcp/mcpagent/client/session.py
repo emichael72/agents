@@ -15,11 +15,11 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import ANSI
 from rich.console import Console
 
-from .agent import MCPAgent
-from .client import MCPClient
-from .context import AgentContext
-from .output import Output
-from .profiles import ModelProfiles
+from mcpagent.client.agent import MCPAgent
+from mcpagent.client.client import MCPClient
+from mcpagent.client.context import AgentContext
+from mcpagent.client.output import Output
+from mcpagent.client.profiles import ModelProfiles
 
 
 class AgentSession:

@@ -6,7 +6,7 @@ Description:
     separate from the installed pydantic dependency.
 """
 
-from . import agent, toolset
-from .agent import Output, ask, build_agent, build_model, chat, main
+from pydantic_agent import agent, toolset
+from pydantic_agent.agent import Output, ask, build_agent, build_model, chat, main
 
 __all__ = ["agent", "toolset", "Output", "ask", "build_agent", "build_model", "chat", "main"]

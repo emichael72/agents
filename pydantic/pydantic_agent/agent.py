@@ -44,7 +44,7 @@ from rich.status import Status
 from rich.style import Style
 from rich.text import Text
 
-from .toolset import REPO_ROOT, toolset as local_toolset
+from pydantic_agent.toolset import REPO_ROOT, toolset as local_toolset
 
 MCP_URL = "http://127.0.0.1:6275/"  # MCPAgent's server (python mcp/server.py)
 
