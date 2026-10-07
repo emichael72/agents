@@ -294,7 +294,8 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
                 os.environ.pop(name, None)
             with patch('mcpagent.client.agent.loaded_model', return_value=None):  # No loaded model reported
                 local = resolve_model(config)  # "default": "local"
-            self.assertEqual((local['base_url'], local['model']), ('http://boba:1234/v1', 'qwen/qwen3-coder-30b'))
+            fallback = config['profiles']['local']  # Whatever the file names, so editing it never breaks this test
+            self.assertEqual((local['base_url'], local['model']), (fallback['base_url'], fallback['model']))
             with patch('mcpagent.client.agent.loaded_model', return_value='qwen/loaded-now'):
                 self.assertEqual(resolve_model(config)['model'], 'qwen/loaded-now')  # model_auto
                 self.assertEqual(resolve_model(config, model='explicit')['model'], 'explicit')

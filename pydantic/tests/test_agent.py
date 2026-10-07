@@ -127,7 +127,8 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 os.environ.pop(name, None)
             with patch.object(agent, "loaded_model", return_value=None):  # The server reports no loaded model
                 local = agent.resolve_model(models)  # "default": "local"
-            self.assertEqual((local["base_url"], local["model"]), ("http://boba:1234/v1", "qwen/qwen3-coder-30b"))
+            fallback = models["profiles"]["local"]  # Whatever the file names, so editing it never breaks this test
+            self.assertEqual((local["base_url"], local["model"]), (fallback["base_url"], fallback["model"]))
             with patch.object(agent, "loaded_model", return_value="qwen/loaded-now") as asked:
                 self.assertEqual(agent.resolve_model(models)["model"], "qwen/loaded-now")  # model_auto
                 self.assertEqual(agent.resolve_model(models, model="explicit")["model"], "explicit")
