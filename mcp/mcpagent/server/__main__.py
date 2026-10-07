@@ -2,11 +2,11 @@
 Module: __main__.py (server)
 
 Description:
-    Command-line entry point of the MCP server: `python -m mcpagent.server [mcpagent.jsonc]`, run
+    Command-line entry point of the MCP server: `python -m mcpagent.server [mcpagent.json]`, run
     from the mcp project directory.
 
     Runs `MCPService` with the "server" section of the MCPAgent config (default:
-    jsons/mcpagent.jsonc in this package, which serves the shared agents/tools folder).
+    jsons/mcpagent.json in this package, which serves the shared agents/tools folder).
     Also takes --version.
 """
 
@@ -22,18 +22,18 @@ from colorama import Fore, Style, init
 # Local imports
 from mcpagent.common.errors import ExceptionReport
 from mcpagent import MCPService, __version__
-from mcpagent.config import DEFAULT_CONFIG, REPO_ROOT, load_config, server_settings
+from mcpagent.config import DEFAULT_CONFIG, REPO_ROOT, MCPAgentConfig
 
 
 def start_mcp_server(config_path: Optional[Union[str, Path]] = None) -> int:
     """
     Entry point to launch an MCP server.
-    This function loads a project configuration file (JSON/JSONC/JSON5),
+    This function loads a project configuration file (JSON),
     instantiates an `MCPService`, and starts the service.
     Args:
         config_path (Optional[Union[str, Path]]): Path to the project configuration file.
         Supports environment variables and '~' expansion.
-        If None, the default config (mcp/mcpagent/jsons/mcpagent.jsonc) is used.
+        If None, the default config (mcp/mcpagent/jsons/mcpagent.json) is used.
     Returns:
         int: Exit status returned by the MCP service (0 for success, nonzero for failure).
     """
@@ -52,7 +52,7 @@ def start_mcp_server(config_path: Optional[Union[str, Path]] = None) -> int:
     try:
         # Paths in the config (tools_dir) are relative to the repository root
         os.chdir(REPO_ROOT)
-        project_data = server_settings(load_config(json_path), json_path)
+        project_data = MCPAgentConfig.load(json_path).server
 
         # Instantiate and start the service
         mcp_service = MCPService(project_data=project_data)
@@ -75,7 +75,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         prog="python mcp/server.py",
         description="Run the MCP server over the tools that its config names.")
     parser.add_argument("config", nargs="?", type=Path, metavar="CONFIG",
-                        help="MCPAgent config file (default: mcp/mcpagent/jsons/mcpagent.jsonc).")
+                        help="MCPAgent config file (default: mcp/mcpagent/jsons/mcpagent.json).")
     parser.add_argument("-v", "--version", action="store_true", help="Show the package version and exit.")
     return parser
 

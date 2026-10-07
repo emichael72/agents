@@ -56,7 +56,7 @@ class MCPService:
         """
         Load the tools and server settings from the parsed server config, and set up the routes.
         Args:
-            project_data: The server settings (mcpagent.jsonc's "server" section): server name and port, bind
+            project_data: The server settings (mcpagent.json's "server" section): server name and port, bind
                 address, allowed browser origins, tools_dir / tools_env and inline tools.
         Raises:
             TypeError: If project_data is not a dict.

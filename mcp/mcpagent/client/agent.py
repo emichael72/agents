@@ -36,7 +36,7 @@ from rich.status import Status
 from rich.style import Style
 from rich.text import Text
 
-from mcpagent.config import repo_path
+from mcpagent.config import MCPAgentConfig
 from .client import MCPClient
 
 
@@ -52,7 +52,7 @@ def load_instructions(config_data: dict[str, Any], key: str = "instructions") ->
     instructions_file: Optional[str] = config_data.get("instructions_file")
     if not instructions_file:
         return ""
-    path = repo_path(instructions_file)
+    path = MCPAgentConfig.repo_path(instructions_file)
     return "\n".join(json.loads(path.read_text(encoding="utf-8")).get(key, []))
 
 
@@ -69,7 +69,7 @@ def load_models(config_data: dict[str, Any]) -> dict:
     models_file: Optional[str] = config_data.get("models_file")
     if not models_file:
         raise ValueError('The client config has no "models_file"; point it at context/models.json.')
-    path = repo_path(models_file)
+    path = MCPAgentConfig.repo_path(models_file)
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -481,7 +481,7 @@ def load_output_settings(config_data: dict[str, Any]) -> dict:
     output_file: Optional[str] = config_data.get("output_file")
     if not output_file:
         return {}
-    path = repo_path(output_file)
+    path = MCPAgentConfig.repo_path(output_file)
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -543,7 +543,7 @@ def load_agent_settings(config_data: dict[str, Any]) -> dict:
     agent_file: Optional[str] = config_data.get("agent_file")
     if not agent_file:
         return {}
-    path = repo_path(agent_file)
+    path = MCPAgentConfig.repo_path(agent_file)
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -875,7 +875,7 @@ async def run_agent(config_file: str | Path, profile=None, model=None, base_url=
         settings = resolve_model(models, profile=profile, model=model, base_url=base_url)
         agent_settings = load_agent_settings(mcp_client.config_data)
         index: Optional[str] = agent_settings.get("memory_index")  # Relative to the repository
-        memory = memory_text(repo_path(index) if index else None)
+        memory = memory_text(MCPAgentConfig.repo_path(index) if index else None)
         active_agent = MCPAgent(mcp_client, base_url=settings["base_url"], model=settings["model"],
                          api_key=settings["api_key"], provider=settings["name"], timeout=settings["timeout"],
                          error_hints=settings["error_hints"],

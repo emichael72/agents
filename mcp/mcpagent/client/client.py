@@ -45,7 +45,7 @@ from mcpagent import (
     STDIOConfigType,
     __version__,  # Sent to servers in the initialize handshake
 )
-from mcpagent.config import client_settings, load_config
+from mcpagent.config import MCPAgentConfig
 
 
 class MCPClient:
@@ -93,7 +93,7 @@ class MCPClient:
     @staticmethod
     def _load_config(config_file: Union[Path, str]) -> dict[str, Any]:
         """
-        Load the client section of an MCPAgent configuration file (JSONC/JSON5).
+        Load the client section of an MCPAgent configuration file (JSON).
         Args:
             config_file: Path to the configuration file (Path or str).
         Returns:
@@ -101,7 +101,7 @@ class MCPClient:
         Raises:
             RuntimeError: If the file is missing, fails schema validation, or has no client section.
         """
-        return client_settings(load_config(config_file), config_file)
+        return MCPAgentConfig.load(config_file).client
 
     def _load_servers_from_config(self) -> None:
         """

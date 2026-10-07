@@ -1,0 +1,40 @@
+{
+  "description": [
+    "MCPAgent configuration: the MCP server (python mcp/server.py) and the agent that uses it",
+    "(python mcp/client.py). Validated against schemas/mcpagent.schema.json; paths are relative to",
+    "the repository root.",
+    "server: the MCP server, which serves the shared agents/tools folder.",
+    "  mcp_server_port, mcp_server_bind_address: where it listens; \"0.0.0.0\" binds to all interfaces.",
+    "  show_usage_examples: print example curl commands on startup.",
+    "  tools_dir: the tool manifests (<tool>/tool.json); each tool is named after its folder.",
+    "  tools_env: environment variables every tool gets, e.g. which agent runs it.",
+    "client: the agent: its log level, the shared context files and the MCP servers it uses.",
+    "  instructions_file, models_file, output_file, agent_file: shared by all three agents;",
+    "  --profile, --local or --openai picks a model profile, else models_file's \"default\".",
+    "  servers: an HTTP server without \"config\" is the server section's, at its address and port."
+  ],
+  "server": {
+    "project_name": "MCP Agent",
+    "description": "Serves the shared agents/tools folder over MCP.",
+    "version": "1.0.0",
+    "mcp_server_port": 6275,
+    "mcp_server_bind_address": "127.0.0.1",
+    "show_usage_examples": false,
+    "tools_dir": "tools",
+    "tools_env": {"AGENT_NAME": "MCP Agent"}
+  },
+  "client": {
+    "log_level": "ERROR",
+    "debug_json_box": false,
+    "instructions_file": "context/instructions.json",
+    "models_file": "context/models.json",
+    "output_file": "context/output.json",
+    "agent_file": "context/agent.json",
+    "servers": [{
+      "server_id": "tools",
+      "description": "The shared agents/tools folder, served by the server section above.",
+      "enabled": true,
+      "transport": "HTTP"
+    }]
+  }
+}

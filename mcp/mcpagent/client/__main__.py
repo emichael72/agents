@@ -6,7 +6,7 @@ Description:
     mcp project directory.
 
     Starts the agent (`run_agent`): a model that uses the tools of the MCP servers in the
-    "client" section of the MCPAgent config (default: jsons/mcpagent.jsonc in this package),
+    "client" section of the MCPAgent config (default: jsons/mcpagent.json in this package),
     with a model profile from the shared agents/context/models.json. Runs one prompt
     (--prompt) or an interactive session.
     Also takes --version.
@@ -39,7 +39,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         description="Chat with a model that can call the MCP servers' tools.")
     parser.add_argument("--config", type=Path,
                         help="MCPAgent config file; its client section names the MCP servers, model "
-                             "profiles and instructions (default: mcp/mcpagent/jsons/mcpagent.jsonc).")
+                             "profiles and instructions (default: mcp/mcpagent/jsons/mcpagent.json).")
     parser.add_argument("--context", type=Path,
                         help="Text file with extra instructions for the assistant.")
     parser.add_argument("--profile",

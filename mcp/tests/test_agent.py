@@ -23,7 +23,7 @@ from aiohttp.test_utils import TestServer
 from rich.console import Console
 
 from mcpagent import MCPClient, MCPService
-from mcpagent.config import DEFAULT_CONFIG, REPO_ROOT, load_config, server_settings
+from mcpagent.config import REPO_ROOT, MCPAgentConfig
 from mcpagent.client.agent import (MCPAgent, Output, load_instructions, load_models, load_output_settings,
                                    resolve_model, identity_text, load_agent_settings, worth_saving, wrap)
 
@@ -71,7 +71,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         old = Path.cwd()
         try:
             os.chdir(REPO_ROOT)  # As start_mcp_server does: config paths are repository-relative
-            self.service = MCPService(server_settings(load_config(DEFAULT_CONFIG), DEFAULT_CONFIG))
+            self.service = MCPService(MCPAgentConfig.load().server)
         finally:
             os.chdir(old)
         self.server = TestServer(self.service._app)
@@ -290,7 +290,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
 
     def shipped_models(self):
         """
-        Load the shared model profiles through the shipped jsons/mcpagent.jsonc.
+        Load the shared model profiles through the shipped jsons/mcpagent.json.
         Returns:
             dict: The parsed models file.
         """
@@ -299,11 +299,11 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     def shipped_config():
         """
-        Load the client section of the config the package ships (jsons/mcpagent.jsonc).
+        Load the client section of the config the package ships (jsons/mcpagent.json).
         Returns:
             dict: The parsed config.
         """
-        return load_config(DEFAULT_CONFIG)['client']
+        return MCPAgentConfig.load().data['client']
 
     async def test_model_profiles_come_from_the_shared_models_file(self):
         config = self.shipped_models()
@@ -378,7 +378,7 @@ class OutputTests(unittest.TestCase):
     """The terminal layout shared by the three agents (README.md, "Terminal output")."""
 
     def test_layout_settings_come_from_the_shared_context_file(self):
-        settings = load_output_settings(load_config(DEFAULT_CONFIG)['client'])
+        settings = load_output_settings(MCPAgentConfig.load().data['client'])
         self.assertEqual((settings['width'], settings['show_time']), (120, True))
 
     # The agents keep independent tests for their shared terminal behavior.

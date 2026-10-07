@@ -17,19 +17,18 @@ from unittest.mock import patch
 
 from aiohttp.test_utils import TestClient, TestServer
 from mcpagent import MCPClient, MCPService
-from mcpagent.config import (DEFAULT_CONFIG, JSONS_DIR, REPO_ROOT, SCHEMA_DIR, SCHEMA_FILE, client_settings,
-                             load_config, repo_path, server_settings)
+from mcpagent.config import DEFAULT_CONFIG, JSONS_DIR, REPO_ROOT, SCHEMA_DIR, SCHEMA_FILE, MCPAgentConfig
 from mcpagent.server.__main__ import start_mcp_server
 
 
 class ServiceTests(unittest.IsolatedAsyncioTestCase):
     """Server tests: a real MCPService on the shared tools, called through an aiohttp test client."""
     async def asyncSetUp(self):
-        """Start the server from jsons/mcpagent.jsonc's server section and open a client to it."""
+        """Start the server from jsons/mcpagent.json's server section and open a client to it."""
         old = Path.cwd()
         try:
             os.chdir(REPO_ROOT)  # As start_mcp_server does: config paths are repository-relative
-            self.service = MCPService(server_settings(load_config(DEFAULT_CONFIG), DEFAULT_CONFIG))
+            self.service = MCPService(MCPAgentConfig.load().server)
         finally:
             os.chdir(old)
         self.client = TestClient(TestServer(self.service._app))
@@ -383,14 +382,14 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ConfigLoadingTests(unittest.TestCase):
-    """One configuration, mcpagent.jsonc: a server and a client section, checked by one schema."""
+    """One configuration, mcpagent.json: a server and a client section, checked by one schema."""
 
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.config_dir = Path(folder.name)
 
-    def write(self, data, name='mcpagent.jsonc'):
+    def write(self, data, name='mcpagent.json'):
         """
         Write a configuration file in the test folder.
         Args:
@@ -405,31 +404,31 @@ class ConfigLoadingTests(unittest.TestCase):
 
     def test_shipped_config_and_repository_paths(self):
         self.assertEqual(JSONS_DIR.parent, Path(__file__).resolve().parents[1] / 'mcpagent')
-        self.assertEqual(DEFAULT_CONFIG, JSONS_DIR / 'mcpagent.jsonc')
-        self.assertEqual(SCHEMA_FILE, SCHEMA_DIR / 'mcpagent.schema')
-        config = load_config(DEFAULT_CONFIG)
-        client = client_settings(config, DEFAULT_CONFIG)
-        server = server_settings(config, DEFAULT_CONFIG)
+        self.assertEqual(DEFAULT_CONFIG, JSONS_DIR / 'mcpagent.json')
+        self.assertEqual(SCHEMA_FILE, SCHEMA_DIR / 'mcpagent.schema.json')
+        config = MCPAgentConfig.load()
+        client = config.client
+        server = config.server
         for key in ('instructions_file', 'models_file', 'output_file', 'agent_file'):
-            self.assertTrue(repo_path(client[key]).is_file())
-        self.assertEqual(repo_path(server['tools_dir']), REPO_ROOT / 'tools')
+            self.assertTrue(MCPAgentConfig.repo_path(client[key]).is_file())
+        self.assertEqual(MCPAgentConfig.repo_path(server['tools_dir']), REPO_ROOT / 'tools')
         # The tools entry names no address: it reaches the server section's port
         url = f"http://127.0.0.1:{server['mcp_server_port']}/"
         self.assertEqual(client['servers'][0]['config'], {'url': url, 'sse_url': url + 'sse'})
-        self.assertNotIn('config', config['client']['servers'][0])  # The loaded config is unchanged
+        self.assertNotIn('config', config.data['client']['servers'][0])  # The loaded config is unchanged
 
     def test_paths_resolve_from_the_repository_root(self):
         self.assertTrue((REPO_ROOT / 'pyproject.toml').is_file())
         self.assertTrue((REPO_ROOT / 'context').is_dir())
-        self.assertEqual(repo_path('context/models.json'), REPO_ROOT / 'context' / 'models.json')
-        self.assertEqual(repo_path('/abs/file.json'), Path('/abs/file.json'))
-        self.assertEqual(repo_path('~/file.json'), Path.home() / 'file.json')
+        self.assertEqual(MCPAgentConfig.repo_path('context/models.json'), REPO_ROOT / 'context' / 'models.json')
+        self.assertEqual(MCPAgentConfig.repo_path('/abs/file.json'), Path('/abs/file.json'))
+        self.assertEqual(MCPAgentConfig.repo_path('~/file.json'), Path.home() / 'file.json')
 
     def test_http_server_without_config_uses_the_server_section(self):
         entry = {'server_id': 'tools', 'description': 'Tools', 'transport': 'HTTP'}
 
         def url(config):
-            return client_settings(config, 'test.jsonc')['servers'][0]['config']['url']
+            return MCPAgentConfig(config, 'test.json').client['servers'][0]['config']['url']
 
         for bind, host in ((None, '127.0.0.1'), ('0.0.0.0', '127.0.0.1'), ('10.1.2.3', '10.1.2.3')):
             with self.subTest(bind=bind):
@@ -442,19 +441,20 @@ class ConfigLoadingTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'no "server" section'):
             url({'client': {'servers': [dict(entry)]}})
 
-    def test_json_and_jsonc_are_validated_against_the_schema(self):
-        for extension in ('.json', '.jsonc'):
-            with self.subTest(extension=extension):
-                config_file = self.write('// A JSONC comment\n{"client": {"log_level": "ERROR", "servers": [],},}',
-                                         f'custom{extension}')
-                self.assertEqual(load_config(config_file), {'client': {'log_level': 'ERROR', 'servers': []}})
-                config_file = self.write({'client': {'log_level': 'loud', 'servers': []}}, f'custom{extension}')
-                with self.assertRaisesRegex(RuntimeError, 'Schema validation failed.*mcpagent.schema'):
-                    load_config(config_file)
+    def test_json_is_validated_against_the_schema(self):
+        description = ['What this config is for.']
+        config_file = self.write({'description': description, 'client': {'log_level': 'ERROR', 'servers': []}})
+        self.assertEqual(MCPAgentConfig.load(config_file).data,
+                         {'description': description, 'client': {'log_level': 'ERROR', 'servers': []}})
+        config_file = self.write({'client': {'log_level': 'loud', 'servers': []}})
+        with self.assertRaisesRegex(RuntimeError, 'Schema validation failed.*mcpagent.schema.json'):
+            MCPAgentConfig.load(config_file)
+        with self.assertRaises(ValueError):  # Plain JSON only: no comments or trailing commas
+            MCPAgentConfig.load(self.write('// A comment\n{"client": {"log_level": "ERROR", "servers": [],},}'))
         with self.assertRaisesRegex(RuntimeError, 'Schema validation failed'):
-            load_config(self.write({'other': {}}))  # Only the two sections
+            MCPAgentConfig.load(self.write({'other': {}}))  # Only the two sections
         with self.assertRaisesRegex(RuntimeError, "'mcp_server_port' is a required property"):
-            load_config(self.write({'server': {}}))
+            MCPAgentConfig.load(self.write({'server': {}}))
 
     def test_broken_or_missing_schema_stops_loading(self):
         config_file = self.write({})
@@ -466,15 +466,15 @@ class ConfigLoadingTests(unittest.TestCase):
                     schema_file.write_text(schema)
                 with patch('mcpagent.config.SCHEMA_FILE', schema_file):
                     with self.assertRaisesRegex(RuntimeError, 'Error loading schema.*test.schema'):
-                        load_config(config_file)
+                        MCPAgentConfig.load(config_file)
 
     def test_missing_or_non_object_config_is_rejected(self):
-        config_file = self.config_dir / 'mcpagent.jsonc'
+        config_file = self.config_dir / 'mcpagent.json'
         with self.assertRaisesRegex(RuntimeError, 'Configuration file not found'):
-            load_config(config_file)
+            MCPAgentConfig.load(config_file)
         config_file.write_text('[]')
         with self.assertRaisesRegex(RuntimeError, 'Schema validation failed'):
-            load_config(config_file)
+            MCPAgentConfig.load(config_file)
 
     def test_each_entry_point_needs_its_section(self):
         client_only = self.write({'client': {'log_level': 'ERROR', 'servers': []}})
@@ -483,7 +483,7 @@ class ConfigLoadingTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'no "server" section'):
             start_mcp_server(client_only)
         self.assertEqual(Path.cwd(), old_cwd)
-        server_only = self.write({'server': {'mcp_server_port': 6275}}, 'server_only.jsonc')
+        server_only = self.write({'server': {'mcp_server_port': 6275}}, 'server_only.json')
         with self.assertRaisesRegex(RuntimeError, 'no "client" section'):
             MCPClient(server_only)
 

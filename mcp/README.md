@@ -14,20 +14,21 @@ is named `mcpagent`, inside the `mcp/` project folder.
 client.py                            client launcher (python mcp/client.py from the repository root)
 server.py                            server launcher (python mcp/server.py from the repository root)
 mcpagent/__init__.py                  the package's public names and __version__
-mcpagent/config.py                    loads and validates the config; its server and client sections
-mcpagent/jsons/mcpagent.jsonc         the config: "server" (port, tools_dir) and "client" (MCP servers,
+mcpagent/config.py                    MCPAgentConfig: loads and validates the config; its sections
+mcpagent/jsons/mcpagent.json          the config: "server" (port, tools_dir) and "client" (MCP servers,
                                       shared context/*.json)
-mcpagent/jsons/schemas/mcpagent.schema JSON schema for mcpagent.jsonc
+mcpagent/jsons/schemas/mcpagent.schema.json  JSON schema for mcpagent.json
+mcpagent/common/logger.py             the client's and the server's logger
+mcpagent/common/errors.py             ExceptionReport: what the entry points print on an error
 mcpagent/client/__main__.py           client module entry point (python -m mcpagent.client)
 mcpagent/client/agent.py              OpenAI Responses tool calling over MCP tools
 mcpagent/client/client.py             MCP client for multiple servers
 mcpagent/client/connection.py         transport, handshake and session handling
-mcpagent/client/types.py              client types and DebugGuru
-mcpagent/client/logger.py             client logger
+mcpagent/client/types.py              client types
+mcpagent/client/debug.py              DebugGuru: JSON-RPC traffic in Rich panels
 mcpagent/server/__main__.py           server module entry point (python -m mcpagent.server)
 mcpagent/server/service.py            MCP HTTP server: tool discovery, validation and commands
 mcpagent/server/types.py              server types
-mcpagent/server/logger.py             server logger
 tests/                               server and agent-loop tests (model responses are mocked)
 requirements.txt                     pinned dependencies (installed by the repository's install.sh)
 ```
@@ -72,7 +73,7 @@ exchanged with the model, `/reset` clears them and
 | `--model`, `--base-url`              | Override the profile's model or server for this run                                    |
 | `--prompt "..."`                     | Run one prompt and exit                                                                |
 | `-d`, `--debug`                      | Show the banner, tool calls and results instead of a spinner                           |
-| `--config path/to/mcpagent.jsonc`    | Use another config (its client section)                                                |
+| `--config path/to/mcpagent.json`     | Use another config (its client section)                                                |
 | `--context path/to/instructions.txt` | Add instructions for the assistant                                                     |
 
 Try: "What time is it in Tokyo?", "Count the lines in tools/time/README.md", "What OS is this
@@ -84,7 +85,7 @@ explain what happened". The tools are listed in [../tools/README.md](../tools/RE
 | Concern              | mcpagent                                                                       | pydantic                                               | vercel                                                |
 |----------------------|--------------------------------------------------------------------------------|--------------------------------------------------------|-------------------------------------------------------|
 | Agent loop           | `MCPAgent.ask()`, hand-written                                                 | `Agent.run_stream_events()`                            | `ToolLoopAgent.stream()`                              |
-| Instructions         | `../context/instructions.json`, named by `instructions_file` in `mcpagent.jsonc` | `../context/instructions.json` → `load_instructions()` | `../context/instructions.json` → `loadInstructions()` |
+| Instructions         | `../context/instructions.json`, named by `instructions_file` in `mcpagent.json`  | `../context/instructions.json` → `load_instructions()` | `../context/instructions.json` → `loadInstructions()` |
 | Model provider       | raw `aiohttp`, `/v1/responses`                                                 | `OpenAIChatModel`                                      | `@ai-sdk/openai-compatible`                           |
 | Tools                | `../tools/*/tool.json`, loaded by the server (`tools_dir`)                     | `../tools/*/tool.json` → `Tool.from_schema`            | `../tools/*/tool.json` → `z.fromJSONSchema`           |
 | Argument validation  | `jsonschema.validate`                                                          | `jsonschema.validate`                                  | zod, from the same JSON schema                        |
@@ -100,16 +101,16 @@ rejected with `Busy: another tool is currently running in this workspace`.
 
 ## Configuring the model
 
-The model is not set in code. `"models_file"` in `mcpagent/jsons/mcpagent.jsonc` names the model profiles shared by
+The model is not set in code. `"models_file"` in `mcpagent/jsons/mcpagent.json` names the model profiles shared by
 all three agents, [`../context/models.json`](../context/models.json); the fields, the options (`--profile`, `--local`,
 `--openai`, `--model`, `--base-url`) and their precedence are described
 under "Context" in [../README.md](../README.md). For this agent the profile's server must support
 the `/v1/responses` endpoint.
 
-The server and the client share one config, `mcpagent/jsons/mcpagent.jsonc` (JSON, JSONC or
-JSON5): `mcp/server.py` reads its `"server"` section and `mcp/client.py` its `"client"` section,
+The server and the client share one config, `mcpagent/jsons/mcpagent.json` (plain JSON; its
+`"description"` lines explain the fields): `mcp/server.py` reads its `"server"` section and `mcp/client.py` its `"client"` section,
 and each stops with an error if its section is missing. Every config, including one given with
-`--config`, is validated against `mcpagent/jsons/schemas/mcpagent.schema`; an invalid config or
+`--config`, is validated against `mcpagent/jsons/schemas/mcpagent.schema.json`; an invalid config or
 schema stops loading. Paths in the config are relative to the repository root.
 
 The model's instructions are not in the code either: `"instructions_file"` in the client section names
@@ -171,12 +172,12 @@ For VS Code, merge this entry into the workspace's `.vscode/mcp.json`:
 To add a tool for all three agents, add a folder to `../tools` (see
 [../tools/README.md](../tools/README.md)) and restart the server.
 
-To serve a different set of scripts, copy `mcpagent/jsons/mcpagent.jsonc`, point the server
+To serve a different set of scripts, copy `mcpagent/jsons/mcpagent.json`, point the server
 section's `tools_dir` at another folder of `<tool>/tool.json` manifests (relative to the
 repository root, or absolute) and run:
 
 ```bash
-.venv/bin/python mcp/server.py /absolute/path/to/mcpagent.jsonc
+.venv/bin/python mcp/server.py /absolute/path/to/mcpagent.json
 ```
 
 `tools_env` adds environment variables to every discovered tool. A config can also define tools

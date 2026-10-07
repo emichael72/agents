@@ -45,7 +45,7 @@ PYTHON_REQUIREMENTS_SKIP=(.venv node_modules .git) # Folders not searched for re
 PYTHON_MODULES_TO_RUN=(mcpagent.server mcpagent.client) # Run with --version
 PYTHON_VERIFY_MODULES=( # Imported
     mcpagent pydantic_agent gatekeepers.fs.fs_gate gatekeepers.pr.changes
-    pydantic_ai jsonschema httpx httpx2 aiohttp json5 prompt_toolkit rich ruff
+    pydantic_ai jsonschema httpx httpx2 aiohttp prompt_toolkit rich ruff
 )
 
 # The Vercel Agent's Node.js
