@@ -1,0 +1,15 @@
+# Default clang-tidy checks for the agents' C/C++ (Fedora's clang-tidy enables none on its own),
+# mounted at /work/.clang-tidy in the shell's sandbox. A project's own .clang-tidy takes precedence.
+# Likely bugs and unsafe patterns, not style. Left out: Annex K's *_s functions (glibc has none)
+# and swappable-parameter warnings (too noisy for small C programs).
+Checks: >
+  -*,
+  clang-analyzer-*,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  cert-*,
+  -cert-err33-c,
+  performance-*,
+  portability-*
+HeaderFilterRegex: 'src/.*'

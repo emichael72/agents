@@ -76,6 +76,9 @@ change on its next start. None of this is hard-coded in the agents.
 - `context/clang-format.yaml`: the C/C++ style (4-space indents, function braces on their own
   line, 120 columns), used by `clang-format` in the shell and by `mr`, which formats the changed
   files before opening a merge request. A project's own `.clang-format` wins.
+- `context/clang-tidy.yaml`: the C/C++ checks for `clang-tidy` in the shell (likely bugs and
+  unsafe patterns, not style); Fedora's clang-tidy enables none on its own. A project's own
+  `.clang-tidy` wins.
 - `context/paths.json`: the folders the tools may use and their access (`r` read, `w` write,
   `x` execute): `core_dump` is `rwx`, `tools` is `r`. Every tool that takes a path checks it with
   the file-system gate, `gatekeepers/fs/fs_gate.py`, and `shell` mounts exactly these folders in its

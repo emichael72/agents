@@ -16,7 +16,8 @@ python3 shell/shell.py --cwd core_dump --command help        # the folders, thei
 Inside, the allowed folders appear as `/work/<name>`, and the command starts in `cwd`. The agents'
 C/C++ style, [`context/clang-format.yaml`](../../context/clang-format.yaml), is mounted at
 `/work/.clang-format`, so `clang-format` uses it for every project that has no `.clang-format` of
-its own. Output shows
+its own; likewise [`context/clang-tidy.yaml`](../../context/clang-tidy.yaml) at `/work/.clang-tidy`
+for `clang-tidy`. Output shows
 `/work/<name>` as `<name>`; it stops after 25 seconds and 300 lines.
 
 ## The sandbox

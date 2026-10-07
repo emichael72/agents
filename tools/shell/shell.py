@@ -46,6 +46,7 @@ import fs_gate  # noqa: E402
 
 COMMANDS_FILE = Path(__file__).resolve().parent / "commands.json"
 CLANG_FORMAT = fs_gate.CONTEXT_DIR / "clang-format.yaml"  # The default C/C++ style, at /work/.clang-format
+CLANG_TIDY = fs_gate.CONTEXT_DIR / "clang-tidy.yaml"  # The default C/C++ checks, at /work/.clang-tidy
 WORK = PurePosixPath("/work")  # Where the allowed folders appear inside the sandbox
 SEPARATORS = {"|", "||", "&&", ";"}
 # git in the shell only looks (and can undo uncommitted edits); committing, branching and syncing
@@ -160,8 +161,8 @@ def check(command: str, cwd: Path, commands: dict[str, dict], allowed: dict[str,
             missing = [r for r in commands[name]["needs"] if r not in folder.access_at(current)]
             if missing:
                 raise ValueError(f"{name} needs {'/'.join(missing)} access, which {shown} does not have.")
-            if any(w in ("-C", "-f", "--directory", "--file", "--makefile") or w.startswith(("-C", "-f", "--directory=",
-                   "--file=", "--makefile=")) for w in words[1:]):
+            if name == "make" and any(w in ("-C", "-f", "--directory", "--file", "--makefile") or w.startswith(
+                    ("-C", "-f", "--directory=", "--file=", "--makefile=")) for w in words[1:]):
                 raise ValueError(f"{name}: run it where its files are (cd there) instead of using -C or -f.")
 
 
@@ -223,8 +224,10 @@ def sandbox(allowed: dict[str, fs_gate.Folder], cwd: Path, identity: Optional[Pa
                     if (git / protected).exists():
                         inner = str(WORK / name / (git / protected).relative_to(folder.path))
                         args += ["--ro-bind", str(git / protected), inner]
-    if CLANG_FORMAT.is_file():  # clang-format looks for .clang-format in each file's parent folders
-        args += ["--ro-bind", str(CLANG_FORMAT), str(WORK / ".clang-format")]
+    # clang-format and clang-tidy look for their config in each file's parent folders
+    for config, name in ((CLANG_FORMAT, ".clang-format"), (CLANG_TIDY, ".clang-tidy")):
+        if config.is_file():
+            args += ["--ro-bind", str(config), str(WORK / name)]
     located = fs_gate.locate(cwd, allowed)
     args += ["--chdir", str(WORK / located[1])]
     environment = {

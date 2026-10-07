@@ -173,6 +173,12 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             error, text = await shell('proj', 'whoami && cat /etc/passwd | wc -l && tar -czf /tmp/a.tgz hello.c && tar -tzf /tmp/a.tgz')
             self.assertFalse(error, text)
             self.assertEqual(json.loads(text)['logs'], [pwd.getpwuid(os.getuid()).pw_name, '1', 'hello.c'])
+            if shutil.which('clang-tidy'):  # The agents' check template is found at /work/.clang-tidy
+                error, text = await shell('proj', 'clang-tidy hello.c -- 2>&1 | grep -c warning: || true')
+                self.assertFalse(error, text)
+                self.assertNotIn('no checks enabled', text)
+            for cwd, command in (('docs', 'cmake --version'), ('docs', 'gdb -batch ./x')):  # Need x access
+                self.assertIn('needs x access', (await shell(cwd, command))[1])
             # Refused by the sandbox (the kernel)
             for cwd, command in (('docs', 'touch x'), ('proj', 'touch locked/x'), ('proj', 'cat /etc/os-release'),
                                  ('proj', 'ls /home'), ('proj', f'touch {tools}/x'), ('proj', 'touch /work/tools/x'),
