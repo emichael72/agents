@@ -56,7 +56,7 @@ and failures as `✗ tool: error` instead.
 
 ## How it maps to the other two
 
-| Concern | mcp | pydantic | vercel |
+| Concern | mcpagent | pydantic | vercel |
 | --- | --- | --- | --- |
 | Agent loop | `MCPAgent.ask()`, hand-written | `Agent.run_stream_events()` | `ToolLoopAgent.stream()` |
 | Instructions | `../context/instructions.json`, named by `instructions_file` in `mcpagent.json` | `../context/instructions.json` → `AgentContext.instructions()` | `../context/instructions.json` → `loadInstructions()` |

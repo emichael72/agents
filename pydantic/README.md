@@ -29,7 +29,7 @@ this agent shares with MCPAgent.
 ## Run
 
 ```bash
-.venv/bin/python pydantic/agent.py                                # interactive chat, local Python tools
+.venv/bin/python pydantic/agent.py                                # interactive chat
 .venv/bin/python pydantic/agent.py --prompt "Time now" --history  # one prompt + raw message dump
 .venv/bin/python -m unittest discover -s pydantic/tests           # offline tests
 ```
