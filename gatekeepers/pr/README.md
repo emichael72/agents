@@ -53,7 +53,7 @@ bash gatekeepers/pr/pr_gate.sh serve                      # the web service and 
 4. The status is decided in this order:
 
    | Situation | `developer-quiz` |
-               | --- | --- |
+   | --- | --- |
    | The build or the tests fail | failure, whatever the quiz |
    | Documentation problems in a changed file | failure, whatever the quiz |
    | Cosmetic change, builds, documentation OK | success, no quiz |

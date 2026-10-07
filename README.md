@@ -47,13 +47,13 @@ None of `.venv/`, `node_modules/` and `.node/` is committed.
 `/etc/os-release` and continues only when `ID` or `ID_LIKE` names `rhel`, `fedora` or `centos` and
 `dnf` is installed; on any other system it stops before changing anything.
 
-| System                                                         | `install.sh`                             |
-|----------------------------------------------------------------|------------------------------------------|
-| Rocky Linux 9                                                  | Tested (Rocky Linux 9.4)                 |
-| RHEL 8 and 9, AlmaLinux, CentOS Stream, Oracle Linux, Fedora   | Accepted: same family, with `dnf`        |
-| Amazon Linux 2023                                              | Accepted: `ID_LIKE` is `fedora`          |
-| RHEL 7, CentOS 7, Amazon Linux 2                               | Stops: `yum` instead of `dnf`            |
-| Debian, Ubuntu and other Linux distributions; macOS            | Stops: not a Red Hat family system       |
+| System                                                       | `install.sh`                       |
+|--------------------------------------------------------------|------------------------------------|
+| Rocky Linux 9                                                | Tested (Rocky Linux 9.4)           |
+| RHEL 8 and 9, AlmaLinux, CentOS Stream, Oracle Linux, Fedora | Accepted: same family, with `dnf`  |
+| Amazon Linux 2023                                            | Accepted: `ID_LIKE` is `fedora`    |
+| RHEL 7, CentOS 7, Amazon Linux 2                             | Stops: `yum` instead of `dnf`      |
+| Debian, Ubuntu and other Linux distributions; macOS          | Stops: not a Red Hat family system |
 
 What the system needs:
 
@@ -73,7 +73,7 @@ What the system needs:
 
 ## Choosing a model
 
-By default every agent uses the `local` profile in [`context/models.json`](context/models.json),
+By default, every agent uses the `local` profile in [`context/models.json`](context/models.json),
 an LM Studio server. All three agents take the same options to use another model; run them from
 the repository root, and start the MCP server (`.venv/bin/python mcp/server.py`) before MCPAgent.
 
@@ -223,7 +223,7 @@ change on its next start. None of this is hard-coded in the agents.
 | `timeout`                   | Request timeout in seconds; 300 leaves time for LM Studio to load a model                                                                                        |
 | `model_auto`                | Ask the server which model is loaded (LM Studio's `/api/v0/models`) and use it; `model` is the fallback when none is loaded. `--model` and `model_env` still win |
 | `name`                      | Display name in the chat banner and error messages                                                                                                               |
-| `error_hints`               | `"openai"`: on a failed request, MCPAgent gives OpenAI's advice (key, quota, billing); otherwise it points at the server and the model                          |
+| `error_hints`               | `"openai"`: on a failed request, MCPAgent gives OpenAI's advice (key, quota, billing); otherwise it points at the server and the model                           |
 
 All three agents take the same options: `--profile NAME` (or the shortcuts `--local` and
 `--openai`) picks a profile, and `--model` / `--base-url` override it for one run. Precedence is
