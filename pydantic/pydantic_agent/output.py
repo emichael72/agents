@@ -18,13 +18,11 @@ from rich.text import Text
 
 # A Markdown link, [text](url), or a bare web address: shown as a clickable OSC 8 link, in LINK_COLOR
 # This terminal behavior is intentionally repeated in the independent agents.
-# noinspection DuplicatedCode
 LINK_COLOR = "bright_cyan"
 LINK = re.compile(r"\[([^]\n]+)]\((https?://[^\s)]+)\)|(https?://[^\s<>()\[\]\"'`]+)")
 OPEN_LINK = re.compile(r"\[[^]\n]*$|]\([^)\s]*$")  # A Markdown link that is not finished yet
 
 
-# noinspection DuplicatedCode
 class Output:
     """
     The terminal layout shared by the three agents (README.md, "Terminal output"):
