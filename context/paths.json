@@ -8,6 +8,10 @@
     "tools": {
       "path": "tools",
       "access": "r"
+    },
+    "memory": {
+      "path": "memory",
+      "access": "rw"
     }
   }
 }

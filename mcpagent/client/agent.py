@@ -475,6 +475,25 @@ def load_output_settings(config_data: dict, config_file) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def memory_text(index: Optional[Path]) -> str:
+    """
+    The agents' memory, to append to their instructions: the topics in the memory index (kept by
+    the memory tool), so the model knows what it remembers without having to look.
+    Args:
+        index: The index file (context/agent.json's memory_index); None when not configured.
+    Returns:
+        str: A paragraph listing the topics, or saying the memory is empty; "" without an index.
+    """
+    if index is None:
+        return ""
+    lines = [line.replace("**", "") for line in (index.read_text(encoding="utf-8").splitlines() if index.is_file() else [])
+             if line.startswith("- ")]
+    if not lines:
+        return "\n\nYour memory is empty: save lasting facts and the user's preferences with the memory tool."
+    return ("\n\nYour memory (topics saved in earlier runs; read one with the memory tool before relying on it, "
+            "and save new facts with it):\n" + "\n".join(lines))
+
+
 def load_agent_settings(config_data: dict, config_file) -> dict:
     """
     Read the agent loop settings from the file the client config names.
@@ -748,12 +767,16 @@ async def run_agent(config_file, profile=None, model=None, base_url=None, prompt
         output = Output(console, load_output_settings(mcp_client.config_data, config_file))
         models = load_models(mcp_client.config_data, config_file)
         settings = resolve_model(models, profile=profile, model=model, base_url=base_url)
+        agent_settings = load_agent_settings(mcp_client.config_data, config_file)
+        agent_file = mcp_client.config_data.get("agent_file")
+        index = agent_settings.get("memory_index")  # Relative to the repository, two levels above agent.json
+        memory = memory_text((Path(config_file).resolve().parent / agent_file).resolve().parent.parent / index
+                             if agent_file and index else None)
         agent = MCPAgent(mcp_client, base_url=settings["base_url"], model=settings["model"],
                          api_key=settings["api_key"], provider=settings["name"], timeout=settings["timeout"],
-                         instructions=load_instructions(mcp_client.config_data, config_file),
+                         instructions=load_instructions(mcp_client.config_data, config_file) + memory,
                          context=context, trace=output.line if trace else None,
-                         max_tool_calls=int(load_agent_settings(mcp_client.config_data, config_file)
-                                            .get("max_tool_calls", 8)))
+                         max_tool_calls=int(agent_settings.get("max_tool_calls", 8)))
         await agent.connect()
         servers = len({server for server, _, _ in agent.routes.values()})
         tools = f"{len(agent.routes)} tools" + (f" from {servers} servers" if servers > 1 else "")

@@ -144,6 +144,15 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "Unknown model profile 'nope'"):
             agent.resolve_model(models, "nope")
 
+    def test_the_memory_index_joins_the_instructions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            index = Path(folder) / "index.md"
+            self.assertIn("memory is empty", agent.memory_text(index))
+            index.write_text("# Memory index\n\n- **preferences**: Prefers short answers (updated 2026-10-07)\n")
+            text = agent.memory_text(index)
+            self.assertIn("- preferences: Prefers short answers", text)
+            self.assertEqual(agent.memory_text(None), "")
+
     def test_instructions_come_from_the_shared_context_file(self):
         instructions = agent.load_instructions()
         self.assertTrue(instructions.startswith("You are an agent"))

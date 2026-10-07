@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ask, buildAgent, linkSegments, loadInstructions, loadModels, loadOutputSettings, Output, resolveModel, wrap } from '../agent.ts';
+import { ask, buildAgent, linkSegments, loadInstructions, loadModels, loadOutputSettings, memoryText, Output, resolveModel, wrap } from '../agent.ts';
 import { loadTools, localTools } from '../tools.ts';
 
 const usage = {
@@ -199,4 +199,14 @@ test('token counts follow the response time', () => {
 test('links split into shown text and address', () => {
   assert.deepEqual(linkSegments('see [PR #5](https://x/y) and http://a.b/c.'),
                    [['see ', undefined], ['PR #5', 'https://x/y'], [' and ', undefined], ['http://a.b/c', 'http://a.b/c'], ['.', undefined]]);
+});
+
+
+test('the memory index joins the instructions', () => {
+  const folder = mkdtempSync(path.join(os.tmpdir(), 'memory-'));
+  const index = path.join(folder, 'index.md');
+  assert.match(memoryText(index), /memory is empty/);
+  writeFileSync(index, '# Memory index\n\n- **preferences**: Prefers short answers (updated 2026-10-07)\n');
+  assert.match(memoryText(index), /- preferences: Prefers short answers/);
+  assert.equal(memoryText(undefined), '');
 });

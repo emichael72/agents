@@ -261,6 +261,31 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue((repo / 'd.c').exists())
             self.assertIn('up to date', (await mr({'path': 'proj', 'action': 'sync'}))[1])
 
+    async def test_memory_saves_reads_and_forgets_topics(self):
+        with tempfile.TemporaryDirectory() as folder:
+            allowed = Path(folder) / 'paths.json'
+            (Path(folder) / 'memory').mkdir()
+            allowed.write_text(json.dumps({'paths': {'memory': {'path': str(Path(folder) / 'memory'), 'access': 'rw'}}}))
+
+            async def memory(args):
+                with patch.dict(os.environ, {'FS_GATE_PATHS': str(allowed)}):
+                    result = (await self.rpc('tools/call', {'name': 'memory', 'arguments': args}))['result']
+                return result['isError'], json.loads(result['content'][0]['text'])['logs']
+
+            self.assertEqual((await memory({'action': 'read'}))[1], ['The memory is empty.'])
+            await memory({'action': 'save', 'topic': 'User Preferences', 'text': 'Prefers short answers'})
+            await memory({'action': 'save', 'topic': 'user-preferences', 'text': 'Tests every new option'})
+            error, logs = await memory({'action': 'read', 'topic': 'user-preferences'})
+            self.assertFalse(error)
+            self.assertEqual(logs, ['- Prefers short answers', '- Tests every new option'])
+            index = (Path(folder) / 'memory' / 'index.md').read_text()
+            self.assertIn('- **user-preferences**: Prefers short answers (updated ', index)
+            self.assertTrue((await memory({'action': 'read', 'topic': 'nothing'}))[0])
+            self.assertFalse((await memory({'action': 'forget', 'topic': 'user-preferences'}))[0])
+            self.assertFalse((Path(folder) / 'memory' / 'user-preferences.md').exists())
+            self.assertEqual((await memory({'action': 'save', 'topic': '../../etc', 'text': 'x'}))[0], False)
+            self.assertTrue((Path(folder) / 'memory' / 'etc.md').exists())  # Made a plain name, stays inside
+
     async def test_ed_edits_inside_allowed_folders_and_protects_tools_and_git(self):
         with tempfile.TemporaryDirectory() as folder:
             (Path(folder) / 'a.c').write_text('int a;\nint b;\nint b;\n')

@@ -74,6 +74,25 @@ def load_instructions(path: Path = INSTRUCTIONS_FILE) -> str:
     return "\n".join(json.loads(path.read_text(encoding="utf-8"))["instructions"])
 
 
+def memory_text(index: Path | None) -> str:
+    """
+    The agents' memory, to append to their instructions: the topics in the memory index (kept by
+    the memory tool), so the model knows what it remembers without having to look.
+    Args:
+        index: The index file (context/agent.json's memory_index); None when not configured.
+    Returns:
+        str: A paragraph listing the topics, or saying the memory is empty; "" without an index.
+    """
+    if index is None:
+        return ""
+    lines = [line.replace("**", "") for line in (index.read_text(encoding="utf-8").splitlines() if index.is_file() else [])
+             if line.startswith("- ")]
+    if not lines:
+        return "\n\nYour memory is empty: save lasting facts and the user's preferences with the memory tool."
+    return ("\n\nYour memory (topics saved in earlier runs; read one with the memory tool before relying on it, "
+            "and save new facts with it):\n" + "\n".join(lines))
+
+
 def build_agent(model: Model, mcp_url: str | None = None) -> Agent:
     """
     Build the agent with the shared instructions and a tool source.
@@ -84,7 +103,9 @@ def build_agent(model: Model, mcp_url: str | None = None) -> Agent:
         Agent: The pydantic-ai agent.
     """
     toolset = MCPToolset(mcp_url, tool_error_behavior="failed") if mcp_url else local_toolset
-    return Agent(model, instructions=load_instructions(), toolsets=[toolset])
+    index = json.loads(AGENT_FILE.read_text(encoding="utf-8")).get("memory_index")
+    instructions = load_instructions() + memory_text(CONTEXT_DIR.parent / index if index else None)
+    return Agent(model, instructions=instructions, toolsets=[toolset])
 
 
 def load_models(path: Path = MODELS_FILE) -> dict:

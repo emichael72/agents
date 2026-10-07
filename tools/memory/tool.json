@@ -1,0 +1,13 @@
+{
+  "description": "The agents' memory between runs. save: remember a fact under a topic (adds a line; replace rewrites the note) whenever the user states a preference, asks you to remember something, or you learn something lasting about a project. read: a topic's note (the index of topics is already in your instructions). forget: delete a topic. Never store secrets.",
+  "command": "python3",
+  "args": ["memory/memory.py"],
+  "params": [
+    {"name": "action", "type": "string", "description": "save, read or forget", "style": "flag"},
+    {"name": "topic", "type": "string", "description": "Short topic name, e.g. preferences or core_dump; omit it with read for the index", "style": "flag", "required": false},
+    {"name": "text", "type": "string", "description": "save: the fact to remember, one short sentence (or the whole note with replace)", "style": "flag", "required": false},
+    {"name": "summary", "type": "string", "description": "save: a one-line summary of the topic for the index; omit it to keep the current one", "style": "flag", "required": false},
+    {"name": "replace", "type": "boolean", "description": "save: rewrite the whole note with text instead of adding a line", "style": "flag", "required": false}
+  ],
+  "resource": "memory/README.md"
+}

@@ -25,7 +25,10 @@ const AGENT_FILE = path.join(CONTEXT_DIR, 'agent.json'); // Agent loop settings
 // Tool calls per prompt, shared with the other agents (context/agent.json). Each step is one model
 // call plus the tools it requested, so this allows at least max_tool_calls calls and a final answer.
 // 0 means no limit: the loop then ends only when the model answers without calling a tool.
-const MAX_TOOL_CALLS = (JSON.parse(readFileSync(AGENT_FILE, 'utf8')) as { max_tool_calls?: number }).max_tool_calls ?? 8;
+const AGENT_SETTINGS = JSON.parse(readFileSync(AGENT_FILE, 'utf8')) as { max_tool_calls?: number; memory_index?: string };
+const MAX_TOOL_CALLS = AGENT_SETTINGS.max_tool_calls ?? 8;
+// The memory index (relative to the repository), loaded into the instructions
+const MEMORY_INDEX = AGENT_SETTINGS.memory_index && path.join(CONTEXT_DIR, '..', AGENT_SETTINGS.memory_index);
 const MAX_STEPS = MAX_TOOL_CALLS ? MAX_TOOL_CALLS + 1 : 0;
 
 const gray = (text: string) => styleText('gray', text); // Everything except the model's answer
@@ -113,11 +116,31 @@ export function loadInstructions(file = INSTRUCTIONS_FILE): string {
   return (JSON.parse(readFileSync(file, 'utf8')) as { instructions: string[] }).instructions.join('\n');
 }
 
+/**
+ * The agents' memory, to append to their instructions: the topics in the memory index (kept by the
+ * memory tool), so the model knows what it remembers without having to look.
+ * @param index The index file (context/agent.json's memory_index); undefined when not configured.
+ * @returns A paragraph listing the topics, or saying the memory is empty; '' without an index.
+ */
+export function memoryText(index?: string): string {
+  if (!index) return '';
+  let text = '';
+  try {
+    text = readFileSync(index, 'utf8');
+  } catch {
+    // No index yet: the memory is empty
+  }
+  const lines = text.split('\n').filter((line) => line.startsWith('- ')).map((line) => line.replaceAll('**', ''));
+  if (!lines.length) return '\n\nYour memory is empty: save lasting facts and the user\'s preferences with the memory tool.';
+  return '\n\nYour memory (topics saved in earlier runs; read one with the memory tool before relying on it, ' +
+    'and save new facts with it):\n' + lines.join('\n');
+}
+
 export function buildAgent(model: LanguageModel, tools: ToolSet, parallel = false, timeoutSeconds = 60) {
   return new ToolLoopAgent({
     model,
     timeout: { stepMs: timeoutSeconds * 1000 }, // one model call plus the tools it requested
-    instructions: loadInstructions(),
+    instructions: loadInstructions() + memoryText(MEMORY_INDEX),
     tools: parallel ? tools : oneAtATime(tools),
     stopWhen: MAX_STEPS ? isStepCount(MAX_STEPS) : () => false,
   });

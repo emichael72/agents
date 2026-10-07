@@ -79,6 +79,9 @@ change on its next start. None of this is hard-coded in the agents.
 - `context/clang-tidy.yaml`: the C/C++ checks for `clang-tidy` in the shell (likely bugs and
   unsafe patterns, not style); Fedora's clang-tidy enables none on its own. A project's own
   `.clang-tidy` wins.
+- `memory/` (with `context/agent.json`'s `memory_index`): the agents' memory between runs. The
+  `memory` tool saves, reads and forgets notes there, and every agent loads `memory/index.md`
+  into its instructions at start-up. The notes stay on this machine (git ignores them).
 - `context/paths.json`: the folders the tools may use and their access (`r` read, `w` write,
   `x` execute): `core_dump` is `rwx`, `tools` is `r`. Every tool that takes a path checks it with
   the file-system gate, `gatekeepers/fs/fs_gate.py`, and `shell` mounts exactly these folders in its
