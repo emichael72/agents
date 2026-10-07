@@ -33,6 +33,7 @@ from jsonschema import ValidationError, validate
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import ANSI
 from rich.console import Console
+from rich.status import Status
 from rich.style import Style
 from rich.text import Text
 
@@ -594,15 +595,17 @@ def wrap(text: str, width: int, indent: str = "  ") -> list[str]:
 class Output:
     """
     The terminal layout shared by the three agents (README.md, "Terminal output"):
-      - Everything except the model's answer (banner, hints, tool calls and results, timing) is a
-        dark gray line.
+      - By default, a spinner runs while the model thinks or a tool runs ("Running shell…"), and
+        only the answer and the timing line are printed.
+      - With debug, everything except the model's answer (banner, hints, tool calls and results,
+        timing) is a dark gray line, and there is no spinner.
       - The model's streamed answer is word-wrapped as it arrives, with exactly one blank line
         before and after it.
       - All output fits in the configured width (context/output.json), or the terminal's if narrower.
       - Each response ends with how long it took.
     """
 
-    def __init__(self, out: Console, settings: Optional[dict] = None):
+    def __init__(self, out: Console, settings: Optional[dict] = None, debug: bool = True):
         """
         Args:
             out: The console to print to.
@@ -623,11 +626,35 @@ class Output:
         self.word = ""  # The streamed word being collected
         self.spaces = ""  # The spaces before it
         self.started = time.monotonic()
+        self.debug = debug  # Print the gray lines; without it, a spinner shows the activity instead
+        self.spinner: Optional[Status] = None
 
     def start(self) -> None:
-        """Start timing a response."""
+        """Start timing a response, and the spinner when not in debug mode (on a terminal only)."""
         self.started = time.monotonic()
         self.usage = None
+        self.spin("Thinking…")
+
+    def spin(self, label: str) -> None:
+        """
+        Show a label on the spinner, starting it if needed; only when not in debug mode, on a terminal.
+        Args:
+            label: What the agent is doing, e.g. "Thinking…".
+        """
+        if self.debug or not self.out.is_terminal:
+            return
+        if self.spinner is None:
+            self.spinner = self.out.status(Text(label, style="bright_black"), spinner="dots",
+                                           spinner_style="bright_black")
+            self.spinner.start()
+        else:
+            self.spinner.update(Text(label, style="bright_black"))
+
+    def stop_spinner(self) -> None:
+        """Stop the spinner, if it runs; it leaves nothing on the screen."""
+        if self.spinner is not None:
+            self.spinner.stop()
+            self.spinner = None
 
     def add_usage(self, input_tokens: int, output_tokens: int, requests: int = 1) -> None:
         """
@@ -652,6 +679,7 @@ class Output:
             chunk = chunk.lstrip("\n")
             if not chunk:
                 return
+            self.stop_spinner()
             self.out.print()  # Blank line before the text
             self.in_text = True
         body = chunk.rstrip("\n")
@@ -663,11 +691,28 @@ class Output:
 
     def line(self, text: str) -> None:
         """
-        Print a whole dark gray line (a tool call or result, the banner), wrapped to the width,
-        closing any open text block first.
+        Print a whole dark gray line (a tool call or result, the banner) in debug mode; otherwise
+        only show the activity on the spinner: "Running <tool>…" for a call, "Thinking…" after it.
         Args:
             text: The line; may contain newlines.
         """
+        if not self.debug:
+            if text.startswith("→ "):
+                self.end()  # A call after some answer text: close the text, and spin again
+                self.spin(f"Running {text[2:].split('(')[0]}…")
+            elif self.spinner is not None and text.startswith(("← ", "✗ ")):
+                self.spin("Thinking…")
+            return
+        self.note(text)
+
+    def note(self, text: str) -> None:
+        """
+        Print a whole dark gray line, also when not in debug mode (the timing line, replies to
+        commands), wrapped to the width, closing any open text block first.
+        Args:
+            text: The line; may contain newlines.
+        """
+        self.stop_spinner()
         self.end()
         for line in wrap(text, self.width):
             self.out.print(self._render(line), style="bright_black", soft_wrap=True)
@@ -684,6 +729,7 @@ class Output:
 
     def finish(self) -> None:
         """Close the response, and print how long it took since `start` and the tokens it used."""
+        self.stop_spinner()
         self.end()
         parts = [f"Response time: {time.monotonic() - self.started:.1f}s"] if self.show_time else []
         if self.show_tokens:
@@ -694,7 +740,7 @@ class Output:
             else:
                 parts.append("tokens: not reported")
         if parts:
-            self.line(" · ".join(parts))
+            self.note(" · ".join(parts))
 
     def _render(self, text: str) -> Text:
         """
@@ -764,12 +810,12 @@ async def run_agent(config_file, profile=None, model=None, base_url=None, prompt
         base_url: Overrides the profile's base URL.
         prompt: A single prompt to answer and exit; None starts an interactive session.
         context: Extra instructions for the assistant.
-        trace: Print tool calls and results.
+        trace: Debug mode: print the gray lines (banner, hints, tool calls and results) instead of a spinner.
     Returns:
         int: The exit code.
     """
     console = Console(highlight=False, soft_wrap=True)  # Never re-wrap lines; Output wraps
-    output = Output(console)  # Replaced by the configured layout once the config is read
+    output = Output(console, debug=trace)  # Replaced by the configured layout once the config is read
     agent: Optional[MCPAgent] = None
     console.print()  # Blank line before anything the agent prints
 
@@ -792,7 +838,7 @@ async def run_agent(config_file, profile=None, model=None, base_url=None, prompt
 
     try:
         mcp_client = MCPClient(config_file)
-        output = Output(console, load_output_settings(mcp_client.config_data, config_file))
+        output = Output(console, load_output_settings(mcp_client.config_data, config_file), debug=trace)
         models = load_models(mcp_client.config_data, config_file)
         settings = resolve_model(models, profile=profile, model=model, base_url=base_url)
         agent_settings = load_agent_settings(mcp_client.config_data, config_file)
@@ -805,7 +851,7 @@ async def run_agent(config_file, profile=None, model=None, base_url=None, prompt
                          instructions=identity_text(agent_settings.get("names", {}).get("mcpagent"),
                                                     mcp_client.config_data, config_file)
                          + load_instructions(mcp_client.config_data, config_file) + memory,
-                         context=context, trace=output.line if trace else None,
+                         context=context, trace=output.line,  # Printed in debug mode, else on the spinner
                          max_tool_calls=int(agent_settings.get("max_tool_calls", 8)))
         await agent.connect()
         servers = len({server for server, _, _ in agent.routes.values()})
@@ -833,7 +879,7 @@ async def run_agent(config_file, profile=None, model=None, base_url=None, prompt
                 return 0
             if prompt == "/reset":
                 agent.history = []
-                output.line("History cleared.")
+                output.note("History cleared.")
             elif prompt == "/history":
                 console.print(json.dumps(agent.history, indent=2, ensure_ascii=False), markup=False)
             elif prompt:

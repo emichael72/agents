@@ -107,7 +107,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", help="Override the profile's model for this run.")
     parser.add_argument("--base-url", help="Override the profile's OpenAI-compatible base URL for this run.")
     parser.add_argument("--prompt", help="Run one prompt and exit.")
-    parser.add_argument("--quiet", action="store_true", help="Hide tool calls and results.")
+    parser.add_argument("-d", "--debug", action="store_true",
+                        help="Print the banner, tool calls and results as gray lines, instead of a spinner.")
     parser.add_argument("-v", "--version", action="store_true", help="Show the package version and exit.")
     return parser
 
@@ -140,7 +141,7 @@ def main() -> int:
         profile = args.profile or ("local" if args.local else "openai" if args.openai else None)
         context = args.context.expanduser().read_text(encoding="utf-8") if args.context else ""
         return asyncio.run(run_agent(config_file, profile=profile, model=args.model, base_url=args.base_url,
-                                     prompt=args.prompt, context=context, trace=not args.quiet))
+                                     prompt=args.prompt, context=context, trace=args.debug))
 
     except KeyboardInterrupt:
         print(f"\n\n{Fore.LIGHTBLACK_EX}Interrupted by user, shutting down.{Style.RESET_ALL}\n")

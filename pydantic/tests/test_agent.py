@@ -7,6 +7,7 @@ Description:
 """
 import io
 import json
+import re
 import os
 import sys
 import tempfile
@@ -15,7 +16,7 @@ import time
 import unittest
 from pathlib import Path
 from typing import Any, Callable, cast
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -207,6 +208,29 @@ class OutputTests(unittest.TestCase):
     def setUp(self):
         self.printed = io.StringIO()
         self.output = agent.Output(Console(file=self.printed), {"width": 30, "show_time": True})
+
+    def test_by_default_only_the_answer_and_timing_print_and_tools_show_on_the_spinner(self):
+        printed = io.StringIO()
+        output = agent.Output(Console(file=printed, force_terminal=True, width=120), {"width": 120, "show_time": True},
+                        debug=False)
+        spinner = Mock()
+        output.out.status = Mock(return_value=spinner)  # rich's spinner, without drawing it
+        output.start()
+        label = lambda: str(spinner.update.call_args.args[0])  # noqa: E731
+        output.line('→ shell({"command":"ls"})')
+        self.assertEqual(label(), "Running shell…")
+        output.line("← shell: a.c")
+        self.assertEqual(label(), "Thinking…")
+        output.text("Two files.")
+        spinner.stop.assert_called_once()  # The answer replaces the spinner
+        output.line('→ ed({"path":"a.c"})')  # A call after the answer text: the spinner comes back
+        self.assertEqual(output.out.status.call_count, 2)
+        self.assertEqual(str(output.out.status.call_args.args[0]), "Running ed…")
+        output.line("banner or hint")
+        output.finish()
+        output.note("History cleared.")
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", printed.getvalue())
+        self.assertEqual(plain.splitlines()[1:], ["Two files.", "", "Response time: 0.0s", "History cleared."])
 
     def test_lines_wrap_with_an_indent_and_keep_long_words_whole(self):
         url = "http://minion:8000/q/" + "x" * 40

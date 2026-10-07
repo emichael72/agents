@@ -14,10 +14,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import json
+import re
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import io
 
@@ -378,6 +379,29 @@ class OutputTests(unittest.TestCase):
     def test_layout_settings_come_from_the_shared_context_file(self):
         settings = load_output_settings(json5.loads(CLIENT_CONFIG.read_text()), CLIENT_CONFIG)
         self.assertEqual((settings['width'], settings['show_time']), (120, True))
+
+    def test_by_default_only_the_answer_and_timing_print_and_tools_show_on_the_spinner(self):
+        printed = io.StringIO()
+        output = Output(Console(file=printed, force_terminal=True, width=120), {"width": 120, "show_time": True},
+                        debug=False)
+        spinner = Mock()
+        output.out.status = Mock(return_value=spinner)  # rich's spinner, without drawing it
+        output.start()
+        label = lambda: str(spinner.update.call_args.args[0])  # noqa: E731
+        output.line('→ shell({"command":"ls"})')
+        self.assertEqual(label(), "Running shell…")
+        output.line("← shell: a.c")
+        self.assertEqual(label(), "Thinking…")
+        output.text("Two files.")
+        spinner.stop.assert_called_once()  # The answer replaces the spinner
+        output.line('→ ed({"path":"a.c"})')  # A call after the answer text: the spinner comes back
+        self.assertEqual(output.out.status.call_count, 2)
+        self.assertEqual(str(output.out.status.call_args.args[0]), "Running ed…")
+        output.line("banner or hint")
+        output.finish()
+        output.note("History cleared.")
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", printed.getvalue())
+        self.assertEqual(plain.splitlines()[1:], ["Two files.", "", "Response time: 0.0s", "History cleared."])
 
     def test_token_counts_follow_the_response_time(self):
         printed = io.StringIO()

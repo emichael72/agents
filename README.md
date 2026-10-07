@@ -147,7 +147,17 @@ to make the agents forget.
 
 ## Terminal output
 
-All three agents print a turn the same way, so their output can be compared line for line:
+All three agents print a turn the same way, so their output can be compared line for line. By
+default, a dark gray spinner runs while the model thinks (`Thinking…`) or a tool runs (`Running
+shell…`), and only the answer and the response time are printed:
+
+```text
+It's 17:03 JST (UTC+9) in Tokyo, Wednesday.
+
+Response time: 3.0s · tokens: 3,557 in, 48 out (2 model calls)
+```
+
+`-d` (`--debug`) shows everything instead of the spinner, the banner and every tool call and result:
 
 ```text
 Local model server model: qwen/qwen3-coder-30b @ http://boba:1234/v1, 12 tools (sequential)
@@ -160,9 +170,10 @@ The quiz service is running. Pull request #1 is still waiting for its quiz, so i
 Response time: 6.3s · tokens: 4,313 in, 53 out (2 model calls)
 ```
 
-1. **Only the model's answer is in the terminal's normal color.** Everything else (the banner, the
-   chat hints and `You >` prompt, tool calls `→`, results `←`, failures `✗`, and the response time)
-   is dark gray (ANSI 90). Errors are red.
+1. **Only the model's answer is in the terminal's normal color.** Everything else (the spinner, and
+   with `-d` the banner, the chat hints, tool calls `→`, results `←` and failures `✗`; always the
+   `You >` prompt and the response time) is dark gray (ANSI 90). Errors are red. The spinner shows
+   only on a terminal; piped output gets no spinner.
 2. **Everything fits in `width` columns** (`context/output.json`, 120), or in the terminal if it is
    narrower. Gray lines wrap with a two-space indent; the streamed answer wraps between words as
    it arrives. A word longer than the width, such as a URL, is never broken.
@@ -171,7 +182,7 @@ Response time: 6.3s · tokens: 4,313 in, 53 out (2 model calls)
    others), in the answer and in the gray tool lines. A link is never split while the answer
    streams. `"links": false` turns this off; piped output is always plain.
 4. **The answer has exactly one blank line before and after it.** A tool call prints together with
-   its result, in the order they ran. `--quiet` hides the tool lines.
+   its result, in the order they ran (with `-d`).
 5. **Each response ends with its time and tokens**: `Response time: N.Ns` from sending the prompt
    to the end of the answer, tools included; then the tokens the model calls used, as the server
    reports them: *in* (sent to the model: instructions, tool list, history, tool results, added

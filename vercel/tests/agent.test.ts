@@ -153,6 +153,20 @@ test('model profiles come from the shared models file', () => {
   }
 });
 
+test('by default only the answer and the timing line print', () => {
+  let printed = '';
+  const output = new Output((text) => { printed += text; }, { width: 120, show_time: true }, false);
+  output.start(); // Not a terminal: no spinner
+  output.line('→ shell({"command":"ls"})');
+  output.line('← shell: a.c');
+  output.text('Two files.');
+  output.line('banner or hint');
+  output.finish();
+  output.note('History cleared.');
+  assert.deepEqual(printed.replace(/\x1b\[[0-9;]*m/g, '').split('\n'),
+                   ['', 'Two files.', '', 'Response time: 0.0s', 'History cleared.', '']);
+});
+
 test('instructions come from the shared context file', () => {
   const instructions = loadInstructions();
   assert.match(instructions, /^You are an agent/);

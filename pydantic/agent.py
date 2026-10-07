@@ -40,6 +40,7 @@ from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from rich.console import Console
+from rich.status import Status
 from rich.style import Style
 from rich.text import Text
 
@@ -313,15 +314,17 @@ def wrap(text: str, width: int, indent: str = "  ") -> list[str]:
 class Output:
     """
     The terminal layout shared by the three agents (README.md, "Terminal output"):
-      - Everything except the model's answer (banner, hints, tool calls and results, timing) is a
-        dark gray line.
+      - By default, a spinner runs while the model thinks or a tool runs ("Running shell…"), and
+        only the answer and the timing line are printed.
+      - With debug, everything except the model's answer (banner, hints, tool calls and results,
+        timing) is a dark gray line, and there is no spinner.
       - The model's streamed answer is word-wrapped as it arrives, with exactly one blank line
         before and after it.
       - All output fits in the configured width (context/output.json), or the terminal's if narrower.
       - Each response ends with how long it took.
     """
 
-    def __init__(self, out: Console, settings: dict | None = None):
+    def __init__(self, out: Console, settings: dict | None = None, debug: bool = True):
         """
         Args:
             out: The console to print to.
@@ -342,11 +345,35 @@ class Output:
         self.word = ""  # The streamed word being collected
         self.spaces = ""  # The spaces before it
         self.started = time.monotonic()
+        self.debug = debug  # Print the gray lines; without it, a spinner shows the activity instead
+        self.spinner: Optional[Status] = None
 
     def start(self) -> None:
-        """Start timing a response."""
+        """Start timing a response, and the spinner when not in debug mode (on a terminal only)."""
         self.started = time.monotonic()
         self.usage = None
+        self.spin("Thinking…")
+
+    def spin(self, label: str) -> None:
+        """
+        Show a label on the spinner, starting it if needed; only when not in debug mode, on a terminal.
+        Args:
+            label: What the agent is doing, e.g. "Thinking…".
+        """
+        if self.debug or not self.out.is_terminal:
+            return
+        if self.spinner is None:
+            self.spinner = self.out.status(Text(label, style="bright_black"), spinner="dots",
+                                           spinner_style="bright_black")
+            self.spinner.start()
+        else:
+            self.spinner.update(Text(label, style="bright_black"))
+
+    def stop_spinner(self) -> None:
+        """Stop the spinner, if it runs; it leaves nothing on the screen."""
+        if self.spinner is not None:
+            self.spinner.stop()
+            self.spinner = None
 
     def add_usage(self, input_tokens: int, output_tokens: int, requests: int = 1) -> None:
         """
@@ -371,6 +398,7 @@ class Output:
             chunk = chunk.lstrip("\n")
             if not chunk:
                 return
+            self.stop_spinner()
             self.out.print()  # Blank line before the text
             self.in_text = True
         body = chunk.rstrip("\n")
@@ -382,11 +410,28 @@ class Output:
 
     def line(self, text: str) -> None:
         """
-        Print a whole dark gray line (a tool call or result, the banner), wrapped to the width,
-        closing any open text block first.
+        Print a whole dark gray line (a tool call or result, the banner) in debug mode; otherwise
+        only show the activity on the spinner: "Running <tool>…" for a call, "Thinking…" after it.
         Args:
             text: The line; may contain newlines.
         """
+        if not self.debug:
+            if text.startswith("→ "):
+                self.end()  # A call after some answer text: close the text, and spin again
+                self.spin(f"Running {text[2:].split('(')[0]}…")
+            elif self.spinner is not None and text.startswith(("← ", "✗ ")):
+                self.spin("Thinking…")
+            return
+        self.note(text)
+
+    def note(self, text: str) -> None:
+        """
+        Print a whole dark gray line, also when not in debug mode (the timing line, replies to
+        commands), wrapped to the width, closing any open text block first.
+        Args:
+            text: The line; may contain newlines.
+        """
+        self.stop_spinner()
         self.end()
         for line in wrap(text, self.width):
             self.out.print(self._render(line), style="bright_black", soft_wrap=True)
@@ -403,6 +448,7 @@ class Output:
 
     def finish(self) -> None:
         """Close the response, and print how long it took since `start` and the tokens it used."""
+        self.stop_spinner()
         self.end()
         parts = [f"Response time: {time.monotonic() - self.started:.1f}s"] if self.show_time else []
         if self.show_tokens:
@@ -413,7 +459,7 @@ class Output:
             else:
                 parts.append("tokens: not reported")
         if parts:
-            self.line(" · ".join(parts))
+            self.note(" · ".join(parts))
 
     def _render(self, text: str) -> Text:
         """
@@ -479,12 +525,12 @@ async def ask(agent: Agent, prompt: str, history: list, trace: bool = True, para
         agent: The agent to run.
         prompt: The user's message.
         history: The messages of earlier turns.
-        trace: Print tool calls and results.
+        trace: Debug mode: print tool calls and results as gray lines; otherwise a spinner shows them.
         parallel: Run the tool calls of one model response concurrently instead of one at a time.
     Returns:
         list: The updated message history, including this turn.
     """
-    output = Output(console)
+    output = Output(console, debug=trace)
     output.start()
     # pydantic-ai reports every call of a model response before their results; hold each call
     # line until its result arrives, so the two print together (as in the other agents).
@@ -500,10 +546,12 @@ async def ask(agent: Agent, prompt: str, history: list, trace: bool = True, para
                         output.text(event.part.content)
                     elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
                         output.text(event.delta.content_delta)
-                    elif trace and isinstance(event, FunctionToolCallEvent):
+                    elif isinstance(event, FunctionToolCallEvent):
                         arguments = json.dumps(event.part.args_as_dict(), separators=(",", ":"))
                         pending_calls[event.tool_call_id] = f"→ {event.part.tool_name}({arguments})"
-                    elif trace and isinstance(event, FunctionToolResultEvent):
+                        if not trace:  # Name the tool on the spinner now, while it runs
+                            output.line(pending_calls[event.tool_call_id])
+                    elif isinstance(event, FunctionToolResultEvent):
                         part = event.part
                         if event.tool_call_id in pending_calls:
                             output.line(pending_calls.pop(event.tool_call_id))
@@ -541,7 +589,7 @@ async def chat(agent: Agent, prompt: str | None, trace: bool, show_history: bool
     Args:
         agent: The agent to run.
         prompt: A single prompt to run and exit; None starts the interactive chat.
-        trace: Print tool calls and results.
+        trace: Debug mode: print the gray lines (hints, tool calls and results).
         show_history: With a single prompt, print the message history afterwards.
         parallel: Run the tool calls of one model response concurrently.
     Returns:
@@ -554,7 +602,7 @@ async def chat(agent: Agent, prompt: str | None, trace: bool, show_history: bool
             if show_history:
                 print_history(history)
             return 0
-        Output(console).line("Ask me to use a tool. /history shows messages, /reset clears them, exit quits.")
+        Output(console, debug=trace).line("Ask me to use a tool. /history shows messages, /reset clears them, exit quits.")
         save_on_exit = json.loads(AGENT_FILE.read_text(encoding="utf-8")).get("save_on_exit")
         on_exit = load_instructions(key="on_exit")
         session = PromptSession()
@@ -566,7 +614,7 @@ async def chat(agent: Agent, prompt: str | None, trace: bool, show_history: bool
             if prompt.lower() in {"exit", "quit", "q"}:
                 # One last turn to save what is worth remembering (save_on_exit); Ctrl+C skips it
                 if save_on_exit and on_exit and worth_saving(history):
-                    Output(console).line("Before exiting: saving anything worth remembering (Ctrl+C skips).")
+                    Output(console, debug=trace).line("Before exiting: saving anything worth remembering (Ctrl+C skips).")
                     try:
                         await ask(agent, on_exit, history, trace, parallel)
                     except Exception as error:
@@ -574,7 +622,7 @@ async def chat(agent: Agent, prompt: str | None, trace: bool, show_history: bool
                 return 0
             if prompt == "/reset":
                 history = []
-                Output(console).line("History cleared.")
+                Output(console).note("History cleared.")
             elif prompt == "/history":
                 print_history(history)
             elif prompt:
@@ -600,7 +648,8 @@ def main() -> int:
                         help=f"Use tools from an MCP server instead of the local tools folder (default URL: {MCP_URL}).")
     parser.add_argument("--prompt", help="Run one prompt and exit.")
     parser.add_argument("--history", action="store_true", help="With --prompt, print the message history.")
-    parser.add_argument("--quiet", action="store_true", help="Hide tool calls and results.")
+    parser.add_argument("-d", "--debug", action="store_true",
+                        help="Print the banner, tool calls and results as gray lines, instead of a spinner.")
     parser.add_argument("--parallel", action="store_true",
                         help="Run the tool calls from one model response concurrently (MCPAgent's server rejects this).")
     args = parser.parse_args()
@@ -614,9 +663,9 @@ def main() -> int:
         agent = build_agent(build_model(settings), args.mcp)
         tools = f"tools from MCP server {args.mcp}" if args.mcp else f"{len(local_toolset.tools)} tools"
         execution = "parallel" if args.parallel else "sequential"
-        Output(console).line(f"{settings['name']} model: {settings['model']} @ {settings['base_url']}, "
+        Output(console, debug=args.debug).line(f"{settings['name']} model: {settings['model']} @ {settings['base_url']}, "
                              f"{tools} ({execution})")
-        return asyncio.run(chat(agent, args.prompt, trace=not args.quiet,
+        return asyncio.run(chat(agent, args.prompt, trace=args.debug,
                                 show_history=args.history, parallel=args.parallel))
     except KeyboardInterrupt:
         return 0

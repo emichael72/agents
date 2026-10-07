@@ -36,8 +36,9 @@ npm --prefix vercel run typecheck                   # tsc --noEmit
 ```
 
 In the chat, `/history` prints the messages exchanged with the model, `/reset` clears them,
-and `exit` quits. Tool calls are shown as `→ tool(args)`, results as `← tool: output` and
-failures as `✗ tool: error`; `--quiet` hides them.
+and `exit` quits. A spinner ([ora](https://github.com/sindresorhus/ora)) shows what the agent is
+doing; with `-d` (`--debug`), tool calls are shown as `→ tool(args)`, results as `← tool: output`
+and failures as `✗ tool: error` instead.
 
 | Option / variable | Purpose |
 | --- | --- |

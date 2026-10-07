@@ -11,6 +11,7 @@ import { parseArgs, styleText } from 'node:util';
 import { createMCPClient } from '@ai-sdk/mcp';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { isStepCount, ToolLoopAgent, type LanguageModel, type ModelMessage, type ToolSet } from 'ai';
+import ora, { type Ora } from 'ora';
 import { localTools, oneAtATime } from './tools.ts';
 
 const MCP_URL = 'http://127.0.0.1:6275/'; // MCPAgent's server (python -m mcpagent.server)
@@ -261,23 +262,43 @@ export class Output {
   private readonly links: boolean; // OSC 8 links, only when writing to a terminal
   private usage?: { input: number; output: number; requests: number }; // When the server reports it
   private readonly write: Write;
+  private readonly debug: boolean; // Print the gray lines; without it, a spinner shows the activity instead
+  private spinner?: Ora;
 
   /**
    * @param write Prints raw text (stdout by default).
    * @param settings The layout settings; undefined reads context/output.json.
+   * @param debug Print the gray lines (banner, hints, tool calls and results); otherwise a spinner
+   *   runs while the model thinks or a tool runs, and only the answer and the timing line print.
    */
-  constructor(write: Write, settings: OutputSettings = loadOutputSettings()) {
+  constructor(write: Write, settings: OutputSettings = loadOutputSettings(), debug = true) {
     this.write = write;
+    this.debug = debug;
     this.width = Math.min(settings.width ?? 120, process.stdout.isTTY ? process.stdout.columns : Infinity);
     this.showTime = settings.show_time ?? true;
     this.showTokens = settings.show_tokens ?? false;
     this.links = (settings.links ?? false) && Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
   }
 
-  /** Start timing a response. */
+  /** Start timing a response, and the spinner when not in debug mode (on a terminal only). */
   start(): void {
     this.started = performance.now();
     this.usage = undefined;
+    this.spin('Thinking…');
+  }
+
+  /** Show a label on the spinner, starting it if needed; only when not in debug mode, on a terminal. */
+  spin(label: string): void {
+    if (this.debug || !process.stdout.isTTY || !(process.stdout.columns > 0)) return; // ora needs the terminal's width
+    if (this.spinner) this.spinner.text = gray(label);
+    // discardStdin off: the chat's readline owns the input
+    else this.spinner = ora({ text: gray(label), color: 'gray', stream: process.stdout, discardStdin: false }).start();
+  }
+
+  /** Stop the spinner, if it runs; it leaves nothing on the screen. */
+  stopSpinner(): void {
+    this.spinner?.stop();
+    this.spinner = undefined;
   }
 
   /** Count the tokens of model calls made for this response (in: sent to the model, out: generated). */
@@ -293,6 +314,7 @@ export class Output {
     if (!this.inText) {
       chunk = chunk.replace(/^\n+/, '');
       if (!chunk) return;
+      this.stopSpinner();
       this.write('\n'); // Blank line before the text
       this.inText = true;
     }
@@ -305,8 +327,26 @@ export class Output {
     }
   }
 
-  /** Print a whole dark gray line (a tool call or result, the banner), wrapped to the width. */
+  /**
+   * Print a whole dark gray line (a tool call or result, the banner) in debug mode; otherwise only
+   * show the activity on the spinner: "Running <tool>…" for a call, "Thinking…" after it.
+   */
   line(text: string): void {
+    if (!this.debug) {
+      if (text.startsWith('→ ')) {
+        this.end(); // A call after some answer text: close the text, and spin again
+        this.spin(`Running ${text.slice(2).split('(')[0]}…`);
+      } else if (this.spinner && /^[←✗] /.test(text)) {
+        this.spin('Thinking…');
+      }
+      return;
+    }
+    this.note(text);
+  }
+
+  /** Print a whole dark gray line, also when not in debug mode (the timing line, replies to commands). */
+  note(text: string): void {
+    this.stopSpinner();
     this.end();
     for (const line of wrap(text, this.width)) this.write(gray(this.render(line)) + '\n');
   }
@@ -322,6 +362,7 @@ export class Output {
 
   /** Close the response, and print how long it took since `start` and the tokens it used. */
   finish(): void {
+    this.stopSpinner();
     this.end();
     const parts = this.showTime ? [`Response time: ${((performance.now() - this.started) / 1000).toFixed(1)}s`] : [];
     if (this.showTokens) {
@@ -331,7 +372,7 @@ export class Output {
           `(${usage.requests} model call${usage.requests === 1 ? '' : 's'})`
         : 'tokens: not reported');
     }
-    if (parts.length) this.line(parts.join(' · '));
+    if (parts.length) this.note(parts.join(' · '));
   }
 
   /** Show the text's Markdown links and web addresses as clickable OSC 8 links, when links are on. */
@@ -382,14 +423,15 @@ export class Output {
  * @param agent The agent to run.
  * @param prompt The user's message.
  * @param history The messages of earlier turns.
- * @param options trace: print tool calls and results; write: where to print (stdout by default).
+ * @param options trace: debug mode, print tool calls and results (otherwise a spinner shows them);
+ *   write: where to print (stdout by default).
  * @returns The updated message history, including this turn.
  */
 export async function ask(agent: Agent, prompt: string, history: ModelMessage[],
                           { trace = true, write = (text: string) => void process.stdout.write(text) }:
                             { trace?: boolean; write?: Write } = {}): Promise<ModelMessage[]> {
   const messages: ModelMessage[] = [...history, { role: 'user', content: prompt }];
-  const output = new Output(write);
+  const output = new Output(write, undefined, trace);
   output.start();
   // The AI SDK reports every call of a model response before their results; hold each call line
   // until its result arrives, so the two print together (as in the other agents).
@@ -407,19 +449,16 @@ export async function ask(agent: Agent, prompt: string, history: ModelMessage[],
           output.text(part.text);
           break;
         case 'tool-call':
-          if (trace) pendingCalls.set(part.toolCallId, `→ ${part.toolName}(${JSON.stringify(part.input)})`);
+          pendingCalls.set(part.toolCallId, `→ ${part.toolName}(${JSON.stringify(part.input)})`);
+          if (!trace) output.line(pendingCalls.get(part.toolCallId)!); // Name the tool on the spinner now, while it runs
           break;
         case 'tool-result':
-          if (trace) {
-            showCall(part.toolCallId);
-            output.line(`← ${part.toolName}: ${readable(part.output)}`);
-          }
+          showCall(part.toolCallId);
+          output.line(`← ${part.toolName}: ${readable(part.output)}`);
           break;
         case 'tool-error':
-          if (trace) {
-            showCall(part.toolCallId);
-            output.line(`✗ ${part.toolName}: ${readable(errorMessage(part.error))}`);
-          }
+          showCall(part.toolCallId);
+          output.line(`✗ ${part.toolName}: ${readable(errorMessage(part.error))}`);
           break;
         case 'error':
           throw part.error;
@@ -469,7 +508,7 @@ async function chat(agent: Agent, prompt: string | undefined, trace: boolean, sh
     if (showHistory) console.dir(history, { depth: null });
     return;
   }
-  console.log(gray('Ask me to use a tool. /history shows messages, /reset clears them, exit quits.'));
+  if (trace) console.log(gray('Ask me to use a tool. /history shows messages, /reset clears them, exit quits.'));
   const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: gray('You > ') });
   const onExit = loadInstructions(INSTRUCTIONS_FILE, 'on_exit');
   try {
@@ -480,7 +519,7 @@ async function chat(agent: Agent, prompt: string | undefined, trace: boolean, sh
       if (['exit', 'quit', 'q'].includes(line.toLowerCase())) {
         // One last turn to save what is worth remembering (save_on_exit); Ctrl+C skips it
         if (AGENT_SETTINGS.save_on_exit && onExit && worthSaving(history)) {
-          console.log(gray('Before exiting: saving anything worth remembering (Ctrl+C skips).'));
+          if (trace) console.log(gray('Before exiting: saving anything worth remembering (Ctrl+C skips).'));
           try {
             await ask(agent, onExit, history, { trace });
           } catch (error) {
@@ -519,7 +558,7 @@ async function main(): Promise<number> {
       mcp: { type: 'string' }, // URL, or "" for the default MCPAgent server
       prompt: { type: 'string' },
       history: { type: 'boolean', default: false },
-      quiet: { type: 'boolean', default: false },
+      debug: { type: 'boolean', short: 'd', default: false },
       parallel: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -533,7 +572,7 @@ async function main(): Promise<number> {
   --mcp URL          Use tools from an MCP server instead of the local tools folder (--mcp "" = ${MCP_URL})
   --prompt TEXT      Run one prompt and exit
   --history          With --prompt, print the message history
-  --quiet            Hide tool calls and results
+  -d, --debug        Print the banner, tool calls and results as gray lines, instead of a spinner
   --parallel         Run the tool calls from one model response concurrently`);
     return 0;
   }
@@ -558,9 +597,9 @@ async function main(): Promise<number> {
     const tools = mcpClient ? await mcpClient.tools() : localTools;
     const agent = buildAgent(buildModel(settings), tools, values.parallel, settings.timeout);
     const toolCount = mcpUrl ? `${Object.keys(tools).length} tools from MCP server ${mcpUrl}` : `${Object.keys(tools).length} tools`;
-    new Output((text) => void process.stdout.write(text)).line(
+    new Output((text) => void process.stdout.write(text), undefined, values.debug).line(
       `${settings.name} model: ${settings.model} @ ${settings.baseURL}, ${toolCount} (${values.parallel ? 'parallel' : 'sequential'})`);
-    await chat(agent, values.prompt, !values.quiet, values.history);
+    await chat(agent, values.prompt, values.debug, values.history);
     return 0;
   } catch (error) {
     console.error(styleText('red', `Error: ${errorMessage(error)}`));

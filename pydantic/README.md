@@ -33,8 +33,8 @@ Run these from the repository root. For `--mcp`, start the MCPAgent server first
 `.venv/bin/python -m mcpagent.server`.
 
 In the chat, `/history` prints the messages exchanged with the model, `/reset` clears them,
-and `exit` quits. Tool calls are shown as `→ tool(args)` and results as `← tool: output`;
-`--quiet` hides them.
+and `exit` quits. A spinner shows what the agent is doing; with `-d` (`--debug`), tool calls are
+shown as `→ tool(args)` and results as `← tool: output` instead.
 
 | Option / variable | Purpose |
 | --- | --- |
