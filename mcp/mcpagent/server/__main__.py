@@ -20,71 +20,9 @@ from typing import Union, Optional
 from colorama import Fore, Style, init
 
 # Local imports
+from mcpagent.common.errors import ExceptionReport
 from mcpagent import MCPService, __version__
 from mcpagent.config import DEFAULT_CONFIG, REPO_ROOT, load_config, server_settings
-
-
-# Both CLI entry points keep their exception reporting self-contained.
-# noinspection DuplicatedCode
-class ExceptionGuru:
-    """
-    A singleton utility class for capturing and exposing the origin (filename and line number)
-    of the innermost frame where the most recent exception occurred, ensuring the exception context
-    is captured only once.
-    """
-
-    _instance: Optional["ExceptionGuru"] = None
-    _context_stored: bool = False
-
-    def __new__(cls) -> "ExceptionGuru":
-        """
-        Overrides object instantiation to implement the singleton pattern.
-        Returns:
-            ExceptionGuru: The singleton instance of the class.
-        """
-        instance = cls._instance
-        if instance is None:
-            instance = super().__new__(cls)
-            cls._instance = instance
-        return instance
-
-    def __init__(self) -> None:
-        """
-        Initializes the exception context (filename and line number).
-        The context is captured only once during the lifetime of the singleton instance.
-        """
-        if not self.__class__._context_stored:
-            self._file_name: str = "<unknown>"
-            self._line_number: int = -1
-            self._store_context()
-            self.__class__._context_stored = True
-
-    def get_context(self) -> tuple[str, int]:
-        """
-        Retrieves the exception origin information.
-        Returns:
-            Tuple[str, int]: A tuple containing the base filename and the line number
-                             where the exception originally occurred.
-        """
-        return self._file_name, self._line_number
-
-    def _store_context(self) -> None:
-        """
-        Captures the filename and line number of the innermost frame where the most recent
-        exception occurred. If no exception context is found, defaults to '<unknown>' and -1.
-        """
-        _exc_type, _exc_obj, exc_tb = sys.exc_info()
-
-        if exc_tb is None:
-            return
-
-        # Traverse to the innermost (deepest) frame
-        tb = exc_tb
-        while tb.tb_next:
-            tb = tb.tb_next
-
-        self._file_name = os.path.basename(tb.tb_frame.f_code.co_filename)
-        self._line_number = tb.tb_lineno
 
 
 def start_mcp_server(config_path: Optional[Union[str, Path]] = None) -> int:
@@ -168,11 +106,7 @@ def main() -> int:
         print(f"\n\n{Fore.LIGHTBLACK_EX}Interrupted by user, shutting down.{Style.RESET_ALL}\n")
 
     except Exception as runtime_error:
-        # Retrieve information about the original exception that triggered this handler.
-        file_name, line_number = ExceptionGuru().get_context()
-        invocation = " ".join(sys.argv)
-        print(f"\n{Fore.RED}Exception:{Style.RESET_ALL} {runtime_error}.\nFile: {file_name}\nLine: {line_number}")
-        print(f"Invocation: {invocation}\n")
+        ExceptionReport(runtime_error).print()
 
     return exit_code
 

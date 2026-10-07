@@ -37,7 +37,7 @@ from jsonschema import validate, ValidationError
 from colorama import Fore, Style
 
 # Local imports
-from .logger import MCPAgentLogger
+from mcpagent.common.logger import MCPAgentLogger
 from .types import MCPServiceConfigType, MCPServiceToolType
 
 

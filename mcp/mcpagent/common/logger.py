@@ -2,8 +2,8 @@
 Module: logger.py
 
 Description:
-    `MCPAgentLogger`: the client's logger, a minimal `logging.Logger` subclass with a consistent
-    console format.
+    `MCPAgentLogger`: the logger of the client and the server, a minimal `logging.Logger` subclass
+    with a consistent console format.
 """
 
 import logging
