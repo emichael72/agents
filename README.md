@@ -28,6 +28,9 @@ README. Run every command from the repository root; paths are relative to it.
 ./install.sh  # -f recreates both, --skip-vercel skips Node, -h help
 ```
 
+It also installs the pinned development tools in `requirements-dev.txt`: Ruff, the Python linter.
+`.venv/bin/ruff check` checks the repository for likely bugs, with the rules in `ruff.toml`.
+
 Requirements: Python 3.10+, and Node.js 22.18+ with npm 10+ for the Vercel Agent (Node 22.18+ runs
 the `.ts` files directly, so there is no build step). Neither `.venv/` nor `node_modules/` is
 committed.

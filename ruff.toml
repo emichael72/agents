@@ -1,0 +1,9 @@
+# Ruff (requirements-dev.txt) checks the repository's Python for likely bugs, not style:
+#   .venv/bin/ruff check
+# F: pyflakes (undefined names, unused imports); E4, E7, E9: statement and syntax errors;
+# B: bugbear (likely bugs); PLE: pylint errors; EXE: shebangs and the executable bit;
+# RUF059: unused unpacked variables; PLR1704: a loop variable that redefines an argument.
+extend-exclude = ["vercel/node_modules"]
+
+[lint]
+select = ["F", "E4", "E7", "E9", "B", "PLE", "EXE", "RUF059", "PLR1704"]

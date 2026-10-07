@@ -21,9 +21,9 @@
 
 PYTHON_VENV_PATH=".venv"
 PYTHON_REQUIRED_MIN_VER="3.10"
-PYTHON_REQUIREMENTS_FILES="mcpagent/requirements.txt pydantic/requirements.txt gatekeepers/pr/requirements.txt"
+PYTHON_REQUIREMENTS_FILES="mcpagent/requirements.txt pydantic/requirements.txt gatekeepers/pr/requirements.txt requirements-dev.txt"
 PYTHON_MODULES_TO_RUN="mcpagent.server mcpagent.client" # Checked with python -m <module> --version
-PYTHON_VERIFY_MODULES="mcpagent pydantic_ai jsonschema httpx httpx2 aiohttp json5 prompt_toolkit rich"
+PYTHON_VERIFY_MODULES="mcpagent pydantic_ai jsonschema httpx httpx2 aiohttp json5 prompt_toolkit rich ruff"
 
 # Node 22.18+ runs .ts files directly (type stripping), so the Vercel Agent needs no build step
 NODE_PROJECT_PATH="vercel"
