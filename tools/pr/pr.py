@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 """
-Module: mr.py
+Module: pr.py
 
 Description:
-    Opens a merge request (a GitHub pull request) for the agents: the uncommitted changes of a
-    repository in an allowed folder with write access go onto a new branch, which is pushed and
-    proposed for merging into the repository's default branch.
+    Opens a GitHub pull request for the agents (users may call it a merge request, MR): the
+    uncommitted changes of a repository in an allowed folder with write access go onto a new
+    branch, which is pushed and proposed for merging into the repository's default branch.
 
     This is the one tool that reaches GitHub, with the credentials of the user running the agent
     (git and gh). With action sync, it brings the default branch up to date with GitHub
-    (fast-forward only), which the agents' sandboxed shell cannot do. Otherwise it opens a merge
+    (fast-forward only), which the agents' sandboxed shell cannot do. Otherwise it opens a pull
     request, the same way every time:
       1. Check the repository: on its default branch, no commits of its own, changes to submit.
       2. Bring the default branch up to date with GitHub (fast-forward only).
       3. Format the changed C/C++ files with clang-format (the repository's .clang-format, else
-         the agents' template, context/clang-format.yaml), so every request follows the style.
+         the agents' template, context/clang-format.yaml), so every pull request follows the style.
       4. Create the branch (new, never the default branch), commit everything, push it.
       5. Open the pull request, then switch back to the default branch.
-      6. Wait for the merge gate's check (MR_WAIT_CHECK, e.g. pr_gate's developer-quiz) on the new
-         commit, up to MR_WAIT_SECONDS, and report it: for pr_gate, the quiz the reviewer must pass.
+      6. Wait for the merge gate's check (PR_WAIT_CHECK, e.g. pr_gate's developer-quiz) on the new
+         commit, up to PR_WAIT_SECONDS, and report it: for pr_gate, the quiz the reviewer must pass.
     It never pushes to the default branch, never force-pushes and never merges: merging stays with
     the people (and gates) of the repository.
 """
@@ -40,8 +40,8 @@ import fs_gate  # noqa: E402
 OPTIONS = ("action", "title", "body", "branch")
 CLANG_FORMAT = fs_gate.CONTEXT_DIR / "clang-format.yaml"  # The default style
 FORMATTED = {".c", ".h", ".cc", ".cpp", ".hpp", ".cxx", ".hh"}
-WAIT_CHECK = os.environ.get("MR_WAIT_CHECK", "")  # The status check to wait for; "" waits for none
-WAIT_SECONDS = float(os.environ.get("MR_WAIT_SECONDS") or 0)
+WAIT_CHECK = os.environ.get("PR_WAIT_CHECK", "")  # The status check to wait for; "" waits for none
+WAIT_SECONDS = float(os.environ.get("PR_WAIT_SECONDS") or 0)
 POLL_SECONDS = 3
 BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,80}$")
 TIMEOUT = 60
@@ -104,7 +104,7 @@ def branch_name(title: str, branch: Optional[str]) -> str:
     """
     The branch to create: the one given, or agent/<title in lowercase words>.
     Args:
-        title: The merge request's title.
+        title: The pull request's title.
         branch: The requested name, if any.
     Returns:
         str: A valid branch name.
@@ -173,7 +173,7 @@ def sync(path: str) -> str:
     if git(repo, "branch", "--show-current") != base:
         raise ValueError(f"The repository is not on {base}; switch to it before syncing.")
     if git(repo, "status", "--porcelain"):
-        raise ValueError("The repository has uncommitted changes; open a merge request with them, or undo them "
+        raise ValueError("The repository has uncommitted changes; open a pull request with them, or undo them "
                          "(git restore in the shell), before syncing.")
     git(repo, "fetch", "--quiet", "origin", base)
     if git(repo, "rev-list", "--count", f"origin/{base}..HEAD") != "0":
@@ -187,9 +187,9 @@ def sync(path: str) -> str:
     return f"{shown}: updated {base} from {before} to {after}:\n{incoming}"
 
 
-def open_mr(path: str, title: str, body: str = "", branch: Optional[str] = None) -> str:
+def open_pr(path: str, title: str, body: str = "", branch: Optional[str] = None) -> str:
     """
-    Submit a repository's uncommitted changes as a merge request.
+    Submit a repository's uncommitted changes as a pull request.
     Args:
         path: <allowed name>/<folder> in the repository; it needs write access.
         title: The title, also the commit message's first line.
@@ -251,7 +251,7 @@ def open_mr(path: str, title: str, body: str = "", branch: Optional[str] = None)
 def main(argv: Optional[list[str]] = None) -> str:
     """
     Read "<path> --title <text> [--body <text>] [--branch <name>]" (values taken verbatim) and open
-    the merge request.
+    the pull request.
     Args:
         argv: Arguments; None reads sys.argv.
     Returns:
@@ -275,8 +275,8 @@ def main(argv: Optional[list[str]] = None) -> str:
     if action != "open":
         raise ValueError(f"Unknown action '{action}'; use open (the default) or sync.")
     if "title" not in options:
-        raise ValueError("Give a title for the merge request.")
-    return open_mr(options["path"], options["title"], options.get("body", ""), options.get("branch"))
+        raise ValueError("Give a title for the pull request.")
+    return open_pr(options["path"], options["title"], options.get("body", ""), options.get("branch"))
 
 
 if __name__ == "__main__":

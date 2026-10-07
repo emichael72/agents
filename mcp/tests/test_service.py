@@ -155,9 +155,9 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(error, text)
             self.assertIn('first', text)  # git reads
             for command in ('git commit -qam x', 'git checkout -b x', 'git branch new', 'git push', 'git -C .. log'):
-                error, text = await shell('proj', command)  # but committing and branching belong to mr
+                error, text = await shell('proj', command)  # but committing and branching belong to pr
                 self.assertTrue(error, command)
-                self.assertIn('mr tool', text)
+                self.assertIn('pr tool', text)
             self.assertTrue((await shell('proj', 'touch .git/hooks/pre-commit'))[0])  # Hooks stay read-only
             if shutil.which('clang-format'):  # The agents' style template is found at /work/.clang-format
                 error, text = await shell('proj', 'clang-format hello.c')
@@ -194,7 +194,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse((Path(folder) / 'ro' / 'x').exists())
             self.assertFalse((Path(tools) / 'x').exists())
 
-    async def test_mr_submits_changes_on_a_new_branch(self):
+    async def test_pr_submits_changes_on_a_new_branch(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             remote, repo, bin_dir = root / 'remote.git', root / 'repo', root / 'bin'
@@ -223,15 +223,15 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             env = {'FS_GATE_PATHS': str(allowed), 'PATH': f"{bin_dir}:{os.environ['PATH']}",
                    'GIT_AUTHOR_NAME': 'T', 'GIT_AUTHOR_EMAIL': 't@x', 'GIT_COMMITTER_NAME': 'T', 'GIT_COMMITTER_EMAIL': 't@x'}
 
-            async def mr(args):
+            async def pr(args):
                 with patch.dict(os.environ, env):
-                    result = (await self.rpc('tools/call', {'name': 'mr', 'arguments': args}))['result']
+                    result = (await self.rpc('tools/call', {'name': 'pr', 'arguments': args}))['result']
                 return result['isError'], result['content'][0]['text']
 
-            self.assertIn('no changes', (await mr({'path': 'proj', 'title': 'Nothing yet'}))[1])
+            self.assertIn('no changes', (await pr({'path': 'proj', 'title': 'Nothing yet'}))[1])
             (repo / 'b.c').write_text('int  b( void ){return 1;}\n')  # Not in the template's style
-            self.assertTrue((await mr({'path': 'look', 'title': 'Read-only folder'}))[0])
-            error, text = await mr({'path': 'proj', 'title': 'Add b.c', 'body': 'A second file.'})
+            self.assertTrue((await pr({'path': 'look', 'title': 'Read-only folder'}))[0])
+            error, text = await pr({'path': 'proj', 'title': 'Add b.c', 'body': 'A second file.'})
             self.assertFalse(error, text)
             self.assertIn('Opened https://github.com/example/repo/pull/7', text)
             self.assertIn('branch agent/add-b-c', text)
@@ -247,10 +247,10 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(branch, 'main')  # Back on main, which did not move
             self.assertEqual(run('git', 'rev-list', '--count', 'main', cwd=repo).stdout.decode().strip(), '2')
             (repo / 'c.c').write_text('int c;\n')
-            self.assertIn('already exists', (await mr({'path': 'proj', 'title': 'Add b.c'}))[1])
+            self.assertIn('already exists', (await pr({'path': 'proj', 'title': 'Add b.c'}))[1])
 
             # sync: a commit that reached GitHub elsewhere comes in; uncommitted changes block it
-            self.assertIn('uncommitted changes', (await mr({'path': 'proj', 'action': 'sync'}))[1])
+            self.assertIn('uncommitted changes', (await pr({'path': 'proj', 'action': 'sync'}))[1])
             (repo / 'c.c').unlink()
             other = root / 'other'
             run('git', 'clone', '-q', str(remote), str(other))
@@ -258,11 +258,11 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             run('git', 'add', 'd.c', cwd=other)
             run('git', '-c', 'user.name=T', '-c', 'user.email=t@x', 'commit', '-q', '-m', 'Add d.c elsewhere', cwd=other)
             run('git', 'push', '-q', 'origin', 'main', cwd=other)
-            error, text = await mr({'path': 'proj', 'action': 'sync'})
+            error, text = await pr({'path': 'proj', 'action': 'sync'})
             self.assertFalse(error, text)
             self.assertIn('Add d.c elsewhere', text)
             self.assertTrue((repo / 'd.c').exists())
-            self.assertIn('up to date', (await mr({'path': 'proj', 'action': 'sync'}))[1])
+            self.assertIn('up to date', (await pr({'path': 'proj', 'action': 'sync'}))[1])
 
     async def test_memory_saves_reads_and_forgets_topics(self):
         with tempfile.TemporaryDirectory() as folder:

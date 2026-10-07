@@ -56,7 +56,7 @@ what is offered:
   the output, interleaved with it. `cd` is followed, and must stay in the allowed folders.
 - **`git` only reads:** `status`, `log`, `show`, `diff`, `blame`, `grep`, `ls-files`, `restore` (to
   undo uncommitted edits) and listing branches and tags. Committing, branching, merging and syncing
-  belong to the [`mr`](../mr/README.md) tool, which keeps the repository in the state it expects
+  belong to the [`pr`](../pr/README.md) tool, which keeps the repository in the state it expects
   (and the sandbox has no network to push or pull anyway).
 - Commands marked `"needs": "x"` (`make`, which runs the Makefile) need execute access where they
   run, and may not use `-C` or `-f` to point elsewhere.

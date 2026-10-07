@@ -1,10 +1,12 @@
-# MR
+# PR
 
-Opens a merge request (a GitHub pull request) with the uncommitted changes of a repository in an
-allowed folder with write access ([`../../context/paths.json`](../../context/paths.json)), such as
-`core_dump`. It is how an agent hands its work to a person: the change waits on GitHub for review,
-and in `core_dump` the [`pr_gate`](../../gatekeepers/pr/README.md) quiz checks that the reviewer understands
-it before it can merge.
+Opens a pull request (PR) on GitHub with the uncommitted changes of a repository in an allowed
+folder with write access ([`../../context/paths.json`](../../context/paths.json)), such as
+`core_dump`. Users may call it a merge request (MR); the tool's description tells the model that
+this is the same thing, so "open an MR" uses this tool. It is how an agent hands its work to a
+person: the change waits on GitHub for review, and in `core_dump` the
+[`pr_gate`](../../gatekeepers/pr/README.md) quiz checks that the reviewer understands it before it
+can merge.
 
 **Before starting work**, `action: sync` brings the repository's default branch up to date with
 GitHub (fast-forward only): the agents' shell has no network, so without it they would work on
@@ -15,8 +17,8 @@ The pull request gate's service also keeps `core_dump` current on its own (`QUIZ
 **Usage Example:**
 
 ```bash
-python3 mr/mr.py core_dump --action sync     # update main from GitHub first
-python3 mr/mr.py core_dump --title "Add an e module" --body "Prints Euler's number; make builds cleanly."
+python3 pr/pr.py core_dump --action sync     # update main from GitHub first
+python3 pr/pr.py core_dump --title "Add an e module" --body "Prints Euler's number; make builds cleanly."
 ```
 
 What it does, every time:
@@ -32,11 +34,11 @@ What it does, every time:
    `.gitignore`), and pushes the branch.
 5. Opens the pull request into the default branch, noting which agent opened it, and switches back
    to the default branch; the changes now live on the branch.
-6. Waits for the merge gate's check on the new commit (`MR_WAIT_CHECK` in `tool.json`, set to
-   `developer-quiz`, for up to `MR_WAIT_SECONDS`, 100) and reports it. With
+6. Waits for the merge gate's check on the new commit (`PR_WAIT_CHECK` in `tool.json`, set to
+   `developer-quiz`, for up to `PR_WAIT_SECONDS`, 100) and reports it. With
    [`pr_gate`](../../gatekeepers/pr/README.md) that is the quiz link the reviewer must pass, or the
    documentation problems that fail the check. `tool.json`'s `timeout` (150 s) lets the agents wait
-   that long. Set `MR_WAIT_CHECK` to `""` to return right after opening the request.
+   that long. Set `PR_WAIT_CHECK` to `""` to return right after opening the pull request.
 
 It never pushes to the default branch, never force-pushes, never reuses an existing branch and
 never merges. Git hooks are off while it commits.

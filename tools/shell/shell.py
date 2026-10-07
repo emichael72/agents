@@ -50,7 +50,7 @@ CLANG_TIDY = fs_gate.CONTEXT_DIR / "clang-tidy.yaml"  # The default C/C++ checks
 WORK = PurePosixPath("/work")  # Where the allowed folders appear inside the sandbox
 SEPARATORS = {"|", "||", "&&", ";"}
 # git in the shell only looks (and can undo uncommitted edits); committing, branching and syncing
-# with GitHub belong to the mr tool, which keeps the repository in the state it expects
+# with GitHub belong to the pr tool, which keeps the repository in the state it expects
 GIT_READ_ONLY = {"status", "log", "show", "diff", "blame", "grep", "ls-files", "shortlog", "describe",
                  "rev-parse", "restore"}
 GIT_LIST_ONLY = {"branch": {"-a", "-r", "-v", "-vv", "--all", "--remotes", "--list", "-l", "--show-current"},
@@ -146,11 +146,11 @@ def check(command: str, cwd: Path, commands: dict[str, dict], allowed: dict[str,
             sub = words[1] if len(words) > 1 else ""
             if sub in GIT_LIST_ONLY:
                 if any(w not in GIT_LIST_ONLY[sub] for w in words[2:]):
-                    raise ValueError(f"git {sub} may only list here. To commit or create a branch, use the mr tool.")
+                    raise ValueError(f"git {sub} may only list here. To commit or create a branch, use the pr tool.")
             elif sub not in GIT_READ_ONLY:
                 raise ValueError(f"git {sub or '(nothing)'} is not allowed in the shell: it only reads ("
-                                 f"{', '.join(sorted(GIT_READ_ONLY))}). The mr tool commits, creates the branch "
-                                 f"and opens the merge request; mr with action sync updates the repository from GitHub.")
+                                 f"{', '.join(sorted(GIT_READ_ONLY))}). The pr tool commits, creates the branch "
+                                 f"and opens the pull request; pr with action sync updates the repository from GitHub.")
         if name == "cd":
             target = to_host(words[1] if len(words) > 1 else ".", current, allowed)
             if not target or not target.is_dir():

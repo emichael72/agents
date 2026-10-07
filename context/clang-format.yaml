@@ -1,5 +1,5 @@
-# Default C/C++ style for the agents' code, used by clang-format in the shell tool and by the mr tool
-# before it opens a merge request. A project's own .clang-format takes precedence.
+# Default C/C++ style for the agents' code, used by clang-format in the shell tool and by the pr tool
+# before it opens a pull request. A project's own .clang-format takes precedence.
 # Matches core_dump: 4-space indents, function braces on their own line, "char *argv", tables of
 # structs (such as getopt options) one entry per line with aligned columns.
 BasedOnStyle: LLVM

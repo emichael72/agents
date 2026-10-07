@@ -22,7 +22,7 @@ from pydantic_ai.toolsets import FunctionToolset
 
 TOOLS_DIR = Path(__file__).resolve().parents[2] / "tools"
 SCRIPT_TIMEOUT = 30
-AGENT_NAME = "Pydantic Agent"  # Lets tools such as mr and pr_gate say which agent ran them
+AGENT_NAME = "Pydantic Agent"  # Lets tools such as pr and pr_gate say which agent ran them
 
 
 def run_script(*command: str, env: dict[str, str] | None = None, timeout: float = SCRIPT_TIMEOUT) -> str:

@@ -3,7 +3,7 @@ Module: clone.py
 
 Description:
     Keeps a local clone of the gated repository current with GitHub, so agents always start from
-    the latest code: their shell has no network, and a model may forget the mr tool's sync action.
+    the latest code: their shell has no network, and a model may forget the pr tool's sync action.
 
     The service calls `sync_clone` every few seconds (QUIZ_SYNC_SECONDS). It touches the clone
     only when that is safe, and then only fast-forwards:

@@ -43,7 +43,7 @@
     "gcc": "compile C",
     "gdb": {"about": "debug a program, e.g. gdb -batch -ex run -ex bt ./prog (runs the program)", "needs": "x"},
     "getconf": "system configuration values",
-    "git": "git, read-only: status, log, show, diff, blame, grep, ls-files, restore (undo edits), listing branches and tags. The mr tool commits and opens merge requests; mr with action sync updates from GitHub",
+    "git": "git, read-only: status, log, show, diff, blame, grep, ls-files, restore (undo edits), listing branches and tags. The pr tool commits and opens pull requests; pr with action sync updates from GitHub",
     "grep": "search file contents",
     "gunzip": "decompress .gz files",
     "gzip": "compress files (.gz)",

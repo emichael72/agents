@@ -15,12 +15,12 @@ added here is available to all of them without code changes:
 | `sysinfo` | Python | `section` (optional) | The system, CPU utilization and load, memory, disks, network, GPU, busiest processes and software versions (Python, gcc, ...) |
 | `shell` | Python / `bwrap` | `cwd`, `command` | Runs a command line (ls, cat, grep, find, sed, make, gcc, git, ... joined with `\|`, `&&`, `;`) in an allowed folder, inside a sandbox; `help` lists the commands |
 | `ed` | Python | `path`, `action`, `old`, `new`, `all`, `start`, `end`, `line` (by action) | Edits a file: replace exact text, replace or delete lines, insert, or write a whole file; shows the changed lines. `hex` (`offset`, `length`) only reads: part of any file as a hex dump |
-| `mr` | Python / `git`, `gh` | `path`, `title`, `body`, `branch` (optional) | Opens a merge request: formats the changed C/C++ files, puts the changes on a new branch, pushes it and opens a pull request into the default branch; returns the gate's quiz link |
+| `pr` | Python / `git`, `gh` | `path`, `action` (open, sync), `title`, `body`, `branch` (optional) | Opens a pull request (also called a merge request, MR): formats the changed C/C++ files, puts the changes on a new branch, pushes it and proposes it for the default branch; returns the gate's quiz link |
 | `memory` | Python | `action` (save, read, forget), `topic`, `text`, `summary`, `replace` | The agents' notes between runs, in `.memory/`; the index is loaded into every agent's instructions |
 | `doxy` | Bash / `doxygen` | `paths` (files or folders, space-separated) | Doxygen documentation problems as `file:line: message`, or "All documented" |
 | `pr_gate` | Python (shared `.venv`) | `pr` (optional) | Open PRs in the gated repository and their gate state; the gate itself is [gatekeepers/pr](../gatekeepers/pr/README.md) |
 
-Every path a tool takes (`shell`, `ed`, `doxy`, `mr`) must be inside the folders named in
+Every path a tool takes (`shell`, `ed`, `doxy`, `pr`) must be inside the folders named in
 [`context/paths.json`](../context/paths.json), with the access the tool needs; see "Allowed paths"
 below. Most file and build work goes through `shell`; see [shell/README.md](shell/README.md).
 
@@ -49,7 +49,7 @@ below. Most file and build work goes through `shell`; see [shell/README.md](shel
 | `style` | `flag` passes `--<name> <value>`; `positional` passes the bare value, in `params` order. Default `flag`. |
 | `required` | Defaults to `true`. An optional parameter the model omits is not passed at all, so the script's own default applies. |
 | `env` | Optional environment variables for the command. |
-| `timeout` | Optional seconds the agents wait for the tool (default 30), for tools that wait on something, such as `mr`. |
+| `timeout` | Optional seconds the agents wait for the tool (default 30), for tools that wait on something, such as `pr`. |
 | `resource` | Optional documentation file, served by MCPAgent as an MCP resource. |
 
 **Paths:** every path in a manifest (`args`, `resource`) is relative to this `tools/` folder, and

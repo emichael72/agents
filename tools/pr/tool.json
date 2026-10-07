@@ -1,0 +1,15 @@
+{
+  "description": "Opens a pull request (PR) on GitHub with the uncommitted changes of a repository in an allowed folder with write access, e.g. core_dump: formats the changed C/C++ files, creates a new branch, commits all changes, pushes it and opens the pull request into the default branch, then waits for the merge gate and returns the quiz link. The user may call a pull request a merge request or MR; it is the same thing, and this is the tool for it. Use it only when the change is complete and clean: make builds with no errors or warnings, make check passes, and doxy reports no documentation problems. Never commit, branch or merge with git yourself; this tool does it. With action sync it instead updates the repository's default branch from GitHub: do that before starting work, so you work on the latest code. It never merges a pull request; a person reviews it.",
+  "command": "python3",
+  "args": ["pr/pr.py"],
+  "timeout": 150,
+  "env": {"PR_WAIT_CHECK": "developer-quiz", "PR_WAIT_SECONDS": "100"},
+  "params": [
+    {"name": "path", "type": "string", "description": "The repository folder, starting with an allowed folder name, e.g. core_dump", "style": "positional"},
+    {"name": "action", "type": "string", "description": "open (default): open a pull request (merge request, MR); sync: update the default branch from GitHub", "style": "flag", "required": false},
+    {"name": "title", "type": "string", "description": "Required to open a pull request: what the change does, e.g. Add an e module that prints Euler's number", "style": "flag", "required": false},
+    {"name": "body", "type": "string", "description": "Description for the reviewer: what changed, why, and how it was checked (e.g. make builds without warnings)", "style": "flag", "required": false},
+    {"name": "branch", "type": "string", "description": "Branch name to create; omit it to derive one from the title (agent/...)", "style": "flag", "required": false}
+  ],
+  "resource": "pr/README.md"
+}

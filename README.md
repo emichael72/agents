@@ -43,9 +43,10 @@ committed.
 Every agent scans this folder at startup, so a tool added there is available to all three
 without code changes. [tools/README.md](tools/README.md) describes the manifest and how to add
 a tool. Current tools: `shell` (ls, cat, grep, find, sed, make, gcc, git and more, in a sandbox),
-`ed` (edit files), `mr` (open a merge request), `memory` (notes kept between runs), `time`,
-`sysinfo`, `doxy` (checks Doxygen documentation of C/C++ sources) and `pr_gate` (Pull Request Gate: a merge gate
-that quizzes a developer on their pull request; see [gatekeepers/pr/README.md](gatekeepers/pr/README.md)).
+`ed` (edit files), `pr` (open a pull request, also called a merge request or MR), `memory` (notes
+kept between runs), `time`, `sysinfo`, `doxy` (checks Doxygen documentation of C/C++ sources) and
+`pr_gate` (Pull Request Gate: a merge gate that quizzes a developer on their pull request; see
+[gatekeepers/pr/README.md](gatekeepers/pr/README.md)).
 Tools that take a path only reach the folders named in
 [`context/paths.json`](context/paths.json).
 
@@ -81,8 +82,8 @@ change on its next start. None of this is hard-coded in the agents.
 - `context/output.json`: the terminal layout: `width` (120) and `show_time` (true). See
   "Terminal output" below.
 - `context/clang-format.yaml`: the C/C++ style (4-space indents, function braces on their own
-  line, 120 columns), used by `clang-format` in the shell and by `mr`, which formats the changed
-  files before opening a merge request. A project's own `.clang-format` wins.
+  line, 120 columns), used by `clang-format` in the shell and by `pr`, which formats the changed
+  files before opening a pull request. A project's own `.clang-format` wins.
 - `context/clang-tidy.yaml`: the C/C++ checks for `clang-tidy` in the shell (likely bugs and
   unsafe patterns, not style); Fedora's clang-tidy enables none on its own. A project's own
   `.clang-tidy` wins.

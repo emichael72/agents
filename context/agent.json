@@ -3,7 +3,7 @@
     "Agent loop settings shared by all three agents.",
     "max_tool_calls: the most tool calls the model may make while answering one prompt;",
     "0 means no limit (a model stuck in a loop then runs until stopped with Ctrl+C).",
-    "A multi-step task (read a project, change it, build, open a merge request) needs 20 or more.",
+    "A multi-step task (read a project, change it, build, open a pull request) needs 20 or more.",
     "memory_index: the agents' memory index (relative to the repository), loaded into their",
     "instructions at start-up; the memory tool maintains it.",
     "save_on_exit: when the user types exit in the interactive chat, first give the model one",

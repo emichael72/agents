@@ -13,7 +13,7 @@ import { z } from 'zod';
 
 export const TOOLS_DIR = path.join(import.meta.dirname, '..', 'tools');
 const SCRIPT_TIMEOUT_MS = 30_000;
-const AGENT_NAME = 'Vercel Agent'; // Lets tools such as mr and pr_gate say which agent ran them
+const AGENT_NAME = 'Vercel Agent'; // Lets tools such as pr and pr_gate say which agent ran them
 
 const execFileAsync = promisify(execFile);
 
