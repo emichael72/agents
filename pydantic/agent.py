@@ -347,6 +347,7 @@ class Output:
         self.started = time.monotonic()
         self.debug = debug  # Print the gray lines; without it, a spinner shows the activity instead
         self.spinner: Optional[Status] = None
+        self.blank_owed = False  # The last text ended without its blank line after it
 
     def start(self) -> None:
         """Start timing a response, and the spinner when not in debug mode (on a terminal only)."""
@@ -400,6 +401,7 @@ class Output:
                 return
             self.stop_spinner()
             self.out.print()  # Blank line before the text
+            self.blank_owed = False
             self.in_text = True
         body = chunk.rstrip("\n")
         if body:
@@ -417,7 +419,7 @@ class Output:
         """
         if not self.debug:
             if text.startswith("→ "):
-                self.end()  # A call after some answer text: close the text, and spin again
+                self.end(blank=False)  # A call after some answer text: end its line, and spin again
                 self.spin(f"Running {text[2:].split('(')[0]}…")
             elif self.spinner is not None and text.startswith(("← ", "✗ ")):
                 self.spin("Thinking…")
@@ -433,14 +435,23 @@ class Output:
         """
         self.stop_spinner()
         self.end()
+        if self.blank_owed:  # Text ended without its blank line (a tool call followed it)
+            self.out.print()
+            self.blank_owed = False
         for line in wrap(text, self.width):
             self.out.print(self._render(line), style="bright_black", soft_wrap=True)
 
-    def end(self) -> None:
-        """Close the open text block, if any: end its line and add the blank line after it."""
+    def end(self, blank: bool = True) -> None:
+        """
+        Close the open text block, if any: end its line and add the blank line after it.
+        Args:
+            blank: Add the blank line now; False leaves it to what follows (more text adds its own,
+                and a gray line adds one first), so text around a hidden tool call has only one.
+        """
         if self.in_text:
             self.out.print(self._render(self._take_word()), end="", soft_wrap=True)
-            self.out.print("\n")
+            self.out.print("\n" if blank else "")
+            self.blank_owed = not blank
         self.in_text = False
         self.pending = ""
         self.column = 0
@@ -655,7 +666,8 @@ def main() -> int:
     args = parser.parse_args()
     if sum(map(bool, (args.profile, args.local, args.openai))) > 1:
         parser.error("use only one of --profile, --local and --openai")
-    console.print()  # Blank line before anything the agent prints
+    if args.debug:
+        console.print()  # Blank line before the banner (hidden without debug, so the answer's own blank line is enough)
 
     try:
         profile = args.profile or ("local" if args.local else "openai" if args.openai else None)

@@ -232,6 +232,20 @@ class OutputTests(unittest.TestCase):
         plain = re.sub(r"\x1b\[[0-9;]*m", "", printed.getvalue())
         self.assertEqual(plain.splitlines()[1:], ["Two files.", "", "Response time: 0.0s", "History cleared."])
 
+    def test_text_around_hidden_tool_calls_has_one_blank_line_between(self):
+        for more_text in (True, False):
+            printed = io.StringIO()
+            output = agent.Output(Console(file=printed), {"width": 120, "show_time": True}, debug=False)
+            output.start()
+            output.text("Let me check the build.")
+            output.line('→ shell({"command":"make"})')
+            output.line("← shell: ok")
+            if more_text:
+                output.text("It builds cleanly.")
+            output.finish()
+            expected = ["", "Let me check the build.", ""] + (["It builds cleanly.", ""] if more_text else [])
+            self.assertEqual(printed.getvalue().splitlines(), expected + ["Response time: 0.0s"])
+
     def test_lines_wrap_with_an_indent_and_keep_long_words_whole(self):
         url = "http://minion:8000/q/" + "x" * 40
         lines = agent.wrap("← pr_gate: the quiz is waiting and the merge is blocked " + url, 30)

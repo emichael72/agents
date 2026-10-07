@@ -167,6 +167,21 @@ test('by default only the answer and the timing line print', () => {
                    ['', 'Two files.', '', 'Response time: 0.0s', 'History cleared.', '']);
 });
 
+test('text around hidden tool calls has one blank line between', () => {
+  for (const moreText of [true, false]) {
+    let printed = '';
+    const output = new Output((text) => { printed += text; }, { width: 120, show_time: true }, false);
+    output.start();
+    output.text('Let me check the build.');
+    output.line('→ shell({"command":"make"})');
+    output.line('← shell: ok');
+    if (moreText) output.text('It builds cleanly.');
+    output.finish();
+    const expected = ['', 'Let me check the build.', '', ...(moreText ? ['It builds cleanly.', ''] : [])];
+    assert.deepEqual(printed.replace(/\x1b\[[0-9;]*m/g, '').split('\n'), [...expected, 'Response time: 0.0s', '']);
+  }
+});
+
 test('instructions come from the shared context file', () => {
   const instructions = loadInstructions();
   assert.match(instructions, /^You are an agent/);

@@ -264,6 +264,7 @@ export class Output {
   private readonly write: Write;
   private readonly debug: boolean; // Print the gray lines; without it, a spinner shows the activity instead
   private spinner?: Ora;
+  private blankOwed = false; // The last text ended without its blank line after it
 
   /**
    * @param write Prints raw text (stdout by default).
@@ -316,6 +317,7 @@ export class Output {
       if (!chunk) return;
       this.stopSpinner();
       this.write('\n'); // Blank line before the text
+      this.blankOwed = false;
       this.inText = true;
     }
     const body = chunk.replace(/\n+$/, '');
@@ -334,7 +336,7 @@ export class Output {
   line(text: string): void {
     if (!this.debug) {
       if (text.startsWith('→ ')) {
-        this.end(); // A call after some answer text: close the text, and spin again
+        this.end(false); // A call after some answer text: end its line, and spin again
         this.spin(`Running ${text.slice(2).split('(')[0]}…`);
       } else if (this.spinner && /^[←✗] /.test(text)) {
         this.spin('Thinking…');
@@ -348,12 +350,21 @@ export class Output {
   note(text: string): void {
     this.stopSpinner();
     this.end();
+    if (this.blankOwed) this.write('\n'); // Text ended without its blank line (a tool call followed it)
+    this.blankOwed = false;
     for (const line of wrap(text, this.width)) this.write(gray(this.render(line)) + '\n');
   }
 
-  /** Close the open text block, if any: end its line and add the blank line after it. */
-  end(): void {
-    if (this.inText) this.write(this.render(this.takeWord()) + '\n\n');
+  /**
+   * Close the open text block, if any: end its line and add the blank line after it.
+   * @param blank Add the blank line now; false leaves it to what follows (more text adds its own, and
+   *   a gray line adds one first), so text around a hidden tool call has only one.
+   */
+  end(blank = true): void {
+    if (this.inText) {
+      this.write(this.render(this.takeWord()) + (blank ? '\n\n' : '\n'));
+      this.blankOwed = !blank;
+    }
     this.inText = false;
     this.pending = '';
     this.column = 0;
@@ -582,7 +593,7 @@ async function main(): Promise<number> {
     return 2;
   }
 
-  console.log(); // Blank line before anything the agent prints
+  if (values.debug) console.log(); // Blank line before the banner (hidden without debug, so the answer's own blank line is enough)
   const mcpUrl = values.mcp === undefined ? undefined : values.mcp || MCP_URL;
   let mcpClient: Awaited<ReturnType<typeof createMCPClient>> | undefined;
   try {
