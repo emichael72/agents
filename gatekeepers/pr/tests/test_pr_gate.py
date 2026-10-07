@@ -19,13 +19,15 @@ from unittest.mock import patch
 import httpx
 from fastapi.testclient import TestClient
 
-from gatekeepers.pr import SETTINGS_FILE, pr_gate, server
+from gatekeepers.pr import SETTINGS_FILE
 from gatekeepers.pr.changes import ChangeInspector
 from gatekeepers.pr.clone import LocalClone
 from gatekeepers.pr.gate import QuizGate
 from gatekeepers.pr.generator import QuizGenerator
 from gatekeepers.pr.github import GitHub
+from gatekeepers.pr.pr_gate import PrGateCli
 from gatekeepers.pr.quiz import Quiz
+from gatekeepers.pr.server import GateApp, Poller
 from gatekeepers.pr.settings import GateSettings
 
 # Fixed settings, so the tests depend on neither settings.json nor the environment; each test
@@ -70,7 +72,7 @@ class QuizTests(unittest.TestCase):
         self.qid = self.row["id"]
         self.content = Quiz.model_validate_json(self.gate.store.get(self.qid)["content"])
         self.answers = [q.correct for q in self.content.questions]
-        self.app = server.create_app(self.gate)
+        self.app = GateApp(self.gate).app
         self.client = TestClient(self.app)
         self.client.post("/login", data={"user": "user", "password": "pass"})
 
@@ -305,7 +307,7 @@ class QuizTests(unittest.TestCase):
         self.assertEqual(len(self.gate.history(pr=999)), 0)
         self.assertIn("Show all pull requests", self.client.get("/history?pr=1").text)
         self.assertEqual(self.client.get("/history", follow_redirects=False).status_code, 200)
-        text = pr_gate.history(self.gate, pr=1)  # The agents' pr_gate tool, action history
+        text = PrGateCli(self.gate).history(pr=1)  # The agents' pr_gate tool, action history
         self.assertIn("PR #1 Compute pi", text)
         self.assertIn("(2 attempt(s), best 3/3)", text)
         self.assertTrue(text.endswith(f"{SETTINGS.base_url}/history?pr=1"))
@@ -438,7 +440,7 @@ class PollerTests(unittest.TestCase):
         self.gate.store.init()
 
     def test_new_revision_gets_a_quiz_once_and_other_authors_are_skipped(self):
-        poller = server.Poller(self.gate)
+        poller = Poller(self.gate)
         with patch.object(self.gate.generator, "generate", return_value=(Quiz.model_validate(FIXTURE), "test")) as generate:
             self.assertEqual(poller.poll_once(), [1])
             self.assertEqual(poller.poll_once(), [])
@@ -446,11 +448,11 @@ class PollerTests(unittest.TestCase):
         self.assertEqual(len(self.gate.store.quizzes()), 1)
 
     def test_failing_revision_is_retried_then_marked_error(self):
-        poller = server.Poller(self.gate)
+        poller = Poller(self.gate)
         with patch.object(self.gate.generator, "generate", side_effect=ValueError("bad reply")) as generate:
-            for _ in range(server.MAX_FAILURES + 2):
+            for _ in range(Poller.MAX_FAILURES + 2):
                 self.assertEqual(poller.poll_once(), [])
-        self.assertEqual(generate.call_count, server.MAX_FAILURES)
+        self.assertEqual(generate.call_count, Poller.MAX_FAILURES)
         self.assertEqual(self.mock_gh.call_args.kwargs["payload"]["state"], "error")
 
 
@@ -532,19 +534,19 @@ class ServiceControlTests(unittest.TestCase):
             calls.append(command)
             return subprocess.CompletedProcess(command, 0, "", "")
 
-        with patch.object(pr_gate.subprocess, "run", side_effect=fake_run), \
+        with patch("gatekeepers.pr.pr_gate.subprocess.run", side_effect=fake_run), \
                 patch.dict(os.environ, {"AGENT_NAME": "Test Agent"}):
-            text = pr_gate.control(QuizGate(SETTINGS), "stop")
+            text = PrGateCli(QuizGate(SETTINGS)).control("stop")
         self.assertIn("Stopped the pr-gate service (asked by Test Agent)", text)
         self.assertEqual(calls, [["systemctl", "--user", "cat", "pr-gate"], ["systemctl", "--user", "stop", "pr-gate"]])
         with self.assertRaisesRegex(ValueError, "Unknown action"):
-            pr_gate.control(QuizGate(SETTINGS), "disable")
+            PrGateCli(QuizGate(SETTINGS)).control("disable")
 
     def test_a_missing_unit_is_reported(self):
         missing = subprocess.CompletedProcess([], 1, "", "No files found")
-        with patch.object(pr_gate.subprocess, "run", return_value=missing), \
+        with patch("gatekeepers.pr.pr_gate.subprocess.run", return_value=missing), \
                 self.assertRaisesRegex(ValueError, "install.sh --gate install"):
-            pr_gate.control(QuizGate(SETTINGS), "start")
+            PrGateCli(QuizGate(SETTINGS)).control("start")
 
 
 class CloneSyncTests(unittest.TestCase):
@@ -595,7 +597,7 @@ class CloneSyncTests(unittest.TestCase):
 
     def test_the_poller_syncs_on_its_own_schedule(self):
         settings = replace(SETTINGS, data_dir=Path(self.temp.name), local_clone=str(self.clone), sync_seconds=60)
-        poller = server.Poller(QuizGate(settings))
+        poller = Poller(QuizGate(settings))
         self.commit(self.other, "b.c", "Second")
         poller.sync_clone()
         self.assertTrue((self.clone / "b.c").exists())

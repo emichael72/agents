@@ -7,8 +7,9 @@ Description:
     creates a quiz for every new revision of an open PR, so pushing a commit is all it takes.
 
     The service provides:
-      - `/` lists the quizzes and what the poller is doing; `/q/<id>` shows and grades a quiz.
-      - `/health` for liveness checks (no authentication).
+      - `GateApp`, the web application: `/` lists the quizzes and what the poller is doing,
+        `/history` every assessment, `/q/<id>` shows and grades a quiz, and `/health` answers
+        liveness checks (no authentication).
       - `Poller`, which lists the open PRs every few seconds and calls `QuizGate.create` for
         each revision that has no quiz yet.
 
@@ -28,12 +29,12 @@ import threading
 import time
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
 from urllib.parse import quote
 
 # Third-party
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
@@ -44,9 +45,6 @@ from gatekeepers.pr.clone import LocalClone
 from gatekeepers.pr.gate import QuizGate
 from gatekeepers.pr.quiz import Quiz
 
-MAX_FAILURES = 3  # Generation attempts per revision before the poller gives up on it
-SESSION_COOKIE = "pr_gate_session"
-
 logger = logging.getLogger("pr_gate")
 
 
@@ -56,6 +54,8 @@ class Poller:
     A revision whose quiz cannot be generated is retried on the next polls, up to
     MAX_FAILURES times; pushing a new commit starts over.
     """
+
+    MAX_FAILURES = 3  # Generation attempts per revision before the poller gives up on it
 
     def __init__(self, gate: QuizGate, interval: float = 30, profile: Optional[str] = None) -> None:
         """
@@ -127,7 +127,7 @@ class Poller:
                 continue
             number, head, base = pr["number"], pr["head"]["sha"], pr["base"]["sha"]
             key = (number, head, base)
-            if self.gate.find_quiz(*key) or self._failures.get(key, 0) >= MAX_FAILURES:
+            if self.gate.find_quiz(*key) or self._failures.get(key, 0) >= self.MAX_FAILURES:
                 continue
             logger.info("PR #%s at %s has no quiz; generating one", number, head[:7])
             self.working = number
@@ -152,74 +152,111 @@ class Poller:
         """
         self._failures[key] = self._failures.get(key, 0) + 1
         logger.warning("PR #%s: quiz generation failed (%s/%s): %s",
-                       key[0], self._failures[key], MAX_FAILURES, exc)
-        if self._failures[key] >= MAX_FAILURES:
+                       key[0], self._failures[key], self.MAX_FAILURES, exc)
+        if self._failures[key] >= self.MAX_FAILURES:
             try:
-                self.gate.github.publish_status(key[1], "error", "Quiz generation failed; push again or create it by hand",
+                self.gate.github.publish_status(key[1], "error",
+                                                "Quiz generation failed; push again or create it by hand",
                                                 self.gate.settings.base_url + "/")
             except RuntimeError as status_exc:
                 logger.warning("PR #%s: could not post the error status: %s", key[0], status_exc)
 
 
-def local_time(stamp: Optional[str]) -> str:
+class GateApp:
     """
-    Show a database time (UTC, "YYYY-MM-DD HH:MM:SS") in the server's local time zone.
-    Args:
-        stamp: The stored time, or None.
-    Returns:
-        str: e.g. "2026-10-07 00:14 IDT", or "" for None.
+    The web application: the demo sign-in, the assessments, the history and the quiz pages. The
+    FastAPI application is `app`; the gate's settings are read per request.
     """
-    if not stamp:
-        return ""
-    moment = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).astimezone()
-    return moment.strftime("%Y-%m-%d %H:%M %Z")
 
+    SESSION_COOKIE = "pr_gate_session"
 
-def create_app(gate: QuizGate, poller: Optional[Poller] = None) -> FastAPI:
-    """
-    Build the web application.
-    Args:
-        gate: The gate whose quizzes it serves.
-        poller: Started and stopped with the application; None serves quizzes without polling.
-    Returns:
-        FastAPI: The application.
-    """
-    secret = gate.store.init()
-    templates = Jinja2Templates(directory=TEMPLATES_DIR)
-    submission_lock = threading.Lock()
+    def __init__(self, gate: QuizGate, poller: Optional[Poller] = None) -> None:
+        """
+        Build the application.
+        Args:
+            gate: The gate whose quizzes it serves.
+            poller: Started and stopped with the application; None serves quizzes without polling.
+        """
+        self.gate = gate
+        self.poller = poller
+        self.secret = gate.store.init()
+        self.templates = Jinja2Templates(directory=TEMPLATES_DIR)
+        self.submission_lock = threading.Lock()  # One submission or skip at a time
+        self.app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=self.lifespan)
+        self.app.middleware("http")(self.headers)
+        self.app.get("/health")(self.health)
+        self.app.get("/login", response_class=HTMLResponse)(self.login_page)
+        self.app.post("/login", response_class=HTMLResponse)(self.login)
+        self.app.get("/", response_class=HTMLResponse)(self.home)
+        self.app.get("/history", response_class=HTMLResponse)(self.history_page)
+        self.app.get("/q/{qid}", response_class=HTMLResponse)(self.quiz_page)
+        self.app.post("/q/{qid}", response_class=HTMLResponse)(self.grade)
+        self.app.post("/q/{qid}/skip", response_class=HTMLResponse)(self.skip)
 
     @asynccontextmanager
-    async def lifespan(_app: FastAPI):
-        if poller:
-            poller.start()
+    async def lifespan(self, _app: FastAPI) -> AsyncIterator[None]:
+        """Run the poller while the application runs."""
+        if self.poller:
+            self.poller.start()
         yield
-        if poller:
-            poller.stop()
+        if self.poller:
+            self.poller.stop()
 
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+    @staticmethod
+    def local_time(stamp: Optional[str]) -> str:
+        """
+        Show a database time (UTC, "YYYY-MM-DD HH:MM:SS") in the server's local time zone.
+        Args:
+            stamp: The stored time, or None.
+        Returns:
+            str: e.g. "2026-10-07 00:14 IDT", or "" for None.
+        """
+        if not stamp:
+            return ""
+        moment = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).astimezone()
+        return moment.strftime("%Y-%m-%d %H:%M %Z")
 
-    def sign(value: str) -> str:
-        return hmac.new(secret.encode(), value.encode(), hashlib.sha256).hexdigest()
+    def sign(self, value: str) -> str:
+        """Sign a value with the secret key: the session cookie and the form tokens."""
+        return hmac.new(self.secret.encode(), value.encode(), hashlib.sha256).hexdigest()
 
-    def authenticate(request: Request) -> str:
-        # Not signed in: send the browser to the sign-in page, then back here
-        if not secrets.compare_digest(request.cookies.get(SESSION_COOKIE, ""), sign("session:" + gate.settings.web_user)):
+    def authenticate(self, request: Request) -> str:
+        """
+        Check the sign-in cookie.
+        Args:
+            request: The request.
+        Returns:
+            str: The signed-in user.
+        Raises:
+            HTTPException: 303 to the sign-in page, then back here, when not signed in.
+        """
+        user = self.gate.settings.web_user
+        if not secrets.compare_digest(request.cookies.get(self.SESSION_COOKIE, ""), self.sign("session:" + user)):
             raise HTTPException(303, headers={"Location": "/login?next=" + quote(request.url.path)})
-        return gate.settings.web_user
+        return user
 
-    def csrf(qid: str) -> str:
-        return sign(qid)
+    def csrf(self, qid: str) -> str:
+        """The form token of one quiz."""
+        return self.sign(qid)
 
-    def locked_submit(qid: str, answers: list[int]) -> dict[str, Any]:
-        with submission_lock:
-            return gate.submit(qid, answers)
+    def locked_submit(self, qid: str, answers: list[int]) -> dict[str, Any]:
+        """Grade an attempt (QuizGate.submit), one at a time."""
+        with self.submission_lock:
+            return self.gate.submit(qid, answers)
 
-    def locked_skip(qid: str) -> dict[str, Any]:
-        with submission_lock:
-            return gate.skip(qid)
+    def locked_skip(self, qid: str) -> dict[str, Any]:
+        """Skip a quiz (QuizGate.skip), one at a time."""
+        with self.submission_lock:
+            return self.gate.skip(qid)
 
-    @app.middleware("http")
+    def login_context(self, target: str, failed: bool) -> dict[str, Any]:
+        """The sign-in page's values: where to go next, and the demo credentials it shows."""
+        settings = self.gate.settings
+        return {"next": target, "user": settings.web_user, "password": settings.web_password, "failed": failed}
+
+    @staticmethod
     async def headers(request: Request, call_next):
+        """Add the security headers to every response."""
         response = await call_next(request)
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -229,92 +266,99 @@ def create_app(gate: QuizGate, poller: Optional[Poller] = None) -> FastAPI:
             "frame-ancestors 'none'; base-uri 'none'")
         return response
 
-    @app.get("/health")
+    @staticmethod
     def health():
+        """GET /health: liveness, without authentication."""
         return {"status": "ok"}
 
-    @app.get("/login", response_class=HTMLResponse)
-    def login_page(request: Request, target: str = Query("/", alias="next")):
-        return templates.TemplateResponse(request=request, name="login.html", context={
-            "next": target, "user": gate.settings.web_user, "password": gate.settings.web_password, "failed": False})
+    def login_page(self, request: Request, target: str = Query("/", alias="next")):
+        """GET /login: the sign-in form."""
+        return self.templates.TemplateResponse(request=request, name="login.html",
+                                               context=self.login_context(target, False))
 
-    @app.post("/login", response_class=HTMLResponse)
-    async def login(request: Request):
+    async def login(self, request: Request):
+        """POST /login: check the credentials and set the session cookie."""
+        settings = self.gate.settings
         form = await request.form(max_fields=5)
         target = str(form.get("next", "/"))
         if not target.startswith("/") or target.startswith("//"):
             target = "/"  # Only redirect within this site
-        valid_user = secrets.compare_digest(str(form.get("user", "")).encode(), gate.settings.web_user.encode())
-        valid_password = secrets.compare_digest(str(form.get("password", "")).encode(), gate.settings.web_password.encode())
+        valid_user = secrets.compare_digest(str(form.get("user", "")).encode(), settings.web_user.encode())
+        valid_password = secrets.compare_digest(str(form.get("password", "")).encode(), settings.web_password.encode())
         if not (valid_user and valid_password):
-            return templates.TemplateResponse(request=request, name="login.html", status_code=401, context={
-                "next": target, "user": gate.settings.web_user, "password": gate.settings.web_password, "failed": True})
+            return self.templates.TemplateResponse(request=request, name="login.html", status_code=401,
+                                                   context=self.login_context(target, True))
         response = RedirectResponse(target, status_code=303)
-        response.set_cookie(SESSION_COOKIE, sign("session:" + gate.settings.web_user), httponly=True, samesite="lax")
+        response.set_cookie(self.SESSION_COOKIE, self.sign("session:" + settings.web_user), httponly=True,
+                            samesite="lax")
         return response
 
-    @app.get("/", response_class=HTMLResponse)
-    def home(request: Request, user: str = Depends(authenticate)):
-        return templates.TemplateResponse(request=request, name="home.html", context={
-            "rows": gate.store.quizzes(), "repo": gate.settings.repo, "user": user, "poller": poller})
+    def home(self, request: Request):
+        """GET /: the assessments and what the poller is doing."""
+        user = self.authenticate(request)
+        return self.templates.TemplateResponse(request=request, name="home.html", context={
+            "rows": self.gate.store.quizzes(), "repo": self.gate.settings.repo, "user": user, "poller": self.poller})
 
-    @app.get("/history", response_class=HTMLResponse)
-    def history_page(request: Request, pr: Optional[int] = None, _user: str = Depends(authenticate)):
-        return templates.TemplateResponse(request=request, name="history.html", context={
-            "rows": gate.history(pr), "repo": gate.settings.repo, "pr": pr, "local_time": local_time,
-            "not_found": gate.NOT_FOUND})
+    def history_page(self, request: Request, pr: Optional[int] = None):
+        """GET /history: every assessment, or one pull request's."""
+        self.authenticate(request)
+        return self.templates.TemplateResponse(request=request, name="history.html", context={
+            "rows": self.gate.history(pr), "repo": self.gate.settings.repo, "pr": pr, "local_time": self.local_time,
+            "not_found": self.gate.NOT_FOUND})
 
-    @app.get("/q/{qid}", response_class=HTMLResponse)
-    def quiz_page(qid: str, request: Request, _user: str = Depends(authenticate)):
+    def quiz_page(self, qid: str, request: Request):
+        """GET /q/<id>: a revision's assessment, and its quiz when it takes one."""
+        self.authenticate(request)
         try:
-            row = gate.store.get(qid)
+            row = self.gate.store.get(qid)
         except KeyError:
             raise HTTPException(404, "Quiz not found") from None
         content = Quiz.model_validate_json(row["content"])
         # Only public fields enter the rendered form
         questions = [{"question": q.question, "options": q.options} for q in content.questions]
-        state, description = gate.gate_state(row)
-        return templates.TemplateResponse(request=request, name="quiz.html", context={
-            "row": row, "title": content.title, "questions": questions, "csrf": csrf(qid),
-            "repo": gate.settings.repo, "state": state, "description": description, "allow_skip": gate.settings.allow_skip})
+        state, description = self.gate.gate_state(row)
+        return self.templates.TemplateResponse(request=request, name="quiz.html", context={
+            "row": row, "title": content.title, "questions": questions, "csrf": self.csrf(qid),
+            "repo": self.gate.settings.repo, "state": state, "description": description,
+            "allow_skip": self.gate.settings.allow_skip})
 
-    @app.post("/q/{qid}", response_class=HTMLResponse)
-    async def grade(qid: str, request: Request, _user: str = Depends(authenticate)):
+    async def grade(self, qid: str, request: Request):
+        """POST /q/<id>: grade the answers and post the result."""
+        self.authenticate(request)
         form = await request.form(max_fields=10)
-        if not secrets.compare_digest(str(form.get("csrf", "")), csrf(qid)):
+        if not secrets.compare_digest(str(form.get("csrf", "")), self.csrf(qid)):
             raise HTTPException(403, "Invalid form token. Reload the quiz.")
         try:
-            row = gate.store.get(qid)
+            row = self.gate.store.get(qid)
             count = len(Quiz.model_validate_json(row["content"]).questions)
             try:
                 answers = [int(str(form[f"q{i}"])) for i in range(count)]
             except (KeyError, ValueError):
                 raise ValueError("Please answer every question.") from None
-            result = await run_in_threadpool(locked_submit, qid, answers)
+            result = await run_in_threadpool(self.locked_submit, qid, answers)
         except KeyError:
             raise HTTPException(404, "Quiz not found") from None
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
         except (RuntimeError, TimeoutError):
             raise HTTPException(502, "GitHub could not confirm the result. Retry this submission.") from None
-        return templates.TemplateResponse(request=request, name="result.html",
-                                          context={"result": result, "row": row, "repo": gate.settings.repo})
+        return self.templates.TemplateResponse(request=request, name="result.html",
+                                               context={"result": result, "row": row, "repo": self.gate.settings.repo})
 
-    @app.post("/q/{qid}/skip", response_class=HTMLResponse)
-    async def skip(qid: str, request: Request, _user: str = Depends(authenticate)):
+    async def skip(self, qid: str, request: Request):
+        """POST /q/<id>/skip: skip the quiz (proof-of-concept mode) and post the result."""
+        self.authenticate(request)
         form = await request.form(max_fields=10)
-        if not secrets.compare_digest(str(form.get("csrf", "")), csrf(qid)):
+        if not secrets.compare_digest(str(form.get("csrf", "")), self.csrf(qid)):
             raise HTTPException(403, "Invalid form token. Reload the quiz.")
         try:
-            row = gate.store.get(qid)
-            result = await run_in_threadpool(locked_skip, qid)
+            row = self.gate.store.get(qid)
+            result = await run_in_threadpool(self.locked_skip, qid)
         except KeyError:
             raise HTTPException(404, "Quiz not found") from None
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
         except (RuntimeError, TimeoutError):
             raise HTTPException(502, "GitHub could not confirm the result. Retry.") from None
-        return templates.TemplateResponse(request=request, name="result.html",
-                                          context={"result": result, "row": row, "repo": gate.settings.repo})
-
-    return app
+        return self.templates.TemplateResponse(request=request, name="result.html",
+                                               context={"result": result, "row": row, "repo": self.gate.settings.repo})
