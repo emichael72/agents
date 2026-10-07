@@ -14,7 +14,7 @@ import { isStepCount, ToolLoopAgent, type LanguageModel, type ModelMessage, type
 import ora, { type Ora } from 'ora';
 import { localTools, oneAtATime } from './tools.ts';
 
-const MCP_URL = 'http://127.0.0.1:6275/'; // MCPAgent's server (python -m mcpagent.server)
+const MCP_URL = 'http://127.0.0.1:6275/'; // MCPAgent's server (python mcp/server.py)
 
 // Instructions (system prompt) and model profiles, shared by all three agents
 const CONTEXT_DIR = path.join(import.meta.dirname, '..', 'context');

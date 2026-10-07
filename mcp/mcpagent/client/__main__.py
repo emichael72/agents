@@ -92,12 +92,12 @@ class ExceptionGuru:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     """
-    Build the argument parser for the agent (python -m mcpagent.client).
+    Build the argument parser for the agent (python mcp/client.py).
     Returns:
         argparse.ArgumentParser: The parser.
     """
     parser = argparse.ArgumentParser(
-        prog="python -m mcpagent.client",
+        prog="python mcp/client.py",
         description="Chat with a model that can call the MCP servers' tools.")
     parser.add_argument("--config", type=Path,
                         help="Client config file: MCP servers, model profiles and instructions "

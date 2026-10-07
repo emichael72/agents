@@ -129,12 +129,12 @@ def start_mcp_server(config_path: Optional[Union[str, Path]] = None) -> int:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     """
-    Build the argument parser for the server (python -m mcpagent.server).
+    Build the argument parser for the server (python mcp/server.py).
     Returns:
         argparse.ArgumentParser: The parser.
     """
     parser = argparse.ArgumentParser(
-        prog="python -m mcpagent.server",
+        prog="python mcp/server.py",
         description="Run the MCP server over the tools that its config names.")
     parser.add_argument("config", nargs="?", type=Path, metavar="SERVER_JSONC",
                         help="Server config file (default: mcp/mcpagent/jsons/server.jsonc).")

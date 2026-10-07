@@ -49,7 +49,7 @@ and failures as `✗ tool: error` instead.
 
 ## How it maps to the other two
 
-| Concern | mcpagent | pydantic | vercel |
+| Concern | mcp | pydantic | vercel |
 | --- | --- | --- | --- |
 | Agent loop | `MCPAgent.ask()`, hand-written | `Agent.run_stream_events()` | `ToolLoopAgent.stream()` |
 | Instructions | `../context/instructions.json`, named by `instructions_file` in `client.jsonc` | `../context/instructions.json` → `load_instructions()` | `../context/instructions.json` → `loadInstructions()` |
