@@ -72,7 +72,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.key_patch.stop)
         old = Path.cwd()
         try:
-            os.chdir(REPO_ROOT)  # As start_mcp_server does: config paths are repository-relative
+            os.chdir(REPO_ROOT)  # As MCPService.serve does: config paths are repository-relative
             self.service = MCPService(MCPAgentConfig.load().server)
         finally:
             os.chdir(old)

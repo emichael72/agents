@@ -18,7 +18,6 @@ from unittest.mock import patch
 from aiohttp.test_utils import TestClient, TestServer
 from mcpagent import MCPClient, MCPService
 from mcpagent.config import DEFAULT_CONFIG, JSONS_DIR, REPO_ROOT, SCHEMA_DIR, SCHEMA_FILE, MCPAgentConfig
-from mcpagent.server.__main__ import start_mcp_server
 
 
 class ServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -27,7 +26,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         """Start the server from jsons/mcpagent.json's server section and open a client to it."""
         old = Path.cwd()
         try:
-            os.chdir(REPO_ROOT)  # As start_mcp_server does: config paths are repository-relative
+            os.chdir(REPO_ROOT)  # As MCPService.serve does: config paths are repository-relative
             self.service = MCPService(MCPAgentConfig.load().server)
         finally:
             os.chdir(old)
@@ -481,7 +480,7 @@ class ConfigLoadingTests(unittest.TestCase):
         self.assertEqual(MCPClient(client_only).config_data['servers'], [])
         old_cwd = Path.cwd()
         with self.assertRaisesRegex(RuntimeError, 'no "server" section'):
-            start_mcp_server(client_only)
+            MCPService.serve(client_only)
         self.assertEqual(Path.cwd(), old_cwd)
         server_only = self.write({'server': {'mcp_server_port': 6275}}, 'server_only.json')
         with self.assertRaisesRegex(RuntimeError, 'no "client" section'):
@@ -489,17 +488,19 @@ class ConfigLoadingTests(unittest.TestCase):
 
     def test_server_validates_before_starting_and_restores_cwd(self):
         old_cwd = Path.cwd()
-        with patch('mcpagent.server.__main__.MCPService') as service_class:
-            service_class.return_value.start.return_value = 0
-            config_file = self.write({'server': {'mcp_server_port': 6275}})
-            self.assertEqual(start_mcp_server(config_file), 0)
-            service_class.assert_called_once_with(project_data={'mcp_server_port': 6275})
+        with patch.object(MCPService, 'start', autospec=True, return_value=0) as start:
+            config_file = self.write({'server': {'mcp_server_port': 6275, 'tools_dir': 'tools'}})
+            self.assertEqual(MCPService.serve(config_file), 0)
+            start.assert_called_once()
+            service = start.call_args.args[0]  # The service built from the server section
+            self.assertEqual(service._mcp_server_port, 6275)
+            self.assertIn('time', service._tools_data)  # tools_dir read from the repository root
             self.assertEqual(Path.cwd(), old_cwd)
-            service_class.reset_mock()
+            start.reset_mock()
             config_file = self.write({'server': {'mcp_server_port': 'invalid'}})
             with self.assertRaisesRegex(RuntimeError, 'Schema validation failed'):
-                start_mcp_server(config_file)
-            service_class.assert_not_called()
+                MCPService.serve(config_file)
+            start.assert_not_called()
             self.assertEqual(Path.cwd(), old_cwd)
 
 if __name__ == '__main__':

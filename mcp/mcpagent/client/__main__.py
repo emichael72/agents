@@ -2,8 +2,8 @@
 Module: __main__.py (client)
 
 Description:
-    Command-line entry point of the MCP Agent: `python -m mcpagent.client`, run from the
-    mcp project directory.
+    Command-line entry point of the MCP Agent: `python -m mcpagent.client` from any folder (the
+    package is installed in the .venv), or `python mcp/client.py`.
 
     Starts the agent (`AgentSession`): a model that uses the tools of the MCP servers in the
     "client" section of the MCPAgent config (default: jsons/mcpagent.json in this package),
@@ -14,7 +14,6 @@ Description:
 
 import argparse
 import asyncio
-import sys
 from pathlib import Path
 from typing import Optional
 
@@ -96,4 +95,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

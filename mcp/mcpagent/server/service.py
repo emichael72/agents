@@ -28,7 +28,7 @@ import shlex
 import signal
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, Union
 from urllib.parse import urlparse, unquote
 
 # Third-party
@@ -37,6 +37,7 @@ from jsonschema import validate, ValidationError
 from colorama import Fore, Style
 
 # Local imports
+from mcpagent.config import DEFAULT_CONFIG, REPO_ROOT, MCPAgentConfig
 from mcpagent.common.logger import MCPAgentLogger
 from .types import MCPServiceConfigType, MCPServiceToolType
 
@@ -873,6 +874,29 @@ class MCPService:
                   f"{base}/message | jq")
 
         print(f"\n{gray}Running... Press Ctrl+C to stop.{reset}\n")
+
+    @classmethod
+    def serve(cls, config_path: Optional[Union[str, Path]] = None) -> int:
+        """
+        Run the server from an MCPAgent config: its "server" section, with the config's paths
+        (tools_dir) relative to the repository root.
+        Args:
+            config_path: The config file; None uses DEFAULT_CONFIG. Environment variables and ~ are
+                expanded.
+        Returns:
+            int: The service's exit status (0 for success, nonzero for failure).
+        Raises:
+            RuntimeError: If the config is missing or invalid, or has no "server" section.
+        """
+        path = Path(os.path.expanduser(os.path.expandvars(str(config_path or DEFAULT_CONFIG)))).resolve()
+        if not path.is_file():
+            raise RuntimeError(f"Project file not found: {path}")
+        old_cwd = Path.cwd()
+        try:
+            os.chdir(REPO_ROOT)  # The service reads tools_dir relative to its working directory
+            return cls(project_data=MCPAgentConfig.load(path).server).start()
+        finally:
+            os.chdir(old_cwd)
 
     def start(self) -> int:
         """
