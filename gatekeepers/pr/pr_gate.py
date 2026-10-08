@@ -6,8 +6,9 @@ Description:
     (python -m gatekeepers.pr.pr_gate, through pr_gate.sh).
 
     Commands:
-      - status [--pr N] [--action status|history|start|stop|restart]: The open PRs and their quiz
-        state, with links (the agents' tool); past assessments; or control the service first.
+      - status [--pr N] [--action status|history|start]: The open PRs and their quiz state, with
+        links (the agents' tool); past assessments; or start the service first. The agents cannot
+        stop or restart the gate: that is the user's, with ./install.sh --gate stop|restart.
       - create PR [--profile NAME] [--fixed FILE]: Create (or re-post) the quiz for a PR now.
       - list: Every stored quiz, as JSON.
       - serve [--host --port --poll --profile]: Run the web service and the GitHub poller.
@@ -34,7 +35,7 @@ class PrGateCli:
     """
 
     UNIT = "pr-gate"  # The gate's systemd user unit; the only service the agents may control
-    SERVICE_ACTIONS = ("start", "stop", "restart")
+    SERVICE_ACTIONS = ("start",)  # Never stop or restart: the agents must not turn off their own gate
 
     def __init__(self, gate: QuizGate) -> None:
         """
@@ -54,11 +55,10 @@ class PrGateCli:
 
     def control(self, action: str, port: int = 8000) -> str:
         """
-        Start, stop or restart the gate's own systemd user unit (UNIT), and nothing else. Stopping it
-        cannot let a change through: the repository's branch protection still requires the gate's
-        check, so pull requests simply wait until it runs again.
+        Start the gate's own systemd user unit (UNIT), and nothing else. The agents may bring the gate
+        up, never take it down: stopping and restarting are left to ./install.sh --gate.
         Args:
-            action: "start", "stop" or "restart".
+            action: "start".
             port: The service port, to wait until it answers after a start.
         Returns:
             str: What was done, and the resulting service state.
@@ -67,7 +67,8 @@ class PrGateCli:
         """
         unit = self.UNIT
         if action not in self.SERVICE_ACTIONS:
-            raise ValueError(f"Unknown action '{action}'; use status, {', '.join(self.SERVICE_ACTIONS)}.")
+            raise ValueError(f"Unknown action '{action}'; use status, history or start. Only the user stops "
+                             "or restarts the gate (./install.sh --gate stop|restart).")
         if subprocess.run(["systemctl", "--user", "cat", unit], capture_output=True).returncode != 0:
             raise ValueError(f"The {unit} service is not installed; run ./install.sh --gate install.")
         result = subprocess.run(["systemctl", "--user", action, unit], capture_output=True, text=True, timeout=30)
@@ -75,14 +76,12 @@ class PrGateCli:
             raise ValueError(f"systemctl {action} {unit} failed: {(result.stderr or result.stdout).strip()[:300]}")
         who = os.environ.get("AGENT_NAME", "the command line")
         logging.getLogger("pr_gate").info("%s %s by %s", unit, action, who)
-        if action == "stop":
-            return f"Stopped the {unit} service (asked by {who}). Pull requests wait for its check until it runs again."
         for _ in range(20):  # Wait until it answers, up to 10 s
             if self.running(port):
-                return (f"{action.capitalize()}ed the {unit} service (asked by {who}); "
+                return (f"Started the {unit} service (asked by {who}); "
                         f"it is running at {self.gate.settings.base_url}.")
             time.sleep(0.5)
-        return f"{action.capitalize()}ed the {unit} service, but it does not answer yet; see ./install.sh --gate logs."
+        return f"Started the {unit} service, but it does not answer yet; see ./install.sh --gate logs."
 
     def history(self, pr: Optional[int] = None, limit: int = 30) -> str:
         """
@@ -208,8 +207,6 @@ class PrGateCli:
                 return 0
             if args.action != "status":
                 print(self.control(args.action, args.port))
-                if args.action == "stop":
-                    return 0
             print(self.status(args.pr, args.port))
         elif args.command == "create":
             print(self.create(args.pr, args.profile, args.fixed))
@@ -236,8 +233,8 @@ class PrGateCli:
         status_cmd.add_argument("--pr", type=int, help="Only this PR")
         status_cmd.add_argument("--port", type=int, default=8000, help="Local service port (default 8000)")
         status_cmd.add_argument("--action", default="status", choices=("status", "history", *cls.SERVICE_ACTIONS),
-                                help="status (default), history of past assessments, or start, stop or restart "
-                                     "the pr-gate service first")
+                                help="status (default), history of past assessments, or start the pr-gate "
+                                     "service first")
 
         create_cmd = sub.add_parser("create", help="Create (or re-post) the quiz for a PR's current revision")
         create_cmd.add_argument("pr", type=int)

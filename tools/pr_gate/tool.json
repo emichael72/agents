@@ -5,14 +5,14 @@
     "(build, tests, documentation, or a quiz waiting, with its link) or may merge.",
     "With action history it lists past assessments (quizzes)",
     "with their pull request, time, outcome and attempts.",
-    "With action start, stop or restart it controls the gate's own service (pr-gate) and nothing else;",
-    "stopping it never lets a change merge."
+    "With action start it starts the gate's own service (pr-gate) when it is not running.",
+    "Only the user can stop or restart the gate."
   ],
   "command": "bash",
   "args": ["../gatekeepers/pr/pr_gate.sh", "status"],
   "timeout": 60,
   "params": [
-    {"name": "action", "type": "string", "description": "status (default): open pull requests; history: past assessments; start, stop or restart the gate's service", "style": "flag", "required": false},
+    {"name": "action", "type": "string", "description": "status (default): open pull requests; history: past assessments; start: start the gate's service if it is not running", "style": "flag", "required": false},
     {"name": "pr", "type": "integer", "description": "Only this pull request number (for status or history); omit it for all", "style": "flag", "required": false}
   ],
   "resource": "pr_gate/README.md"

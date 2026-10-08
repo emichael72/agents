@@ -525,9 +525,9 @@ class ChangesTests(unittest.TestCase):
 
 
 class ServiceControlTests(unittest.TestCase):
-    """The agents may start, stop or restart the gate's own service, and nothing else."""
+    """The agents may start the gate's own service, and nothing else: never stop or restart it."""
 
-    def test_only_the_gate_unit_is_controlled(self):
+    def test_only_the_gate_unit_is_started(self):
         calls = []
 
         def fake_run(command, **kwargs):
@@ -535,12 +535,20 @@ class ServiceControlTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, "", "")
 
         with patch("gatekeepers.pr.pr_gate.subprocess.run", side_effect=fake_run), \
+                patch.object(PrGateCli, "running", return_value=True), \
                 patch.dict(os.environ, {"AGENT_NAME": "Test Agent"}):
-            text = PrGateCli(QuizGate(SETTINGS)).control("stop")
-        self.assertIn("Stopped the pr-gate service (asked by Test Agent)", text)
-        self.assertEqual(calls, [["systemctl", "--user", "cat", "pr-gate"], ["systemctl", "--user", "stop", "pr-gate"]])
-        with self.assertRaisesRegex(ValueError, "Unknown action"):
-            PrGateCli(QuizGate(SETTINGS)).control("disable")
+            text = PrGateCli(QuizGate(SETTINGS)).control("start")
+        self.assertIn("Started the pr-gate service (asked by Test Agent)", text)
+        self.assertEqual(calls, [["systemctl", "--user", "cat", "pr-gate"], ["systemctl", "--user", "start", "pr-gate"]])
+
+    def test_the_agents_cannot_stop_or_restart_the_gate(self):
+        for action in ("stop", "restart", "disable"):
+            with patch("gatekeepers.pr.pr_gate.subprocess.run") as run, \
+                    self.assertRaisesRegex(ValueError, "Only the user stops or restarts the gate"):
+                PrGateCli(QuizGate(SETTINGS)).control(action)
+            run.assert_not_called()
+        with self.assertRaises(SystemExit), patch("sys.stderr"):
+            PrGateCli.build_parser(5).parse_args(["status", "--action", "stop"])
 
     def test_a_missing_unit_is_reported(self):
         missing = subprocess.CompletedProcess([], 1, "", "No files found")
