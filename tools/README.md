@@ -64,7 +64,7 @@ python3 tools/ed/ed.py --old=-Wall --new='-Wall -Wextra' -- core_dump/Makefile
 ~~~
 
 The model's arguments are checked against the manifest schema before execution. The Python scripts use a shared parser
-in `tools/common/cli.py`; `--help` shows each script's options.
+in [tools/common](common/README.md); `--help` shows each script's options.
 
 The PR gate also runs these tools: shell handles its builds/tests and doxy checks its documentation. The gate and pr
 tool share the same inspection code.

@@ -4,8 +4,9 @@ Module: cli.py
 Description:
     The command line every Python tool shares. The agents call a tool as
         python3 <tool>/<tool>.py --<name>=<value> ... [-- <positional> ...]
-    (tools/README.md, "Parameters"): each option and its value in one argument, so a value may start
-    with "-" or span lines, and the positional values after "--", so none is taken for an option.
+    (tools/README.md, "How arguments reach a script"): each option and its value in one argument,
+    so a value may start with "-" or span lines, and the positional values after "--", so none is
+    taken for an option.
 
     `ToolArgumentParser` reads that with argparse. A mistake on the command line raises ValueError,
     which the tool prints as "Error: <reason>" with exit status 1, like any other failure, rather
