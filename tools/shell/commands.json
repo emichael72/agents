@@ -3,6 +3,7 @@
     "Commands the shell tool may run, each with a short note for the model.",
     "A command that also exists as its own tool (tools/<name>/tool.json)",
     "is refused by the shell: the dedicated tool wins.",
+    "A command not installed on the machine is left out of help and refused.",
     "\"needs\": \"x\" means the command runs the folder's own code (make runs the Makefile),",
     "so it needs execute access where it runs.",
     "Every command runs in a sandbox that sees only the folders in context/paths.json,",

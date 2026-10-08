@@ -11,9 +11,9 @@ Description:
     whatever its arguments.
 
     The command line is checked before it runs:
-      - Every command (after |, ||, && or ;) must be in commands.json, or be a program inside a
-        folder with "x" access (./core_dump). A command that is also its own tool is refused: the
-        dedicated tool wins.
+      - Every command (after |, ||, && or ;) must be in commands.json and installed (help lists
+        only those), or be a program inside a folder with "x" access (./core_dump). A command that
+        is also its own tool is refused: the dedicated tool wins.
       - No redirection (< >), background (&), subshells or groups, $(...) or backticks, or
         line breaks. "2>&1" and "2>/dev/null" are dropped: errors already appear in the output.
       - Commands marked "needs": "x" (make, ninja) need execute access where they run; cd is
@@ -56,6 +56,8 @@ class Shell:
 
     VERSION = "1.0.0"
     COMMANDS_FILE = Path(__file__).resolve().parent / "commands.json"
+    PROGRAMS = "/usr/bin"  # Where the sandbox finds programs (its PATH; /bin links here)
+    BUILTINS = {"cd", "echo", "false", "printf", "pwd", "test", "true"}  # bash's own: always there
     CLANG_FORMAT = CONTEXT_DIR / "clang-format.yaml"  # The default C/C++ style, at /work/.clang-format
     CLANG_TIDY = CONTEXT_DIR / "clang-tidy.yaml"  # The default C/C++ checks, at /work/.clang-tidy
     WORK = PurePosixPath("/work")  # Where the allowed folders appear inside the sandbox
@@ -87,11 +89,14 @@ class Shell:
         Args:
             gate: The allowed folders; None reads context/paths.json.
             commands: The allowed commands; None reads commands.json, leaving out those that are
-                also their own tool.
+                also their own tool and those not installed on this machine.
         """
         self.gate = gate or FsGate.load()
+        self.missing: set[str] = set()  # Listed in commands.json, but not installed here
         if commands is None:
-            commands = {name: entry for name, entry in self.load_commands().items() if not self.own_tool(name)}
+            listed = {name: entry for name, entry in self.load_commands().items() if not self.own_tool(name)}
+            commands = {name: entry for name, entry in listed.items() if self.installed(name)}
+            self.missing = set(listed) - set(commands)
         self.commands = commands
 
     @classmethod
@@ -103,6 +108,17 @@ class Shell:
         """
         commands = json.loads(cls.COMMANDS_FILE.read_text(encoding="utf-8"))["commands"]
         return {name: entry if isinstance(entry, dict) else {"about": entry} for name, entry in commands.items()}
+
+    @classmethod
+    def installed(cls, command: str) -> bool:
+        """
+        Whether the sandbox can run a command: a bash builtin, or a program in PROGRAMS.
+        Args:
+            command: The command's name, e.g. ctags.
+        Returns:
+            bool: True when it is there.
+        """
+        return command in cls.BUILTINS or shutil.which(command, path=cls.PROGRAMS) is not None
 
     @staticmethod
     def own_tool(command: str) -> bool:
@@ -187,6 +203,8 @@ class Shell:
                 continue
             if self.own_tool(name):
                 raise ValueError(f"Use the {name} tool instead of '{name}' in the shell.")
+            if name in self.missing:
+                raise ValueError(f"'{name}' is not installed on this machine. Run the command help to see the list.")
             if name not in commands:
                 raise ValueError(f"'{name}' is not an allowed command. Run the command help to see the list.")
             if name == "git":
