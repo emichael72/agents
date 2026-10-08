@@ -10,6 +10,7 @@ Description:
 
 import copy
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -89,25 +90,18 @@ class MCPAgentConfig:
     @property
     def client(self) -> dict[str, Any]:
         """
-        The agent's settings: a copy of the "client" section, with each HTTP server entry that has
-        no "config" pointed at the "server" section's address and port.
+        The agent's settings: a copy of the "client" section, with each STDIO server entry that has
+        no "config" set to start this package's own server, with this config, as a child process.
         Raises:
-            RuntimeError: If the configuration has no "client" section, or an HTTP entry needs the
-                "server" section's port and there is none.
+            RuntimeError: If the configuration has no "client" section, or a STDIO entry without
+                "config" has no "server" section to start.
         """
         client = copy.deepcopy(self._section("client"))
         for entry in client.get("servers", []):
-            if entry.get("transport", "").upper() != "HTTP" or "config" in entry:
+            if entry.get("transport", "").upper() != "STDIO" or "config" in entry:
                 continue
-            server = self.server
-            host = server.get("mcp_server_bind_address") or "127.0.0.1"
-            host = "127.0.0.1" if host == "0.0.0.0" else host  # Reach a server bound to all interfaces locally
-            port = server.get("mcp_server_port")
-            if port is None:
-                raise RuntimeError(f'Configuration {self.path} has no "mcp_server_port" in its server section')
-            # noinspection HttpUrlsUsage
-            url = f"http://{host}:{port}/"
-            entry["config"] = {"url": url, "sse_url": url + "sse"}
+            self._section("server")  # The server it starts reads this section
+            entry["config"] = {"command": [sys.executable, "-m", "mcpagent.service", str(self.path.resolve())]}
         return client
 
     def _section(self, name: str) -> dict[str, Any]:

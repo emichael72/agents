@@ -19,9 +19,9 @@ from typing import Any, Callable, Optional
 import aiohttp
 from jsonschema import ValidationError, validate
 
-from mcpagent.client.client import MCPClient
-from mcpagent.client.guard import RepeatGuard
-from mcpagent.client.output import Output
+from mcpagent.client import MCPClient
+from mcpagent.guard import RepeatGuard
+from mcpagent.output import Output
 
 
 class Reply:
@@ -212,6 +212,21 @@ class MCPAgent:
         except (ValueError, aiohttp.ContentTypeError):
             return None
 
+    def _stream_error(self, event: dict[str, Any]) -> str:
+        """
+        What a streamed "error" event says, for the error message: a local server's own message, or
+        only OpenAI's error code (its messages can echo credentials).
+        Args:
+            event: The event: {"type": "error", "code", "message"}, or with them under "error".
+        Returns:
+            str: ": <code> <message>" (or less), or "" when the event says nothing usable.
+        """
+        detail = event.get("error") if isinstance(event.get("error"), dict) else event
+        code = str(detail.get("code") or "").strip()
+        message = str(detail.get("message") or "").strip() if self.local else ""
+        text = " ".join(part for part in (code, message[:300]) if part)
+        return f": {text}" if text else ""
+
     async def _request_response(self, payload: dict[str, Any],
                                 on_text: Optional[Callable[[str], None]] = None) -> Reply:
         """
@@ -243,7 +258,8 @@ class MCPAgent:
                     elif kind in {"response.completed", "response.incomplete", "response.failed"}:
                         return Reply(200, event["response"])
                     elif kind == "error":
-                        raise RuntimeError(f"{self.provider} stream failed. Earlier tool calls may have completed; no retry was made.")
+                        raise RuntimeError(f"{self.provider} stream failed{self._stream_error(event)}. Earlier tool "
+                                           f"calls may have completed; no retry was made.")
             raise RuntimeError(f"{self.provider} stream ended before completion. Earlier tool calls may have completed; no retry was made.")
 
     async def ask(self, prompt: str, on_text: Optional[Callable[[str], None]] = None) -> str:

@@ -15,11 +15,11 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import ANSI
 from rich.console import Console
 
-from mcpagent.client.agent import MCPAgent
-from mcpagent.client.client import MCPClient
-from mcpagent.client.context import AgentContext
-from mcpagent.client.output import Output
-from mcpagent.client.profiles import ModelProfiles
+from mcpagent.agent import MCPAgent
+from mcpagent.client import MCPClient
+from mcpagent.context import AgentContext
+from mcpagent.output import Output
+from mcpagent.profiles import ModelProfiles
 
 
 class AgentSession:
@@ -103,6 +103,9 @@ class AgentSession:
                          max_tool_calls=int(self.settings.get("max_tool_calls", 8)),
                          max_repeated_calls=int(self.settings.get("max_repeated_calls", 0)))
         self.agent = agent
+        # The server's log lines (server_output), among the other gray lines; only with -d
+        if self.trace and mcp_client.config_data.get("server_output"):
+            mcp_client.on_server_output(lambda line: self.output.line(f"server {line}"))
         await agent.connect()
         servers = len({server for server, _, _ in agent.routes.values()})
         tools = f"{len(agent.routes)} tools" + (f" from {servers} servers" if servers > 1 else "")

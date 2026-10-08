@@ -28,12 +28,12 @@ import contextlib
 import logging
 import time
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 # Local imports
 from mcpagent import __version__  # Sent to servers in the initialize handshake
-from mcpagent.client.connection import MCPClientConnection
-from mcpagent.client.types import (
+from mcpagent.connection import MCPClientConnection
+from mcpagent.types import (
     ConfigType,
     EventCallbackType,
     HTTPConfigType,
@@ -43,7 +43,7 @@ from mcpagent.client.types import (
     ResponseCallbackType,
     STDIOConfigType,
 )
-from mcpagent.common.logger import MCPAgentLogger
+from mcpagent.logger import MCPAgentLogger
 from mcpagent.config import MCPAgentConfig
 
 
@@ -258,6 +258,17 @@ class MCPClient:
             "recover_count": 0,
             "state": "unknown"  # "unknown" | "up" | "down"
         }
+
+    def on_server_output(self, callback: Optional[Callable[[str], None]]) -> None:
+        """
+        Pass each line the STDIO servers write to stderr (their log) to a callback.
+        Args:
+            callback: Called with each line; None drops them (the default).
+        """
+        for sid in self._servers:
+            conn = self._get_connection(server_id=sid)
+            if isinstance(conn, MCPClientConnection):
+                conn.on_stderr = callback
 
     async def connect(self,
                       server_id: Optional[str] = None,

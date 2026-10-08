@@ -10,18 +10,20 @@ Description:
 """
 
 import asyncio
+import collections
 import contextlib
 import inspect
 import json
 import logging
 import itertools
-from typing import Any, AsyncGenerator, Optional, Union
+import os
+from typing import Any, AsyncGenerator, Callable, Optional, Union
 
 # Third-party
 import aiohttp
 
 # Local imports
-from mcpagent.client.types import (
+from mcpagent.types import (
     ConfigType,
     EventCallbackType,
     HTTPConfigType,
@@ -32,7 +34,7 @@ from mcpagent.client.types import (
     ResponseCallbackType,
     STDIOConfigType,
 )
-from mcpagent.common.logger import MCPAgentLogger
+from mcpagent.logger import MCPAgentLogger
 
 
 class MCPClientConnection:
@@ -87,6 +89,10 @@ class MCPClientConnection:
         self._proc: Optional[asyncio.subprocess.Process] = None
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
+        self._stderr_task: Optional[asyncio.Task] = None
+        self._stderr_tail: collections.deque[str] = collections.deque(maxlen=10)  # For error messages
+        # Called with each line the STDIO server writes to stderr (its log); None drops them
+        self.on_stderr: Optional[Callable[[str], None]] = None
 
     async def connect(self) -> None:
         """
@@ -104,30 +110,43 @@ class MCPClientConnection:
             if not cmd:
                 raise ValueError("STDIO transport requires a 'command' in config")
 
-            # Spawn subprocess with pipes
+            # Spawn the server with pipes. Its own session: Ctrl+C reaches the agent, which stops
+            # the server itself (close). A large line limit: one response line may hold a whole file.
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env={**os.environ, **(self._config.env or {})},
+                start_new_session=True,
+                limit=2 ** 24,
             )
             self._proc = proc
             self._reader = proc.stdout
             self._writer = proc.stdin
 
-            # Start a background task to read stderr for logging
-            asyncio.create_task(self._log_stderr())
+            # Read stderr (the server's log) in the background, so the pipe never fills
+            self._stderr_task = asyncio.create_task(self._read_stderr())
 
-    async def _log_stderr(self) -> None:
+    async def _read_stderr(self) -> None:
         """
-        Continuously read the subprocess's stderr stream and print
-        lines for debugging/logging purposes.
-
-        Runs as a background task once a STDIO process is spawned.
+        Read the server's stderr until it closes: pass each line to `on_stderr` (if set), and keep
+        the last few for the error message if the server stops unexpectedly.
         """
         assert self._proc and self._proc.stderr
-        async for line in self._proc.stderr:
-            self._logger.error(f"{self._server_id} STDERR: {line.decode().rstrip()}")
+        async for raw in self._proc.stderr:
+            line = raw.decode(errors="replace").rstrip()
+            self._stderr_tail.append(line)
+            if self.on_stderr is not None:
+                with contextlib.suppress(Exception):
+                    self.on_stderr(line)
+
+    def _stopped_error(self) -> EOFError:
+        """The error for a STDIO server that stopped: its exit status and the last lines of its log."""
+        status = self._proc.returncode if self._proc else None
+        tail = "; ".join(self._stderr_tail)
+        return EOFError(f"The MCP server '{self._server_id}' stopped" + (f" (exit {status})" if status is not None else "")
+                        + (f": {tail}" if tail else ""))
 
     async def stdio_write(self, message: dict) -> None:
         """
@@ -343,7 +362,9 @@ class MCPClientConnection:
                         raise TimeoutError(f"Request {request_id} timed out after {timeout:.1f}s") from None
 
                     if not line:
-                        raise EOFError("STDIO server closed the connection")
+                        with contextlib.suppress(asyncio.TimeoutError):  # Let its exit status and log arrive
+                            await asyncio.wait_for(self._proc.wait() if self._proc else asyncio.sleep(0), 1)
+                        raise self._stopped_error()
 
                     data = json.loads(line.decode())
                     return data
@@ -426,9 +447,10 @@ class MCPClientConnection:
                 self._http_session = None
 
         elif self._transport == MCPTransportType.STDIO:
+            self.on_stderr = None  # Nothing more to show: the session is ending
             if self._writer:
                 try:
-                    self._writer.close()
+                    self._writer.close()  # The server's stdin closes: it exits by itself
                     await self._writer.wait_closed()
 
                 except (BrokenPipeError, ConnectionResetError, OSError):
@@ -437,12 +459,22 @@ class MCPClientConnection:
                 self._writer = None
 
             if self._proc:
-                self._proc.terminate()
                 try:
                     await asyncio.wait_for(self._proc.wait(), timeout=proc_grace_time)
-                except asyncio.TimeoutError:
-                    self._proc.kill()
-                    await self._proc.wait()
+                except asyncio.TimeoutError:  # Still busy (a tool running): stop it, then kill it
+                    with contextlib.suppress(ProcessLookupError):
+                        self._proc.terminate()
+                    try:
+                        await asyncio.wait_for(self._proc.wait(), timeout=proc_grace_time)
+                    except asyncio.TimeoutError:
+                        with contextlib.suppress(ProcessLookupError):
+                            self._proc.kill()
+                        await self._proc.wait()
+                self._proc = None
+            if self._stderr_task:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(self._stderr_task, timeout=1)
+                self._stderr_task = None
                 self._proc = None
             self._reader = None
 

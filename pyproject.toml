@@ -23,7 +23,7 @@ requires-python = ">=3.10"
 [tool.setuptools]
 package-dir = {mcpagent = "mcp/mcpagent", pydantic_agent = "pydantic/pydantic_agent", gatekeepers = "gatekeepers"}
 packages = [
-    "mcpagent", "mcpagent.common", "mcpagent.client", "mcpagent.server",
+    "mcpagent",
     "pydantic_agent",
     "gatekeepers", "gatekeepers.fs", "gatekeepers.pr",
 ]

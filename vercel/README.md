@@ -1,7 +1,7 @@
 # Vercel Agent (`agents/vercel`)
 
 A terminal agent built with Vercel's [AI SDK](https://ai-sdk.dev) (`ai` v7), the counterpart of the
-[pydantic agent](../pydantic) and MCPAgent's client. It uses the same model profiles
+[pydantic agent](../pydantic) and [MCPAgent](../mcp). It uses the same model profiles
 ([`../context/models.json`](../context/models.json)), the same instructions and the same tools, from
 the shared [tools folder](../tools). The agent loop is run by the SDK's `ToolLoopAgent`; this code
 only defines the tools and renders the stream in the terminal.

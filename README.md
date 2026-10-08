@@ -75,7 +75,7 @@ What the system needs:
 
 By default, every agent uses the `local` profile in [`context/models.json`](context/models.json),
 an LM Studio server. All three agents take the same options to use another model; run them from
-the repository root, and start the MCP server (`.venv/bin/python mcp/server.py`) before MCPAgent.
+the repository root.
 
 **OpenAI.** The `openai` profile ships ready to use (`gpt-4.1-mini`). Set the key without echoing
 it or saving it in shell history, then pass `--openai`:
@@ -84,7 +84,7 @@ it or saving it in shell history, then pass `--openai`:
 read -rsp "OpenAI API key: " OPENAI_API_KEY && export OPENAI_API_KEY  # Bash
 read -rs "OPENAI_API_KEY?OpenAI API key: " && export OPENAI_API_KEY   # zsh
 
-.venv/bin/python mcp/client.py --openai       # MCPAgent
+.venv/bin/python mcp/agent.py --openai        # MCPAgent
 .venv/bin/python pydantic/agent.py --openai   # the Pydantic Agent
 node vercel/agent.ts --openai                 # the Vercel Agent
 ```
@@ -333,13 +333,12 @@ Each agent implements this in an `Output` class (`mcp/mcpagent/client/output.py`
 
 ## MCPAgent
 
-An MCP server that exposes shell scripts as tools, plus a terminal client that drives the model.
-See [mcp/README.md](mcp/README.md).
+The agent with a hand-written loop, using the tools over MCP: it starts its own MCP server, which
+runs them, and stops it when it exits. See [mcp/README.md](mcp/README.md).
 
 ```bash
-.venv/bin/python mcp/server.py                          # terminal 1: MCP server on 127.0.0.1:6275
-.venv/bin/python mcp/client.py                          # terminal 2: chat, default model profile
-.venv/bin/python mcp/client.py --prompt "Time now"      # one prompt and exit
+.venv/bin/python mcp/agent.py                           # interactive chat
+.venv/bin/python mcp/agent.py --prompt "Time now"       # one prompt and exit
 .venv/bin/python -m unittest discover -s mcp/tests      # offline tests
 ```
 

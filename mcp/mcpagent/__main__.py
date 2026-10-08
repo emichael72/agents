@@ -1,13 +1,14 @@
 """
-Module: __main__.py (client)
+Module: __main__.py
 
 Description:
-    Command-line entry point of the MCP Agent: `python -m mcpagent.client` from any folder (the
-    package is installed in the .venv), or `python mcp/client.py`.
+    Command-line entry point of MCPAgent: `python -m mcpagent` from any folder (the package is
+    installed in the .venv), or `python mcp/agent.py`.
 
     Starts the agent (`AgentSession`): a model that uses the tools of the MCP servers in the
-    "client" section of the MCPAgent config (default: jsons/mcpagent.json in this package),
-    with a model profile from the shared agents/context/models.json. Runs one prompt
+    "client" section of the MCPAgent config (default: jsons/mcpagent.json in this package), with
+    a model profile from the shared agents/context/models.json. The agent starts its own MCP
+    server (the "server" section) as a child process and stops it when it exits. Runs one prompt
     (--prompt) or an interactive session.
     Also takes --version.
 """
@@ -21,19 +22,19 @@ from typing import Optional
 from rich.console import Console
 
 # Local imports
-from mcpagent.common.errors import ExceptionReport
+from mcpagent.errors import ExceptionReport
 from mcpagent import DEFAULT_CONFIG, __version__
-from mcpagent.client.session import AgentSession
+from mcpagent.session import AgentSession
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     """
-    Build the argument parser for the agent (python mcp/client.py).
+    Build the argument parser for the agent (python mcp/agent.py).
     Returns:
         argparse.ArgumentParser: The parser.
     """
     parser = argparse.ArgumentParser(
-        prog="python mcp/client.py",
+        prog="python mcp/agent.py",
         description="Chat with a model that can call the MCP servers' tools.")
     parser.add_argument("--config", type=Path,
                         help="MCPAgent config file; its client section names the MCP servers, model "

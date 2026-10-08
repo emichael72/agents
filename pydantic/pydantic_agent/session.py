@@ -2,8 +2,8 @@
 Module: session.py
 
 Description:
-    `AgentSession`: the Pydantic Agent in the terminal, the counterpart of MCPAgent's client
-    (`python mcp/client.py`). It uses the same model profiles, instructions and tools
+    `AgentSession`: the Pydantic Agent in the terminal, the counterpart of MCPAgent
+    (`python mcp/agent.py`). It uses the same model profiles, instructions and tools
     (agents/tools) as MCPAgent; the agent loop (call the model, run the requested tools, send the
     results back, repeat until it answers) is pydantic-ai's. The session builds the `Agent`, runs
     one turn at a time while rendering pydantic-ai's events (streamed text, tool calls and

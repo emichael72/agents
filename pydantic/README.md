@@ -1,7 +1,7 @@
 # Pydantic Agent (`agents/pydantic`)
 
 A terminal agent built with [pydantic-ai](https://pydantic.dev/docs/ai/), the counterpart of
-MCPAgent's client. It uses the same model profiles
+[MCPAgent](../mcp). It uses the same model profiles
 ([`../context/models.json`](../context/models.json)), the same instructions and the same tools, from
 the shared [tools folder](../tools). The difference is **who runs the agent loop**: MCPAgent's
 `MCPAgent.ask()` is hand-written, while here pydantic-ai does it.

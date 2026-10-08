@@ -7,6 +7,7 @@ Description:
     A real MCP server runs the shared tools; the model is a small aiohttp server answering with
     scripted responses, so no model server or API key is needed.
 """
+import asyncio
 from pathlib import Path
 import json
 import re
@@ -23,13 +24,12 @@ from aiohttp.test_utils import TestServer
 from rich.console import Console
 
 from mcpagent import REPO_ROOT
-from mcpagent.client.client import MCPClient
-from mcpagent.server.service import MCPService
+from mcpagent.client import MCPClient
 from mcpagent.config import MCPAgentConfig
-from mcpagent.client.agent import MCPAgent
-from mcpagent.client.context import AgentContext
-from mcpagent.client.output import Output
-from mcpagent.client.profiles import ModelProfiles
+from mcpagent.agent import MCPAgent
+from mcpagent.context import AgentContext
+from mcpagent.output import Output
+from mcpagent.profiles import ModelProfiles
 
 
 # The scripted turn every agent's tests replay
@@ -66,27 +66,17 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         """
-        Start an MCP server on the shared tools, write a client config for it, and connect an
-        MCPAgent whose model requests are answered from `self.outputs`.
+        Write a config whose client starts the real MCP server on the shared tools (as the shipped
+        one does), and connect an MCPAgent whose model requests are answered from `self.outputs`.
         """
         self.key_patch = patch.dict(os.environ, {"OPENAI_API_KEY": "test-key-not-real"})
         self.key_patch.start()
         self.addCleanup(self.key_patch.stop)
-        old = Path.cwd()
-        try:
-            os.chdir(REPO_ROOT)  # As MCPService.serve does: config paths are repository-relative
-            self.service = MCPService(MCPAgentConfig.load().server)
-        finally:
-            os.chdir(old)
-        self.server = TestServer(self.service._app)
-        await self.server.start_server()
-        self.addAsyncCleanup(self.server.close)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.config = Path(self.temp.name) / 'mcpagent.json'
-        self.config.write_text(json.dumps({"client": {"log_level": "ERROR", "servers": [{
-            "server_id": "tools", "description": "Test shell tools", "transport": "HTTP", "config": {"url": str(self.server.make_url('/'))}
-        }]}}))
+        self.config.write_text(json.dumps({"server": MCPAgentConfig.load().server, "client": {
+            "log_level": "ERROR", "servers": [{"server_id": "tools", "description": "Test shell tools", "transport": "STDIO"}]}}))
         self.requests = []
         self.outputs = []
         self.traces = []
@@ -224,6 +214,24 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('test-key-not-real', str(caught.exception))
         self.assertEqual(len(self.requests), 1)
 
+    async def test_a_stream_error_says_what_the_server_reported(self):
+        event = {"type": "error", "code": "model_unloaded", "message": "Model qwen-coder was unloaded (test-key-not-real)"}
+
+        async def stream(request):
+            self.requests.append(await request.json())
+            response = web.StreamResponse(headers={'Content-Type': 'text/event-stream'})
+            await response.prepare(request)
+            await response.write(f"data: {json.dumps(event)}\n\n".encode())
+            return response
+
+        self.model_handler = stream
+        with self.assertRaisesRegex(RuntimeError, r'stream failed: model_unloaded\. Earlier tool') as caught:
+            await self.agent.ask('Hello', on_text=lambda text: None)  # OpenAI's error hints: the code only
+        self.assertNotIn('test-key-not-real', str(caught.exception))
+        self.agent.local = True  # A local server: its own message too
+        with self.assertRaisesRegex(RuntimeError, 'stream failed: model_unloaded Model qwen-coder was unloaded'):
+            await self.agent.ask('Hello', on_text=lambda text: None)
+
     async def test_tool_failure_returned_to_model(self):
         self.outputs = [[call(self.aliases['shell'], {'cwd': 'missing-file', 'command': 'ls'})],
                         [message('File not found')]]
@@ -273,6 +281,32 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, 'insufficient_quota'):
             await self.agent.ask('Hello')
 
+    async def test_the_agent_starts_its_server_and_stops_it(self):
+        conn = self.agent.mcp._get_connection('tools')
+        assert conn is not None and conn._proc is not None
+        process = conn._proc
+        self.assertIsNone(process.returncode)  # Started by connect, still running
+        lines = []
+        self.agent.mcp.on_server_output(lines.append)
+        self.outputs = [[call(self.aliases['time'], {'timezone': 'UTC'})], [message('Noon')]]
+        await self.agent.ask('What time is it?')
+        for _ in range(50):  # The log line arrives on its own stream
+            if lines:
+                break
+            await asyncio.sleep(0.02)
+        self.assertRegex(lines[0], r'^ran time: bash time/time\.sh --timezone=UTC \(exit 0, \d+\.\ds\)$')
+        await self.agent.close()
+        self.assertEqual(process.returncode, 0)  # stdin closed: it exited by itself
+
+    async def test_a_server_that_cannot_start_says_why(self):
+        broken = Path(self.temp.name) / 'broken.json'
+        broken.write_text(json.dumps({"server": {"tools_dir": "no-such-folder"}, "client": {
+            "log_level": "ERROR", "servers": [{"server_id": "tools", "description": "Broken", "transport": "STDIO"}]}}))
+        client = MCPClient(broken)
+        self.addAsyncCleanup(client.close, close_all=True)
+        with self.assertRaisesRegex(EOFError, r"The MCP server 'tools' stopped \(exit 1\): error: .*no-such-folder"):
+            await client.connect(connect_all=True)
+
     async def test_stateful_mcp_session_header_and_notification(self):
         received = []
 
@@ -296,10 +330,11 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         server = TestServer(app)
         await server.start_server()
         self.addAsyncCleanup(server.close)
-        config = json.loads(self.config.read_text())
-        config['client']['servers'][0]['config']['url'] = str(server.make_url('/'))
-        self.config.write_text(json.dumps(config))
-        client = MCPClient(self.config)
+        remote = Path(self.temp.name) / 'remote.json'  # Another MCP server, reached over HTTP
+        remote.write_text(json.dumps({"client": {"log_level": "ERROR", "servers": [{
+            "server_id": "tools", "description": "Remote tools", "transport": "HTTP",
+            "config": {"url": str(server.make_url('/'))}}]}}))
+        client = MCPClient(remote)
         self.addAsyncCleanup(client.close, close_all=True)
         await client.connect(connect_all=True)
         self.assertEqual(len(received), 2)

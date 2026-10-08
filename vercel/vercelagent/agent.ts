@@ -1,4 +1,4 @@
-// An AI SDK (Vercel) terminal agent, the counterpart of the pydantic agent and MCPAgent's client.
+// An AI SDK (Vercel) terminal agent, the counterpart of the pydantic agent and MCPAgent.
 //
 // Same model profiles (agents/context/models.json), instructions (agents/context/instructions.json)
 // and tools (agents/tools) as the other two agents. The agent loop

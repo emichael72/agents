@@ -42,7 +42,7 @@ PYTHON_REQUIREMENTS_FILES=()                       # Set by find_requirements_fi
 PYTHON_REQUIREMENTS_SKIP=(.venv node_modules .git) # Folders not searched for requirements*.txt
 
 # Checked by verify_python_agents
-PYTHON_MODULES_TO_RUN=(mcpagent.server mcpagent.client) # Run with --version
+PYTHON_MODULES_TO_RUN=(mcpagent mcpagent.service) # Run with --version
 PYTHON_VERIFY_MODULES=( # Imported
     mcpagent pydantic_agent gatekeepers.fs.fs_gate gatekeepers.pr.changes
     pydantic_ai jsonschema httpx httpx2 aiohttp prompt_toolkit rich ruff
@@ -888,8 +888,7 @@ install_all() {
 
     log INFO ""
     log INFO "Usage (from the repository root):"
-    log INFO "  .venv/bin/python mcp/server.py      # MCPAgent: the MCP server"
-    log INFO "  .venv/bin/python mcp/client.py      # MCPAgent: the agent"
+    log INFO "  .venv/bin/python mcp/agent.py       # MCPAgent (starts its own MCP server)"
     log INFO "  .venv/bin/python pydantic/agent.py  # the Pydantic Agent"
     if [[ "${NODE_FETCH}" == true ]]; then
         log INFO "  .node/bin/node vercel/agent.ts      # the Vercel Agent (Node.js %s in .node/)" \

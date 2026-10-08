@@ -3,7 +3,7 @@ Module: test_service.py
 
 Description:
     Tests for the MCP server (`MCPService`): tool discovery, real tool execution, argument
-    validation and errors, the resource allowlist, and transport and origin checks.
+    validation and errors, the resource allowlist, and the stdin/stdout protocol.
 """
 from pathlib import Path
 import json
@@ -16,44 +16,41 @@ import unittest
 from typing import Any
 from unittest.mock import patch
 
-from aiohttp.test_utils import TestClient, TestServer
+import asyncio
+import io
+import sys
 from mcpagent import DEFAULT_CONFIG, JSONS_DIR, REPO_ROOT, SCHEMA_DIR, SCHEMA_FILE
-from mcpagent.client.client import MCPClient
-from mcpagent.server.service import MCPService
+from mcpagent.client import MCPClient
+from mcpagent import service as service_module
+from mcpagent.service import MCPService
 from mcpagent.config import MCPAgentConfig
 
 
 class ServiceTests(unittest.IsolatedAsyncioTestCase):
-    """Server tests: a real MCPService on the shared tools, called through an aiohttp test client."""
+    """Server tests: a real MCPService on the shared tools, sent lines as its client sends them."""
     async def asyncSetUp(self):
-        """Start the server from jsons/mcpagent.json's server section and open a client to it."""
+        """Build the server from jsons/mcpagent.json's server section, keeping its log lines."""
+        self.log = []
         old = Path.cwd()
         try:
             os.chdir(REPO_ROOT)  # As MCPService.serve does: config paths are repository-relative
-            self.service = MCPService(MCPAgentConfig.load().server)
+            self.service = MCPService(MCPAgentConfig.load().server, log=self.log.append)
         finally:
             os.chdir(old)
-        self.client = TestClient(TestServer(self.service._app))
-        await self.client.start_server()
-
-    async def asyncTearDown(self):
-        """Close the test client and server."""
-        await self.client.close()
 
     async def rpc(self, method, params=None):
         """
-        Send one JSON-RPC request to the server and check that it answered with HTTP 200.
+        Send one JSON-RPC request line to the server, as the client writes it to its stdin.
         Args:
             method: The JSON-RPC method, e.g. "tools/call".
             params: The method's parameters.
         Returns:
             dict: The JSON-RPC response.
         """
-        response = await self.client.post('/', json={
-            'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params or {}
-        })
-        self.assertEqual(response.status, 200)
-        return await response.json()
+        line = await self.service.handle_line(json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': method,
+                                                          'params': params or {}}))
+        self.assertIsNotNone(line)
+        return json.loads(line)
 
     async def test_discovery_and_all_tools(self):
         init = await self.rpc('initialize', {'protocolVersion': 'future'})
@@ -383,18 +380,35 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                 result = await self.rpc('resources/read', {'uri': uri})
                 self.assertEqual(result['error']['code'], -32602)
 
-    async def test_transport_and_origin(self):
-        response = await self.client.post('/', json={'jsonrpc': '2.0', 'method': 'notifications/initialized'})
-        self.assertEqual(response.status, 202)
-        self.assertEqual(await response.read(), b'')
-        response = await self.client.get('/')
-        self.assertEqual(response.status, 405)
-        response = await self.client.post('/', json={}, headers={'Origin': 'https://untrusted.example'})
-        self.assertEqual(response.status, 403)
-        response = await self.client.get('/help')
-        self.assertEqual(response.status, 200)
-        response = await self.client.post('/', json={})
-        self.assertEqual((await response.json())['error']['code'], -32600)
+    async def test_stdio_protocol(self):
+        notification = json.dumps({'jsonrpc': '2.0', 'method': 'notifications/initialized'})
+        self.assertIsNone(await self.service.handle_line(notification))  # No response to a notification
+        self.assertIsNone(await self.service.handle_line(''))
+        self.assertEqual(json.loads(await self.service.handle_line('{not json'))['error']['code'], -32700)
+        self.assertEqual(json.loads(await self.service.handle_line('{}'))['error']['code'], -32600)
+        self.assertEqual(json.loads(await self.service.handle_line('[]'))['error']['code'], -32600)
+        ping = {'jsonrpc': '2.0', 'id': 7, 'method': 'ping'}
+        batch = json.loads(await self.service.handle_line(json.dumps([ping, json.loads(notification)])))
+        self.assertEqual(batch, [{'jsonrpc': '2.0', 'id': 7, 'result': {}}])
+
+        # run_stdio: one response line per request, until stdin closes; a short log
+        reader = asyncio.StreamReader()
+        reader.feed_data((json.dumps(ping) + '\n' + notification + '\n').encode())
+        reader.feed_data((json.dumps({'jsonrpc': '2.0', 'id': 8, 'method': 'tools/call',
+                                      'params': {'name': 'time', 'arguments': {'timezone': 'UTC'}}}) + '\n').encode())
+        reader.feed_eof()
+        written = []
+        self.assertEqual(await self.service.run_stdio(reader, written.append), 0)
+        self.assertEqual([json.loads(line)['id'] for line in written], [7, 8])
+        self.assertEqual(self.log[0], f'started, {len(self.service._tools_registry)} tools from tools/')
+        self.assertRegex(self.log[1], r'^ran time: bash time/time\.sh --timezone=UTC \(exit 0, \d+\.\ds\)$')
+        self.assertEqual(len(self.log), 2)
+
+    def test_the_server_does_not_run_on_its_own(self):
+        with patch.object(sys, 'argv', ['service']), patch.object(sys.stdin, 'isatty', return_value=True), \
+                patch('sys.stderr', new_callable=io.StringIO) as stderr:
+            self.assertEqual(service_module.main(), 2)
+        self.assertIn('started by the agent (python mcp/agent.py)', stderr.getvalue())
 
 
 class ConfigLoadingTests(unittest.TestCase):
@@ -428,9 +442,9 @@ class ConfigLoadingTests(unittest.TestCase):
         for key in ('instructions_file', 'models_file', 'output_file', 'agent_file'):
             self.assertTrue(MCPAgentConfig.repo_path(client[key]).is_file())
         self.assertEqual(MCPAgentConfig.repo_path(server['tools_dir']), REPO_ROOT / 'tools')
-        # The tools entry names no address: it reaches the server section's port
-        url = f"http://127.0.0.1:{server['mcp_server_port']}/"
-        self.assertEqual(client['servers'][0]['config'], {'url': url, 'sse_url': url + 'sse'})
+        # The tools entry names no command: it starts the server section's server, with this config
+        self.assertEqual(client['servers'][0]['config'],
+                         {'command': [sys.executable, '-m', 'mcpagent.service', str(DEFAULT_CONFIG)]})
         self.assertNotIn('config', config.data['client']['servers'][0])  # The loaded config is unchanged
 
     def test_paths_resolve_from_the_repository_root(self):
@@ -440,23 +454,18 @@ class ConfigLoadingTests(unittest.TestCase):
         self.assertEqual(MCPAgentConfig.repo_path('/abs/file.json'), Path('/abs/file.json'))
         self.assertEqual(MCPAgentConfig.repo_path('~/file.json'), Path.home() / 'file.json')
 
-    # noinspection HttpUrlsUsage
-    def test_http_server_without_config_uses_the_server_section(self):
-        entry = {'server_id': 'tools', 'description': 'Tools', 'transport': 'HTTP'}
+    def test_a_stdio_server_without_config_starts_the_server_section(self):
+        entry = {'server_id': 'tools', 'description': 'Tools', 'transport': 'STDIO'}
 
-        def url(config):
-            return MCPAgentConfig(config, 'test.json').client['servers'][0]['config']['url']
+        def command(config):
+            return MCPAgentConfig(config, 'test.json').client['servers'][0]['config']['command']
 
-        for bind, host in ((None, '127.0.0.1'), ('0.0.0.0', '127.0.0.1'), ('10.1.2.3', '10.1.2.3')):
-            with self.subTest(bind=bind):
-                server = {'mcp_server_port': 7000, **({'mcp_server_bind_address': bind} if bind else {})}
-                self.assertEqual(url({'server': server, 'client': {'servers': [dict(entry)]}}), f'http://{host}:7000/')
-        with self.assertRaisesRegex(RuntimeError, 'mcp_server_port'):  # The port is set only in the config
-            url({'server': {}, 'client': {'servers': [dict(entry)]}})
-        remote = {**entry, 'config': {'url': 'http://remote:1/'}}  # An explicit address needs no server section
-        self.assertEqual(url({'client': {'servers': [remote]}}), 'http://remote:1/')
+        self.assertEqual(command({'server': {}, 'client': {'servers': [dict(entry)]}}),
+                         [sys.executable, '-m', 'mcpagent.service', str(Path('test.json').resolve())])
+        other = {**entry, 'config': {'command': ['other-server']}}  # Another server: its own command
+        self.assertEqual(command({'client': {'servers': [other]}}), ['other-server'])
         with self.assertRaisesRegex(RuntimeError, 'no "server" section'):
-            url({'client': {'servers': [dict(entry)]}})
+            command({'client': {'servers': [dict(entry)]}})
 
     def test_json_is_validated_against_the_schema(self):
         description = ['What this config is for.']
@@ -470,8 +479,11 @@ class ConfigLoadingTests(unittest.TestCase):
             MCPAgentConfig.load(self.write('// A comment\n{"client": {"log_level": "ERROR", "servers": [],},}'))
         with self.assertRaisesRegex(RuntimeError, 'Schema validation failed'):
             MCPAgentConfig.load(self.write({'other': {}}))  # Only the two sections
-        with self.assertRaisesRegex(RuntimeError, "'mcp_server_port' is a required property"):
-            MCPAgentConfig.load(self.write({'server': {}}))
+        with self.assertRaisesRegex(RuntimeError, "'mcp_server_port' was unexpected"):  # No ports: stdio only
+            MCPAgentConfig.load(self.write({'server': {'mcp_server_port': 6275}}))
+        with self.assertRaisesRegex(RuntimeError, "'config' is a required property"):  # HTTP needs an address
+            MCPAgentConfig.load(self.write({'client': {'log_level': 'ERROR', 'servers': [
+                {'server_id': 'x', 'description': 'x', 'transport': 'HTTP'}]}}))
 
     def test_broken_or_missing_schema_stops_loading(self):
         config_file = self.write({})
@@ -500,25 +512,28 @@ class ConfigLoadingTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'no "server" section'):
             MCPService.serve(client_only)
         self.assertEqual(Path.cwd(), old_cwd)
-        server_only = self.write({'server': {'mcp_server_port': 6275}}, 'server_only.json')
+        server_only = self.write({'server': {'tools_dir': 'tools'}}, 'server_only.json')
         with self.assertRaisesRegex(RuntimeError, 'no "client" section'):
             MCPClient(server_only)
 
     def test_server_validates_before_starting_and_restores_cwd(self):
         old_cwd = Path.cwd()
-        with patch.object(MCPService, 'start', autospec=True, return_value=0) as start:
-            config_file = self.write({'server': {'mcp_server_port': 6275, 'tools_dir': 'tools'}})
+
+        async def served(service):
+            served.service = service
+            return 0
+
+        with patch.object(MCPService, 'run_stdio', autospec=True, side_effect=served) as run:
+            config_file = self.write({'server': {'tools_dir': 'tools'}})
             self.assertEqual(MCPService.serve(config_file), 0)
-            start.assert_called_once()
-            service = start.call_args.args[0]  # The service built from the server section
-            self.assertEqual(service._mcp_server_port, 6275)
-            self.assertIn('time', service._tools_data)  # tools_dir read from the repository root
+            run.assert_called_once()
+            self.assertIn('time', served.service._tools_data)  # tools_dir read from the repository root
             self.assertEqual(Path.cwd(), old_cwd)
-            start.reset_mock()
-            config_file = self.write({'server': {'mcp_server_port': 'invalid'}})
+            run.reset_mock()
+            config_file = self.write({'server': {'tools_dir': 123}})
             with self.assertRaisesRegex(RuntimeError, 'Schema validation failed'):
                 MCPService.serve(config_file)
-            start.assert_not_called()
+            run.assert_not_called()
             self.assertEqual(Path.cwd(), old_cwd)
 
 if __name__ == '__main__':

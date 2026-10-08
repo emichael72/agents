@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "MCPAgent Configuration",
-  "description": "Validates mcpagent.json: its server section (read by mcp/server.py) and client section (read by mcp/client.py); neither is required here, as each entry point reports its own when missing. Paths are relative to the repository root.",
+  "description": "Validates mcpagent.json: its server section (the MCP server the agent starts) and client section (the agent, python mcp/agent.py); neither is required here, as each part reports its own when missing. Paths are relative to the repository root.",
   "type": "object",
   "properties": {
     "description": {
@@ -22,9 +22,6 @@
   "definitions": {
     "server": {
       "type": "object",
-      "required": [
-        "mcp_server_port"
-      ],
       "properties": {
         "project_name": {
           "type": "string",
@@ -37,27 +34,6 @@
         "version": {
           "type": "string",
           "description": "Server version sent to clients in the initialize handshake."
-        },
-        "mcp_server_port": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 65535,
-          "description": "TCP port the server listens on."
-        },
-        "mcp_server_bind_address": {
-          "type": "string",
-          "description": "Address to bind; \"0.0.0.0\" binds to all interfaces."
-        },
-        "allowed_origins": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Browser origins allowed to call the server."
-        },
-        "show_usage_examples": {
-          "type": "boolean",
-          "description": "Print usage examples on startup."
         },
         "tools_dir": {
           "type": "string",
@@ -109,6 +85,10 @@
         "output_file": {
           "type": "string",
           "description": "JSON file with the terminal layout (\"width\", \"show_time\")."
+        },
+        "server_output": {
+          "type": "boolean",
+          "description": "Show the started server's log lines with the agent's other gray lines (with -d). Default false."
         },
         "servers": {
           "type": "array",
@@ -180,7 +160,7 @@
           "additionalProperties": false
         },
         "config": {
-          "description": "How to reach the server. An HTTP entry without it uses the server section's address and port.",
+          "description": "How to reach the server. A STDIO entry without it starts the server section's server as a child process.",
           "oneOf": [
             {
               "type": "object",
@@ -238,7 +218,7 @@
       "if": {
         "properties": {
           "transport": {
-            "const": "STDIO"
+            "const": "HTTP"
           }
         }
       },
