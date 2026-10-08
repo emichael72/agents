@@ -39,6 +39,27 @@ protected.
 The shared clang-format and clang-tidy settings supply defaults when the project has none of its own. Calls stop after
 25 seconds and limit displayed output to 300 lines.
 
+## Environment
+
+The sandbox starts from a fixed environment. The `environment` entry in [commands.json](commands.json) adds to it:
+
+~~~json
+"environment": {
+  "path": ["/usr/local/bin"],
+  "variables": {"RUN_BY_AGENT": "1", "AGENT_NAME": "${AGENT_NAME}"}
+}
+~~~
+
+`path` lists folders searched before `/usr/bin`, as the sandbox sees them: under `/usr`, or `/work/<name>/...` in a
+folder with `x` access. A folder that does not exist, or lacks that access, is skipped. Commands must still be listed
+in `commands` to run.
+
+`variables` are exported to every command, so a script can tell that an agent runs it. `${NAME}` takes NAME from the
+shell tool's own environment, where the agents set `AGENT_NAME`. The sandbox's own variables (`PATH`, `HOME`, `GIT_*`,
+`LD_*`, and the rest of its fixed set) cannot be replaced.
+
+## Limits
+
 The sandbox contains the command's execution. Files it changes may later be built or run outside it, so review the
 submitted changes normally.
 

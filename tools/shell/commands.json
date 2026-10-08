@@ -7,8 +7,20 @@
     "\"needs\": \"x\" means the command runs the folder's own code (make runs the Makefile),",
     "so it needs execute access where it runs.",
     "Every command runs in a sandbox that sees only the folders in context/paths.json,",
-    "with no network."
+    "with no network.",
+    "environment adds to each command's environment: path lists folders searched before",
+    "/usr/bin, as the sandbox sees them (under /usr, or /work/<name>/... with x access);",
+    "variables are exported, ${NAME} taking NAME from the tool's own environment",
+    "(the agents set AGENT_NAME). The sandbox's own variables (PATH, HOME, GIT_*, ...)",
+    "cannot be replaced."
   ],
+  "environment": {
+    "path": ["/usr/local/bin"],
+    "variables": {
+      "RUN_BY_AGENT": "1",
+      "AGENT_NAME": "${AGENT_NAME}"
+    }
+  },
   "commands": {
     "addr2line": "turn addresses into file:line (addr2line -e prog 0x...)",
     "ar": "list or extract static libraries (ar t lib.a)",

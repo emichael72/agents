@@ -1,14 +1,18 @@
 """
-Offline tests for the shell tool's command list: only installed commands are offered.
+Offline tests for the shell tool's commands.json: only installed commands are offered, and the
+"environment" entry adds search folders and variables to the sandbox.
 Run from the repository root:
     .venv/bin/python -m unittest discover -s tools/shell/tests
 """
 
 import json
+import os
+import shutil
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any, Optional
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -16,35 +20,84 @@ from gatekeepers.fs.fs_gate import FsGate  # noqa: E402
 from tools.shell.shell import Shell  # noqa: E402
 
 
-class CommandListTests(unittest.TestCase):
-    """A command in commands.json that is not installed is hidden from help and refused."""
+class ShellConfigTests(unittest.TestCase):
+    """A shell built from a temporary commands.json, over a writable "proj" and a read-only "docs"."""
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        folder = Path(self.temp.name)
-        commands = folder / "commands.json"
-        commands.write_text(json.dumps({"commands": {
-            "ls": "list folder contents", "cd": "change folder", "no-such-program-xyz": "not installed"}}))
-        paths = folder / "paths.json"
-        paths.write_text(json.dumps({"paths": {"work": str(folder)}}))
+        self.folder = Path(self.temp.name)
+        for name in ("proj", "docs"):
+            (self.folder / name / "bin").mkdir(parents=True)
+            tool = self.folder / name / "bin" / f"{name}-tool"
+            tool.write_text(f"#!/bin/sh\necho {name} tool ran\n")
+            tool.chmod(0o755)
+        self.paths = self.folder / "paths.json"
+        self.paths.write_text(json.dumps({"paths": {
+            "proj": {"path": str(self.folder / "proj"), "access": "rwx"},
+            "docs": {"path": str(self.folder / "docs"), "access": "r"}}}))
+
+    def shell(self, environment: Optional[dict[str, Any]] = None) -> Shell:
+        """
+        Build a shell from a commands.json holding a few commands and the given environment.
+        Args:
+            environment: commands.json's "environment"; None leaves it out.
+        Returns:
+            Shell: The shell.
+        """
+        settings: dict[str, Any] = {"commands": {
+            "ls": "list folder contents", "cd": "change folder", "echo": "print text",
+            "no-such-program-xyz": "not installed", "proj-tool": "a project script", "docs-tool": "a docs script"}}
+        if environment is not None:
+            settings["environment"] = environment
+        commands = self.folder / "commands.json"
+        commands.write_text(json.dumps(settings))
         with patch.object(Shell, "COMMANDS_FILE", commands):
-            self.shell = Shell(FsGate.load(paths))
-        self.folder = folder
+            return Shell(FsGate.load(self.paths))
 
     def test_only_installed_commands_are_offered(self):
-        self.assertEqual(sorted(self.shell.commands), ["cd", "ls"])  # cd is a bash builtin
-        self.assertEqual(self.shell.missing, {"no-such-program-xyz"})
-        self.assertNotIn("no-such-program-xyz", self.shell.help_text())
+        shell = self.shell()
+        self.assertEqual(sorted(shell.commands), ["cd", "echo", "ls"])  # cd is a bash builtin
+        self.assertEqual(shell.missing, {"no-such-program-xyz", "proj-tool", "docs-tool"})
+        self.assertNotIn("no-such-program-xyz", shell.help_text())
 
     def test_a_missing_command_is_refused_as_not_installed(self):
+        shell = self.shell()
         with self.assertRaises(ValueError) as raised:
-            self.shell.check("ls && no-such-program-xyz", self.folder)
+            shell.check("ls && no-such-program-xyz", self.folder / "proj")
         self.assertIn("not installed on this machine", str(raised.exception))
         with self.assertRaises(ValueError) as raised:
-            self.shell.check("python3 -c 1", self.folder)
+            shell.check("python3 -c 1", self.folder / "proj")
         self.assertIn("not an allowed command", str(raised.exception))
-        self.shell.check("cd . && ls", self.folder)  # Installed commands pass
+        shell.check("cd . && ls", self.folder / "proj")  # Installed commands pass
+
+    def test_search_folders_need_execute_access_and_must_exist(self):
+        shell = self.shell({"path": ["/work/proj/bin", "/work/docs/bin", "/usr/no-such-folder", "/usr/bin"]})
+        self.assertEqual(shell.search_path, [("/work/proj/bin", self.folder / "proj" / "bin"), ("/usr/bin", Path("/usr/bin"))])
+        self.assertIn("proj-tool", shell.commands)
+        self.assertIn("docs-tool", shell.missing)  # docs is read-only: its folder is not searched
+        for folder in ("relative/bin", "/etc", "/usr/../etc", "/tmp"):
+            with self.subTest(folder=folder), self.assertRaisesRegex(ValueError, "under /usr or /work"):
+                self.shell({"path": [folder]})
+
+    def test_variables_are_expanded_and_the_sandbox_keeps_its_own(self):
+        with patch.dict(os.environ, {"AGENT_NAME": "Test Agent"}):
+            os.environ.pop("UNSET_XYZ", None)
+            shell = self.shell({"variables": {"RUN_BY_AGENT": "1", "WHO": "${AGENT_NAME} via ${UNSET_XYZ}"}})
+        self.assertEqual(shell.variables, {"RUN_BY_AGENT": "1", "WHO": "Test Agent via "})
+        for variables in ({"PATH": "/tmp"}, {"HOME": "/x"}, {"GIT_CONFIG_VALUE_0": "hooks"}, {"LD_PRELOAD": "x.so"},
+                          {"1BAD": "x"}, {"COUNT": 1}):
+            with self.subTest(variables=variables), self.assertRaisesRegex(ValueError, "commands.json"):
+                self.shell({"variables": variables})
+
+    @unittest.skipUnless(shutil.which("bwrap"), "bubblewrap is not installed")
+    def test_the_sandbox_sees_the_search_folders_and_variables(self):
+        with patch.dict(os.environ, {"AGENT_NAME": "Test Agent"}):
+            shell = self.shell({"path": ["/work/proj/bin"], "variables": {"RUN_BY_AGENT": "1", "WHO": "${AGENT_NAME}"}})
+        ok, text = shell.run("proj", 'echo "$RUN_BY_AGENT|$WHO|$PATH" && proj-tool')
+        self.assertTrue(ok, text)
+        self.assertIn("1|Test Agent|proj/bin:/usr/bin:/bin", text)  # Output shows /work/proj as proj
+        self.assertIn("proj tool ran", text)
 
 
 if __name__ == "__main__":

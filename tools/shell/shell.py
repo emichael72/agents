@@ -38,7 +38,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path, PurePosixPath
-from typing import Optional
+from typing import Any, Optional
 
 # Import the shared filesystem gate from the repository root (the nearest folder above
 # holding pyproject.toml).
@@ -57,6 +57,19 @@ class Shell:
     VERSION = "1.0.0"
     COMMANDS_FILE = Path(__file__).resolve().parent / "commands.json"
     PROGRAMS = "/usr/bin"  # Where the sandbox finds programs (its PATH; /bin links here)
+    # The sandbox's own environment. commands.json's "environment" may add search folders and
+    # variables, but not replace these or git's settings (hooks off), which the sandbox relies on.
+    ENVIRONMENT = {
+        "PATH": "/usr/bin:/bin", "HOME": "/tmp/home", "LANG": "C.UTF-8", "TERM": "dumb",
+        "PAGER": "cat", "GIT_PAGER": "cat", "GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": "true",
+        "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_COUNT": "3",
+        "GIT_CONFIG_KEY_0": "core.hooksPath", "GIT_CONFIG_VALUE_0": "/dev/null",
+        "GIT_CONFIG_KEY_1": "core.fsmonitor", "GIT_CONFIG_VALUE_1": "false",
+        "GIT_CONFIG_KEY_2": "safe.directory", "GIT_CONFIG_VALUE_2": "*",
+    }
+    RESERVED_PREFIXES = ("GIT_", "LD_", "BASH_")  # Also kept from commands.json's variables
+    VARIABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+    REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")  # ${NAME} in a variable's value
     BUILTINS = {"cd", "echo", "false", "printf", "pwd", "test", "true"}  # bash's own: always there
     CLANG_FORMAT = CONTEXT_DIR / "clang-format.yaml"  # The default C/C++ style, at /work/.clang-format
     CLANG_TIDY = CONTEXT_DIR / "clang-tidy.yaml"  # The default C/C++ checks, at /work/.clang-tidy
@@ -90,8 +103,13 @@ class Shell:
             gate: The allowed folders; None reads context/paths.json.
             commands: The allowed commands; None reads commands.json, leaving out those that are
                 also their own tool and those not installed on this machine.
+        Raises:
+            ValueError: If commands.json's "environment" is not valid.
         """
         self.gate = gate or FsGate.load()
+        environment = self.load_environment()
+        self.search_path = self.search_folders(environment.get("path", []))
+        self.variables = self.extra_variables(environment.get("variables", {}))
         self.missing: set[str] = set()  # Listed in commands.json, but not installed here
         if commands is None:
             listed = {name: entry for name, entry in self.load_commands().items() if not self.own_tool(name)}
@@ -110,15 +128,74 @@ class Shell:
         return {name: entry if isinstance(entry, dict) else {"about": entry} for name, entry in commands.items()}
 
     @classmethod
-    def installed(cls, command: str) -> bool:
+    def load_environment(cls) -> dict[str, Any]:
         """
-        Whether the sandbox can run a command: a bash builtin, or a program in PROGRAMS.
+        Read what commands.json adds to the sandbox's environment.
+        Returns:
+            dict[str, Any]: {"path": [folders], "variables": {name: value}}; {} when it adds nothing.
+        """
+        return json.loads(cls.COMMANDS_FILE.read_text(encoding="utf-8")).get("environment", {})
+
+    def search_folders(self, folders: list[str]) -> list[tuple[str, Path]]:
+        """
+        Resolve the extra folders to search for commands, as the sandbox sees them: under /usr, or
+        under /work in an allowed folder with execute access. One that does not exist here, or
+        lacks that access, is left out.
+        Args:
+            folders: The folders, e.g. ["/usr/local/bin", "/work/core_dump/scripts"].
+        Returns:
+            list[tuple[str, Path]]: Each folder as the sandbox sees it, and its real path.
+        Raises:
+            ValueError: If a folder is not an absolute path under /usr or /work.
+        """
+        found = []
+        for folder in folders:
+            inner = PurePosixPath(folder)
+            if not inner.is_absolute() or ".." in inner.parts or inner.parts[1:2] not in (("usr",), ("work",)):
+                raise ValueError(f"commands.json: the search folder '{folder}' must be an absolute path under "
+                                 f"/usr or /work.")
+            real = self.to_host(folder, Path("/")) if inner.parts[1] == "work" else Path(folder)
+            if real is None or not real.is_dir():
+                continue
+            if inner.parts[1] == "work":  # Its programs run as the folder's own code: needs x
+                located = self.gate.locate(real)
+                if located is None or "x" not in located[0].access_at(real):
+                    continue
+            found.append((folder, real))
+        return found
+
+    def extra_variables(self, variables: dict[str, Any]) -> dict[str, str]:
+        """
+        Read the variables to export in the sandbox. ${NAME} in a value is replaced by NAME from this
+        tool's own environment (the agents set AGENT_NAME), or by "" when it is not set.
+        Args:
+            variables: Each variable's name and value, e.g. {"AGENT_NAME": "${AGENT_NAME}"}.
+        Returns:
+            dict[str, str]: The variables, their references replaced.
+        Raises:
+            ValueError: If a name is not valid, the sandbox sets it itself, or a value is not text.
+        """
+        exported = {}
+        for name, value in variables.items():
+            if not self.VARIABLE_NAME.match(name) or not isinstance(value, str):
+                raise ValueError(f"commands.json: the variable '{name}' needs a valid name and a text value.")
+            if name in self.ENVIRONMENT or name.startswith(self.RESERVED_PREFIXES):
+                raise ValueError(f"commands.json: the sandbox sets '{name}' itself; add search folders with "
+                                 f"\"path\".")
+            exported[name] = self.REFERENCE.sub(lambda match: os.environ.get(match.group(1), ""), value)
+        return exported
+
+    def installed(self, command: str) -> bool:
+        """
+        Whether the sandbox can run a command: a bash builtin, or a program in the extra search
+        folders or PROGRAMS.
         Args:
             command: The command's name, e.g. ctags.
         Returns:
             bool: True when it is there.
         """
-        return command in cls.BUILTINS or shutil.which(command, path=cls.PROGRAMS) is not None
+        folders = [str(real) for _, real in self.search_path] + [self.PROGRAMS]
+        return command in self.BUILTINS or shutil.which(command, path=os.pathsep.join(folders)) is not None
 
     @staticmethod
     def own_tool(command: str) -> bool:
@@ -384,14 +461,8 @@ class Shell:
             raise ValueError("The working folder is outside the allowed folders.")
         _, shown = located
         args += ["--chdir", str(self.WORK / shown)]
-        environment = {
-            "PATH": "/usr/bin:/bin", "HOME": "/tmp/home", "LANG": "C.UTF-8", "TERM": "dumb",
-            "PAGER": "cat", "GIT_PAGER": "cat", "GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": "true",
-            "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_COUNT": "3",
-            "GIT_CONFIG_KEY_0": "core.hooksPath", "GIT_CONFIG_VALUE_0": "/dev/null",
-            "GIT_CONFIG_KEY_1": "core.fsmonitor", "GIT_CONFIG_VALUE_1": "false",
-            "GIT_CONFIG_KEY_2": "safe.directory", "GIT_CONFIG_VALUE_2": "*",
-        }
+        environment = {**self.ENVIRONMENT, **self.variables}
+        environment["PATH"] = ":".join([inner for inner, _ in self.search_path] + [self.ENVIRONMENT["PATH"]])
         for key, setting in (("GIT_AUTHOR_NAME", "user.name"), ("GIT_AUTHOR_EMAIL", "user.email")):
             value = subprocess.run(["git", "config", "--global", setting], capture_output=True, text=True).stdout.strip()
             if value:
