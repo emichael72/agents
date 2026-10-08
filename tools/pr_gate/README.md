@@ -19,4 +19,4 @@ Omit `--pr` to show all relevant requests. History shows previous assessments an
 
 The agent can start the systemd service, but it cannot stop or restart it through this tool. A person manages those actions with `./install.sh --gate stop` or `restart`.
 
-The result reports whether the gate permits merging. GitHub may still have other requirements. See the [walkthrough](../../gatekeepers/pr/FLOW.md) for how the status reaches GitHub.
+The result reports whether the gate permits merging. GitHub may still have other requirements. See the [walkthrough](../../gatekeepers/pr/README.md#what-happens-to-a-change) for how the status reaches GitHub.

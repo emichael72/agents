@@ -156,8 +156,8 @@ class Shell:
             if not words:
                 raise ValueError("Empty command between separators.")
             assigned = []
-            while words and self.ASSIGNMENT.match(words[0]):
-                assigned.append(self.ASSIGNMENT.match(words[0]).group(1))
+            while words and (assignment := self.ASSIGNMENT.match(words[0])) is not None:
+                assigned.append(assignment.group(1))
                 words = words[1:]
             if assigned and not self.bare_assignments(command, len(assigned), segment_index):
                 raise ValueError("Write a variable before make as NAME=value, with no quotes or backslashes in "

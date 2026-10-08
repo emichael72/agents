@@ -11,8 +11,8 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from skill import Skills, main  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from tools.skill.skill import Skills, main  # noqa: E402
 
 
 class SkillToolTests(unittest.TestCase):
@@ -37,8 +37,9 @@ class SkillToolTests(unittest.TestCase):
 
     def test_read_refuses_what_is_not_a_skill(self):
         for name in ("../build", "build/SKILL.md", "", "-x"):
-            with self.assertRaisesRegex(ValueError, "is not a skill name"):
+            with self.assertRaises(ValueError) as raised:
                 self.skills.read(name)
+            self.assertRegex(str(raised.exception), "is not a skill name")
         with self.assertRaisesRegex(ValueError, "There is no skill 'notes'(.|\n)*- build:"):
             self.skills.read("notes")
 

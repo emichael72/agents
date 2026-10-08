@@ -12,8 +12,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from pr import PullRequests  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from tools.pr.pr import PullRequests  # noqa: E402
 
 from gatekeepers.fs.fs_gate import FsGate  # noqa: E402
 from gatekeepers.pr.changes import ChangeInspector  # noqa: E402
@@ -64,7 +64,7 @@ class PrToolTests(unittest.TestCase):
             seen["files"] = sorted(str(p.relative_to(tree)) for p in tree.rglob("*") if p.is_file())
             return True, "$ make && make check: succeeded\nlots of output"
 
-        def docs(tree, changed):
+        def docs(_tree, changed):
             seen["changed"] = sorted(changed)
             return True, "All documented."
 

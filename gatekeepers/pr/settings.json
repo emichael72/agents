@@ -1,5 +1,11 @@
 {
-  "description": "Settings of the pull request gate (gatekeepers/pr): read by settings.py for the service and the agents' pr_gate status tool. A variable set in the environment overrides its value here; see README.md, 'Settings'.",
+  "description": [
+    "Settings of the pull request gate (gatekeepers/pr): read by settings.py for the service",
+    "and the agents' pr_gate status tool. A variable set in the environment overrides its",
+    "value here; see README.md, 'Settings'.",
+    "QUIZ_MODEL_ATTEMPTS: maximum model replies per quiz, including the initial reply.",
+    "An invalid or unfinished reply is retried within this limit; 2 means one retry."
+  ],
   "settings": {
     "QUIZ_REPO": "emichael72/core_dump",
     "QUIZ_DEVELOPER": "emichael72",
@@ -8,6 +14,7 @@
     "QUIZ_LOCAL_CLONE": "~/projects/core_dump",
     "QUIZ_SYNC_SECONDS": "30",
     "QUIZ_MODEL_PROFILE": "",
+    "QUIZ_MODEL_ATTEMPTS": "2",
     "QUIZ_WEB_USER": "user",
     "QUIZ_WEB_PASSWORD": "pass",
     "QUIZ_BUILD_COMMAND": "make",

@@ -260,6 +260,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(history[-1].parts[0].content, "3 messages so far")
 
 
+# noinspection DuplicatedCode
 class OutputTests(unittest.TestCase):
     """The shared terminal layout (README.md, "Terminal output")."""
 

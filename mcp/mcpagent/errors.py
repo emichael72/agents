@@ -7,6 +7,7 @@ Description:
 """
 import os
 import sys
+from types import TracebackType
 
 from rich.console import Console
 from rich.text import Text
@@ -26,7 +27,7 @@ class ExceptionReport:
         self.error = error
         self.file_name = "<unknown>"
         self.line_number = -1
-        traceback = error.__traceback__
+        traceback: TracebackType | None = error.__traceback__
         while traceback is not None:  # Keep the origin of the innermost frame
             self.file_name = os.path.basename(traceback.tb_frame.f_code.co_filename)
             self.line_number = traceback.tb_lineno

@@ -15,7 +15,7 @@ it. Follow these steps in order.
    table and the short options string. Missing one of them is the most common bug.
 3. Edit with ed, never with the shell: ed creates files (action write) and changes them. Prefer
    replace, with old copied exactly from the file; keep each edit small, and look at the lines ed
-   shows afterwards. Document every new file and function with Doxygen comments, like the existing
+   shows afterward. Document every new file and function with Doxygen comments, like the existing
    code: each function once, in its header (@brief, @param, @return), and the .c file only a @file
    block. Documenting a function in both places makes doxy report every parameter twice.
 4. Test what you added: add commands for every new option or behavior, including one that must

@@ -10,4 +10,4 @@ The agent sees the PR gate through the [pr_gate tool](../tools/pr_gate/README.md
 
 The editing tool refuses changes to the gatekeepers, tools, and shared context folders. The shell sees these only if allowed, and they are read-only or absent.
 
-For the submission sequence, see the [PR tool](../tools/pr/README.md). For the browser, database, and GitHub handoff, see the [flow walkthrough](pr/FLOW.md).
+For the submission sequence, see the [PR tool](../tools/pr/README.md). For the browser, database, and GitHub handoff, see the [flow walkthrough](pr/README.md#what-happens-to-a-change).

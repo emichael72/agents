@@ -221,7 +221,8 @@ class MCPAgent:
         Returns:
             str: ": <code> <message>" (or less), or "" when the event says nothing usable.
         """
-        detail = event.get("error") if isinstance(event.get("error"), dict) else event
+        error = event.get("error")
+        detail = error if isinstance(error, dict) else event
         code = str(detail.get("code") or "").strip()
         message = str(detail.get("message") or "").strip() if self.local else ""
         text = " ".join(part for part in (code, message[:300]) if part)

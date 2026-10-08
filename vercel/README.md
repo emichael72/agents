@@ -1,6 +1,7 @@
 # Vercel agent
 
-This is the TypeScript version, using Vercel's AI SDK. `ToolLoopAgent` handles the model-and-tool loop; the surrounding code loads the shared settings, adapts the tools, and displays the conversation.
+This is the TypeScript version, using Vercel's AI SDK. `ToolLoopAgent` handles the model-and-tool loop; the surrounding
+code loads the shared settings, adapts the tools, and displays the conversation.
 
 ## Run it
 
@@ -11,17 +12,22 @@ node vercel/agent.ts
 node vercel/agent.ts -d --prompt "What time is it in Tokyo?"
 ~~~
 
-Node.js 22.18 or later runs the TypeScript directly. If the installer downloaded Node into `.node/`, use `.node/bin/node` instead, or put `.node/bin` first in your PATH.
+Node.js 22.18 or later runs the TypeScript directly. If the installer downloaded Node into `.node/`, use
+`.node/bin/node` instead, or put `.node/bin` first in your PATH.
 
-`-d` shows tool calls and results. `--history` prints the exchanged messages after a one-prompt run. In a chat, use `/history`, `/reset`, and `exit`.
+`-d` shows tool calls and results. `--history` prints the exchanged messages after a one-prompt run. In a chat, use
+`/history`, `/reset`, and `exit`.
 
 The model options match the Python agents: `--profile NAME`, `--local`, `--openai`, `--model`, and `--base-url`.
 
 ## Parallel calls
 
-[instructions.json](instructions.json) currently enables `parallel_tool_calls`. Tool scripts run as concurrent child processes, so independent calls can overlap even though Node's JavaScript runs on an event loop.
+[instructions.json](instructions.json) currently enables `parallel_tool_calls`. Tool scripts run as concurrent child
+processes, so independent calls can overlap even though Node's JavaScript runs on an event loop.
 
-Set the option to `false` to queue calls one at a time, and keep the accompanying instructions consistent. The launcher loads local tools. Its own instructions.json augments the shared context/instructions.json, including guidance to the model about independent and dependent calls.
+Set the option to `false` to queue calls one at a time, and keep the accompanying instructions consistent. The launcher
+loads local tools. Its own instructions.json augments the shared context/instructions.json, including guidance to the
+model about independent and dependent calls.
 
 ## Where the code is
 

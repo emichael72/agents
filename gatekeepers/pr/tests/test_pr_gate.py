@@ -14,9 +14,9 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
-import httpx
 from fastapi.testclient import TestClient
 
 from gatekeepers.pr import SETTINGS_FILE
@@ -35,12 +35,12 @@ from gatekeepers.pr.settings import GateSettings
 SETTINGS = GateSettings(repo="owner/name", developer="dev", base_url="http://gate.test", pr_comment=False,
                         allow_skip=False, data_dir=Path("/nonexistent"))
 
-FIXTURE = {"title": "C math quiz", "questions": [
+FIXTURE: dict[str, Any] = {"title": "C math quiz", "questions": [
     {"question": f"What does the changed code do in case {i}?",
      "options": ["Answer A", "Answer B", "Answer C", "Answer D"],
      "correct": i, "explanation": "Private explanation sentinel " + str(i)}
     for i in range(3)]}
-INFO = {"number": 1, "state": "open", "base": {"ref": "main", "sha": "b" * 40},
+INFO: dict[str, Any] = {"number": 1, "state": "open", "base": {"ref": "main", "sha": "b" * 40},
         "head": {"sha": "a" * 40}, "user": {"login": SETTINGS.developer}, "title": "Compute pi"}
 CODE_CHANGE = {"build_ok": True, "build_report": "$ make && make check: succeeded", "docs_ok": True, "docs_report": "All 1 changed C/C++ file(s) are documented.",
                "cosmetic": False, "code_files": ["src/pi.c"]}
@@ -55,6 +55,7 @@ def reply(content, finish_reason="stop"):
     return {"choices": [{"finish_reason": finish_reason, "message": {"content": content}}]}
 
 
+# noinspection SqlNoDataSourceInspection
 class QuizTests(unittest.TestCase):
 
     def setUp(self):
@@ -166,14 +167,18 @@ class QuizTests(unittest.TestCase):
         self.assertEqual(self.gate.store.get(self.qid)["published"], "success")
 
     def test_invalid_answers_rejected(self):
-        for answers in [[], [4, 0, 0], [True, 0, 0], ["0", 0, 0]]:
+        invalid_answers: list[Any] = [[], [4, 0, 0], [True, 0, 0], ["0", 0, 0]]
+        for answers in invalid_answers:
             with self.assertRaises(ValueError):
                 self.gate.submit(self.qid, answers)
 
     def test_browser_form_csrf_and_grading(self):
         url = "/q/" + self.qid
         self.assertEqual(self.client.post(url, data={"q0": "0"}).status_code, 403)
-        token = re.search(r'name="csrf" value="([0-9a-f]+)"', self.client.get(url).text).group(1)
+        match = re.search(r'name="csrf" value="([0-9a-f]+)"', self.client.get(url).text)
+        self.assertIsNotNone(match)
+        assert match is not None
+        token = match.group(1)
         data = {"csrf": token, **{f"q{i}": str(a) for i, a in enumerate(self.answers)}}
         response = self.client.post(url, data=data)
         self.assertEqual(response.status_code, 200)
@@ -266,7 +271,10 @@ class QuizTests(unittest.TestCase):
         with self.enabled(allow_skip=True):
             page = self.client.get(url).text
             self.assertIn('formaction="/q/%s/skip"' % self.qid, page)
-            token = re.search(r'name="csrf" value="([0-9a-f]+)"', page).group(1)
+            match = re.search(r'name="csrf" value="([0-9a-f]+)"', page)
+            self.assertIsNotNone(match)
+            assert match is not None
+            token = match.group(1)
             self.assertEqual(self.client.post(url + "/skip", data={}).status_code, 403)  # Needs the form token
             response = self.client.post(url + "/skip", data={"csrf": token})
         self.assertEqual(response.status_code, 200)
@@ -376,6 +384,26 @@ class ModelTests(unittest.TestCase):
             settings = QuizGenerator(models_file=self.models).resolve_model("openai")
         self.assertEqual((settings["model"], settings["api_key"]), ("gpt", "sk-test"))
 
+    def test_model_attempts_come_from_settings_and_environment(self):
+        manifest = json.loads(SETTINGS_FILE.read_text())["settings"]
+        with patch.dict(os.environ, {"QUIZ_MODEL_ATTEMPTS": ""}):
+            self.assertEqual(QuizGenerator().attempts, int(manifest["QUIZ_MODEL_ATTEMPTS"]))
+        settings = {"name": "Local", "base_url": "http://x/v1", "model": "m", "api_key": "k", "timeout": 5}
+        for attempts in (1, 3):
+            with self.subTest(attempts=attempts), patch.dict(os.environ, {"QUIZ_MODEL_ATTEMPTS": str(attempts)}), \
+                    patch.object(QuizGenerator, "resolve_model", return_value=settings), \
+                    patch("gatekeepers.pr.generator.httpx.post") as post:
+                post.return_value.json.return_value = reply("not JSON")
+                with self.assertRaisesRegex(ValueError, "No quiz was created"):
+                    QuizGenerator().generate("a small diff")
+                self.assertEqual(post.call_count, attempts)
+
+    def test_invalid_model_attempt_counts_are_rejected(self):
+        for value in ("0", "-1", "not a number", "1.5"):
+            with self.subTest(value=value), patch.dict(os.environ, {"QUIZ_MODEL_ATTEMPTS": value}), \
+                    self.assertRaises(ValueError):
+                QuizGenerator()
+
     def test_missing_key_and_unknown_profile(self):
         with patch.dict(os.environ, {"TEST_OPENAI_KEY": ""}), self.assertRaises(ValueError):
             QuizGenerator(models_file=self.models).resolve_model("openai")
@@ -384,7 +412,7 @@ class ModelTests(unittest.TestCase):
 
     def test_fenced_json_is_accepted_and_invalid_reply_retried(self):
         settings = {"name": "Local", "base_url": "http://x/v1", "model": "m", "api_key": "k", "timeout": 5}
-        with patch.object(QuizGenerator, "resolve_model", return_value=settings), patch.object(httpx, "post") as post:
+        with patch.object(QuizGenerator, "resolve_model", return_value=settings), patch("gatekeepers.pr.generator.httpx.post") as post:
             post.return_value.json.side_effect = [reply("not JSON"), reply("```json\n" + json.dumps(FIXTURE) + "\n```")]
             content, source = QuizGenerator().generate("a small diff", "local")
             self.assertEqual(len(content.questions), 3)
@@ -400,7 +428,7 @@ class ModelTests(unittest.TestCase):
     def test_the_pull_request_and_test_output_reach_the_quiz_writer(self):
         settings = {"name": "Local", "base_url": "http://x/v1", "model": "m", "api_key": "k", "timeout": 5}
         context = QuizGenerator.context({"title": "Add -w", "body": "Works with -dpw."}, "$ make && make check: succeeded\n./core_dump -d")
-        with patch.object(QuizGenerator, "resolve_model", return_value=settings), patch.object(httpx, "post") as post:
+        with patch.object(QuizGenerator, "resolve_model", return_value=settings), patch("gatekeepers.pr.generator.httpx.post") as post:
             post.return_value.json.return_value = reply(json.dumps(FIXTURE))
             QuizGenerator().generate("a diff", "local", ["src/main.c"], context)
         prompt = post.call_args.kwargs["json"]["messages"][1]["content"]
@@ -412,7 +440,7 @@ class ModelTests(unittest.TestCase):
     def test_a_code_change_called_cosmetic_is_rejected(self):
         settings = {"name": "Local", "base_url": "http://x/v1", "model": "m", "api_key": "k", "timeout": 5}
         cosmetic = json.dumps({"title": "Comment updates", "cosmetic": True, "questions": []})
-        with patch.object(QuizGenerator, "resolve_model", return_value=settings), patch.object(httpx, "post") as post:
+        with patch.object(QuizGenerator, "resolve_model", return_value=settings), patch("gatekeepers.pr.generator.httpx.post") as post:
             post.return_value.json.side_effect = [reply(cosmetic), reply(cosmetic)]
             with self.assertRaisesRegex(ValueError, "cosmetic"):
                 QuizGenerator().generate("a small diff", "local", ["src/pi.c"])
@@ -548,7 +576,7 @@ class ServiceControlTests(unittest.TestCase):
     def test_only_the_gate_unit_is_started(self):
         calls = []
 
-        def fake_run(command, **kwargs):
+        def fake_run(command, **_kwargs):
             calls.append(command)
             return subprocess.CompletedProcess(command, 0, "", "")
 
@@ -588,7 +616,8 @@ class CloneSyncTests(unittest.TestCase):
         self.commit(self.other, "a.c", "First")
         self.git("clone", "-q", str(self.remote), str(self.clone), cwd=root)
 
-    def git(self, *args, cwd):
+    @staticmethod
+    def git(*args, cwd):
         subprocess.run(["git", "-c", "user.name=T", "-c", "user.email=t@x", *args], cwd=cwd, check=True,
                        capture_output=True)
 
@@ -627,6 +656,8 @@ class CloneSyncTests(unittest.TestCase):
         self.commit(self.other, "b.c", "Second")
         poller.sync_clone()
         self.assertTrue((self.clone / "b.c").exists())
+        self.assertIsNotNone(poller.last_sync)
+        assert poller.last_sync is not None
         self.assertIn("fast-forwarded by 1 commit", poller.last_sync)
         self.commit(self.other, "c.c", "Third")
         poller.sync_clone()  # Not due yet

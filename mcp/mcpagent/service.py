@@ -156,7 +156,8 @@ class MCPService:
         if reader is None:
             loop = asyncio.get_running_loop()
             reader = asyncio.StreamReader(limit=2 ** 24)  # A tool call's arguments may be a whole file
-            await loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(reader), sys.stdin)
+            protocol = asyncio.StreamReaderProtocol(reader)
+            await loop.connect_read_pipe(lambda: protocol, sys.stdin)
         if writer is None:
             def writer(text: str) -> None:
                 sys.stdout.write(text + "\n")
@@ -395,7 +396,8 @@ class MCPService:
         """
         self._tools_registry[tool.name] = tool
 
-    async def _run_one_cmdline_async(self, argv: list[str], cwd: Optional[str] = None,
+    @staticmethod
+    async def _run_one_cmdline_async(argv: list[str], cwd: Optional[str] = None,
                                      env: Optional[dict[str, str]] = None) -> dict[str, Any]:
         """
         Run one tool command and collect its output.

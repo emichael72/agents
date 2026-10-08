@@ -446,6 +446,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen, [('/v1/responses', 'Bearer lm-studio')])  # The local profile's own key
 
 
+# noinspection DuplicatedCode
 class OutputTests(unittest.TestCase):
     """The terminal layout shared by the three agents (README.md, "Terminal output")."""
 

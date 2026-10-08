@@ -20,14 +20,13 @@ from pydantic import ValidationError
 
 from gatekeepers.pr import INSTRUCTIONS_FILE, MODELS_FILE
 from gatekeepers.pr.quiz import Quiz
+from gatekeepers.pr.settings import GateSettings
 
 
 class QuizGenerator:
     """
     Writes quizzes with the model of one profile.
     """
-
-    ATTEMPTS = 2  # An invalid reply is retried once
 
     def __init__(self, profile: Optional[str] = None, models_file: Path = MODELS_FILE,
                  instructions_file: Path = INSTRUCTIONS_FILE) -> None:
@@ -41,6 +40,9 @@ class QuizGenerator:
         self.profile = profile
         self.models_file = models_file
         self.instructions_file = instructions_file
+        self.attempts = int(GateSettings.setting("QUIZ_MODEL_ATTEMPTS"))
+        if self.attempts < 1:
+            raise ValueError("QUIZ_MODEL_ATTEMPTS must be at least 1.")
 
     def instructions(self) -> str:
         """
@@ -145,8 +147,8 @@ class QuizGenerator:
     def generate(self, diff: str, profile: Optional[str] = None,
                  code_files: Optional[list[str]] = None, context: str = "") -> tuple[Quiz, str]:
         """
-        Ask the model for a quiz about a diff. An invalid reply is retried once; so is a reply that
-        calls the change cosmetic when the server found code changes.
+        Ask the model for a quiz about a diff, up to QUIZ_MODEL_ATTEMPTS times. Invalid or unfinished
+        replies are retried within that limit, as are replies that call a code change cosmetic.
         Args:
             diff: The PR's unified diff.
             profile: The model profile; None uses this generator's, then the models file's default.
@@ -168,7 +170,7 @@ class QuizGenerator:
                         else "no code changed; only comments, formatting or documentation files")
             prompt = f"Server analysis: {analysis}.\n\n" + prompt
         error = None
-        for _ in range(self.ATTEMPTS):
+        for _ in range(self.attempts):
             response = httpx.post(
                 settings["base_url"].rstrip("/") + "/chat/completions",
                 headers={"Authorization": "Bearer " + settings["api_key"]},

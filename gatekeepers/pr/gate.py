@@ -51,9 +51,9 @@ class QuizGate:
             generator: The quiz writer; None uses the settings' model profile.
         """
         self.settings = settings
-        self.store = store or QuizStore(settings.data_dir)
-        self.github = github or GitHub(settings.repo)
-        self.generator = generator or QuizGenerator(settings.profile)
+        self.store: QuizStore = store or QuizStore(settings.data_dir)
+        self.github: GitHub = github or GitHub(settings.repo)
+        self.generator: QuizGenerator = generator or QuizGenerator(settings.profile)
 
     @classmethod
     def load(cls) -> "QuizGate":

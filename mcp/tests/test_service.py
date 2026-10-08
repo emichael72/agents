@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 import unittest
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import asyncio
 import io
@@ -47,9 +47,14 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         Returns:
             dict: The JSON-RPC response.
         """
-        line = await self.service.handle_line(json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': method,
-                                                          'params': params or {}}))
+        return await self.response(json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': method,
+                                                'params': params or {}}))
+
+    async def response(self, request: str) -> Any:
+        """Decode a request's response, failing if the server unexpectedly sends none."""
+        line = await self.service.handle_line(request)
         self.assertIsNotNone(line)
+        assert line is not None
         return json.loads(line)
 
     async def test_discovery_and_all_tools(self):
@@ -384,11 +389,11 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         notification = json.dumps({'jsonrpc': '2.0', 'method': 'notifications/initialized'})
         self.assertIsNone(await self.service.handle_line(notification))  # No response to a notification
         self.assertIsNone(await self.service.handle_line(''))
-        self.assertEqual(json.loads(await self.service.handle_line('{not json'))['error']['code'], -32700)
-        self.assertEqual(json.loads(await self.service.handle_line('{}'))['error']['code'], -32600)
-        self.assertEqual(json.loads(await self.service.handle_line('[]'))['error']['code'], -32600)
+        self.assertEqual((await self.response('{not json'))['error']['code'], -32700)
+        self.assertEqual((await self.response('{}'))['error']['code'], -32600)
+        self.assertEqual((await self.response('[]'))['error']['code'], -32600)
         ping = {'jsonrpc': '2.0', 'id': 7, 'method': 'ping'}
-        batch = json.loads(await self.service.handle_line(json.dumps([ping, json.loads(notification)])))
+        batch = await self.response(json.dumps([ping, json.loads(notification)]))
         self.assertEqual(batch, [{'jsonrpc': '2.0', 'id': 7, 'result': {}}])
 
         # run_stdio: one response line per request, until stdin closes; a short log
@@ -405,7 +410,9 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.log), 2)
 
     def test_the_server_does_not_run_on_its_own(self):
-        with patch.object(sys, 'argv', ['service']), patch.object(sys.stdin, 'isatty', return_value=True), \
+        stdin = Mock(spec=io.TextIOBase)
+        stdin.isatty.return_value = True
+        with patch.object(sys, 'argv', ['service']), patch('sys.stdin', new=stdin), \
                 patch('sys.stderr', new_callable=io.StringIO) as stderr:
             self.assertEqual(service_module.main(), 2)
         self.assertIn('started by the agent (python mcp/agent.py)', stderr.getvalue())
@@ -513,15 +520,17 @@ class ConfigLoadingTests(unittest.TestCase):
     def test_server_validates_before_starting_and_restores_cwd(self):
         old_cwd = Path.cwd()
 
-        async def served(service):
-            served.service = service
+        served_services: list[MCPService] = []
+
+        async def served(service: MCPService):
+            served_services.append(service)
             return 0
 
         with patch.object(MCPService, 'run_stdio', autospec=True, side_effect=served) as run:
             config_file = self.write({'tools_dir': 'tools'})
             self.assertEqual(MCPService.serve(config_file), 0)
             run.assert_called_once()
-            self.assertIn('time', served.service._tools_data)  # tools_dir read from the repository root
+            self.assertIn('time', served_services[0]._tools_data)  # tools_dir read from the repository root
             self.assertEqual(Path.cwd(), old_cwd)
             run.reset_mock()
             config_file = self.write({'tools_dir': 123})
