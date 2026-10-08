@@ -91,6 +91,7 @@
     "seq": "print a sequence of numbers",
     "sha256sum": "SHA-256 checksum",
     "shellcheck": "check shell scripts for bugs (shellcheck script.sh)",
+    "shfmt": "format shell scripts (shfmt -d -i 4 script.sh shows the changes; -w writes them)",
     "size": "section sizes of an object file",
     "sort": "sort lines",
     "split": "split a file into pieces",
