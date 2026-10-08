@@ -42,9 +42,11 @@ class GitHub:
 
     def info(self) -> dict[str, Any]:
         """The repository, as GitHub describes it to this account; read once."""
-        if self._info is None:
-            self._info = json.loads(self.run("api", f"repos/{self.repo}"))
-        return self._info
+        info = self._info
+        if info is None:
+            info = json.loads(self.run("api", f"repos/{self.repo}"))
+            self._info = info
+        return info
 
     def default_branch(self) -> str:
         """The branch pull requests target, e.g. main."""

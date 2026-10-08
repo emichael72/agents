@@ -7,7 +7,7 @@ Description:
     agents' pr_gate tool share: it is the place to change them.
 
     `Project`: one gated repository. The folders marked "pr_gated" in context/paths.json are the
-    gated projects; each must hold a git clone whose origin is on github.com, which names the
+    gated projects; each must hold a git clone whose origin is on GitHub, which names the
     repository (owner/name). settings.json's "projects" may override the build settings per folder.
 """
 
@@ -50,7 +50,7 @@ class Project:
         Returns:
             str: owner/name.
         Raises:
-            ValueError: If the folder is not a git clone, or its origin is not on github.com.
+            ValueError: If the folder is not a git clone, or its origin is not on GitHub.
         """
         try:
             result = subprocess.run(["git", "-C", str(path), "remote", "get-url", "origin"], capture_output=True,

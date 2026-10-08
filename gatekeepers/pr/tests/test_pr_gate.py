@@ -769,7 +769,10 @@ class MultiRepositoryTests(unittest.TestCase):
         one, two = self.gate.create(self.ONE, 1), self.gate.create(self.TWO, 1)
         self.assertNotEqual(one["id"], two["id"])
         self.assertEqual((one["repo"], two["repo"]), (self.ONE, self.TWO))
-        self.assertEqual(self.gate.find_quiz(self.TWO, 1, INFO["head"]["sha"], INFO["base"]["sha"])["id"], two["id"])
+        found = self.gate.find_quiz(self.TWO, 1, INFO["head"]["sha"], INFO["base"]["sha"])
+        self.assertIsNotNone(found)
+        assert found is not None
+        self.assertEqual(found["id"], two["id"])
         statuses = [c.args[1] for c in self.mock_gh.call_args_list if "/statuses/" in c.args[1]]
         self.assertTrue(any(s.startswith("repos/o/one/") for s in statuses))
         self.assertTrue(any(s.startswith("repos/o/two/") for s in statuses))
@@ -823,6 +826,8 @@ class MultiRepositoryTests(unittest.TestCase):
     def test_old_quizzes_are_adopted_only_by_a_single_project(self):
         row = self.gate.create(self.ONE, 1)
         with self.gate.store.connect() as db:
+            # This SQL runs against the test's temporary SQLite database.
+            # noinspection SqlNoDataSourceInspection
             db.execute("UPDATE quizzes SET repo=''")
         self.gate.init_store()  # Two projects: whose they were is unknown
         self.assertEqual(self.gate.store.get(row["id"])["repo"], "")

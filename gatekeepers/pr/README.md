@@ -137,12 +137,12 @@ what enforces the requirement.
 
 ## Stored quizzes and retries
 
-| Information                                                                      | Location                                                |
-|----------------------------------------------------------------------------------|---------------------------------------------------------|
-| Questions, choices, key, explanations, model used, PR version, and check reports | SQLite `quizzes` table on minion                        |
-| Each attempt's score, total, pass/fail, and timestamp                            | SQLite `attempts` table                                 |
-| The code tests that `make check` runs                                            | Submitted project files: the project's Makefile         |
-| Required merge rule and reported commit statuses                                 | GitHub                                                  |
+| Information                                                                      | Location                                        |
+|----------------------------------------------------------------------------------|-------------------------------------------------|
+| Questions, choices, key, explanations, model used, PR version, and check reports | SQLite `quizzes` table on minion                |
+| Each attempt's score, total, pass/fail, and timestamp                            | SQLite `attempts` table                         |
+| The code tests that `make check` runs                                            | Submitted project files: the project's Makefile |
+| Required merge rule and reported commit statuses                                 | GitHub                                          |
 
 The default database is `gatekeepers/pr/data/quiz.sqlite3` in the repository checkout. `QUIZ_DATA_DIR` can move it. It
 survives restarts. Attempts store scores rather than the complete selection of answers. The History page shows the saved
@@ -167,14 +167,18 @@ Quizzes survive restarts; the poller's temporary generation-retry counters do no
 A project is gated by marking its folder in [context/paths.json](../../context/paths.json):
 
 ~~~json
-"core_dump": {
-  "path": "~/projects/core_dump",
-  "access": "rwx",
-  "pr_gated": true
+{
+  "paths": {
+    "core_dump": {
+      "path": "~/projects/core_dump",
+      "access": "rwx",
+      "pr_gated": true
+    }
+  }
 }
 ~~~
 
-The folder must hold a git clone whose `origin` is on github.com; that remote names the repository (`owner/name`), so
+The folder must hold a git clone whose `origin` is on `github.com`; that remote names the repository (`owner/name`), so
 it is not configured twice. Only GitHub is supported. The service's `gh` login needs write access to the repository to
 post the status. At startup the service checks each project: one it cannot read or post to is logged and left out, and
 a folder whose clone is missing or not on GitHub is logged as skipped.
@@ -187,7 +191,13 @@ The build settings `QUIZ_BUILD_COMMAND`, `QUIZ_TEST_TARGET`, and `QUIZ_FAIL_ON_W
 project can replace them in the `projects` section of [settings.json](settings.json), keyed by folder name:
 
 ~~~json
-"projects": {"core_dump": {"QUIZ_TEST_TARGET": "test"}}
+{
+  "projects": {
+    "core_dump": {
+      "QUIZ_TEST_TARGET": "test"
+    }
+  }
+}
 ~~~
 
 Only PRs by one developer are assessed: `QUIZ_DEVELOPER`, or when it is empty, the account `gh` is signed in as.
