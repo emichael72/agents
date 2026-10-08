@@ -1,24 +1,21 @@
 # Memory
 
-The agents' memory between runs: short notes, one topic per file, in the folder named `memory` in
-[`context/paths.json`](../../context/paths.json) (`agents/.memory/`, read and write, no execute).
-Every agent loads `.memory/index.md` into its instructions at start-up, so it knows what it
-remembers without being asked; this tool saves, reads and forgets the notes behind the index. See
-"Memory" in the [repository README](../../README.md#memory).
+Memory is a set of short notes shared by the agents between chats. It can hold project decisions, preferences, or things worth remembering.
 
-| Action   | Parameters                                       | Does                                                                                                |
-|----------|--------------------------------------------------|-----------------------------------------------------------------------------------------------------|
-| `save`   | `topic`, `text`, `summary`, `replace` (optional) | Adds `text` as a line to the topic's note (`replace` rewrites the note), and updates its index line |
-| `read`   | `topic` (optional)                               | The topic's note, or the index                                                                      |
-| `forget` | `topic`                                          | Deletes the note and its index line                                                                 |
+Notes normally live in `.memory/`. The index is loaded at startup so an agent knows which topics exist; it reads the full note when needed. These files stay local and are ignored by Git.
 
-**Usage Example:**
+## Save, read, or forget
 
-```bash
-python3 memory/memory.py --action=save --topic=preferences --text="Prefers short answers"
-python3 memory/memory.py --action=read --topic=preferences
-python3 memory/memory.py --action=forget --topic=preferences
-```
+From the repository root:
 
-Topics are plain names (letters, digits, `-`, `_`), stored as `<topic>.md`; a note holds at most
-4,000 characters. The notes are local to this machine (git ignores `.memory/`). Never store secrets.
+~~~bash
+python3 tools/memory/memory.py --action=save --topic=preferences --text="Prefers short answers"
+python3 tools/memory/memory.py --action=read --topic=preferences
+python3 tools/memory/memory.py --action=forget --topic=preferences
+~~~
+
+Read without a topic to see the index. Saving appends a line; `--replace=true` rewrites the note. `--summary` sets its one-line description in the index.
+
+A topic is stored as `<topic>.md` and holds at most 4,000 characters. Names are normalized to lowercase letters, digits, dashes, and underscores. Notes are for lasting information, not secrets.
+
+The folder named memory in [context/paths.json](https://github.com/emichael72/agents/blob/a2fe18a204843563134bb1ed0d7aaf63d558691e/context/paths.json) must allow reading and writing. Typing `exit` in a chat may give the agent a final turn to save notes; Ctrl+C and one-prompt runs skip that turn.

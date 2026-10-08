@@ -1,76 +1,42 @@
-# Pydantic Agent (`agents/pydantic`)
+# Pydantic agent
 
-A terminal agent built with [pydantic-ai](https://pydantic.dev/docs/ai/), the counterpart of
-[MCPAgent](../mcp). It uses the same model profiles
-([`../context/models.json`](../context/models.json)), the same instructions and the same tools, from
-the shared [tools folder](../tools). The difference is **who runs the agent loop**: MCPAgent's
-`MCPAgent.ask()` is hand-written, while here pydantic-ai does it.
+This version uses Pydantic AI to manage the conversation with the model and the repeated tool calls. The tools and model settings are the same as the other agents; the framework handles the loop.
 
-## Layout
+## Run it
 
-```
-agent.py                    launcher that preserves the existing command
-pydantic_agent/__init__.py  package root: REPO_ROOT and the shared context files' paths; its
-                            name avoids the installed pydantic package's
-pydantic_agent/__main__.py  command line (python -m pydantic_agent): argparse, then AgentSession
-pydantic_agent/session.py   AgentSession: builds the Agent, runs turns, renders events, the chat
-pydantic_agent/context.py   AgentContext: shared instructions, identity, memory, settings, limits
-pydantic_agent/profiles.py  ModelProfiles: the shared model profiles and the pydantic-ai model
-pydantic_agent/output.py    Output: the terminal layout shared by the three agents
-pydantic_agent/toolset.py   LocalTools: loads ../tools/*/tool.json as pydantic-ai tools
-tests/                      offline tests: scripted FunctionModel, tools run for real
-```
+From the repository root, after installing:
 
-## Setup
+~~~bash
+.venv/bin/python pydantic/agent.py
+.venv/bin/python pydantic/agent.py -d --prompt "What time is it in Tokyo?"
+~~~
 
-The repository's [`install.sh`](../install.sh) installs `requirements.txt` into the `.venv/` that
-this agent shares with MCPAgent.
+`-d` shows tool calls and results. Add `--history` to a one-prompt run to print the exchanged messages. In a chat, `/history` shows them, `/reset` clears them, and `exit` ends the session.
 
-## Run
+Model options are `--profile NAME`, `--local`, `--openai`, `--model`, and `--base-url`. They use the profiles in [context/models.json](https://github.com/emichael72/agents/blob/a2fe18a204843563134bb1ed0d7aaf63d558691e/context/models.json).
 
-```bash
-.venv/bin/python pydantic/agent.py                                # interactive chat
-.venv/bin/python pydantic/agent.py --prompt "Time now" --history  # one prompt + raw message dump
-.venv/bin/python -m unittest discover -s pydantic/tests           # offline tests
-```
+## Parallel calls
 
-Run these from the repository root.
+[instructions.json](https://github.com/emichael72/agents/blob/a2fe18a204843563134bb1ed0d7aaf63d558691e/pydantic/instructions.json) currently sets `parallel_tool_calls` to `true`. Independent calls from one model response can run together. A build that depends on an edit must wait for a later response.
 
-The importable package is `pydantic_agent`, inside this folder; `install.sh` installs it into the
-`.venv` in editable mode, so `.venv/bin/python -m pydantic_agent` also works from any folder, and
-PyCharm resolves its imports with the `.venv` as the interpreter. Keep this folder free of
-`__init__.py`: a package named `pydantic` would shadow the installed dependency.
+Set it to `false` for sequential execution, update the accompanying instructions to agree, and restart the agent. There is no `--parallel` flag in the current launcher.
 
-In the chat, `/history` prints the messages exchanged with the model, `/reset` clears them,
-and `exit` quits. A spinner shows what the agent is doing; with `-d` (`--debug`), tool calls are
-shown as `→ tool(args)` and results as `← tool: output` instead.
+The agent adds its own instructions.json to the shared context/instructions.json. Its additions explain the parallel behavior to the model. It also loads the shared skills list and memory index. Tools run locally.
 
-| Option / variable | Purpose |
-| --- | --- |
-| `--profile NAME`, `--local`, `--openai` | Model profile from `../context/models.json`; default: its `"default"` (`local`) |
-| `--model`, `--base-url` | Override the profile's model or server for this run |
+## Where the code is
 
-## How it maps to the other two
+`agent.py` launches the installed `pydantic_agent` package. Most of the work is in:
 
-| Concern | mcpagent | pydantic | vercel |
-| --- | --- | --- | --- |
-| Agent loop | `MCPAgent.ask()`, hand-written | `Agent.run_stream_events()` | `ToolLoopAgent.stream()` |
-| Instructions | `../context/instructions.json` (`instructions_file` in `mcpagent.json`), then `../mcp/instructions.json` (`agent_instructions_file`) | `../context/instructions.json`, then `instructions.json` → `AgentContext.system_prompt()` | `../context/instructions.json`, then `instructions.json` → `buildAgent()` |
-| Model provider | raw `httpx`, `/v1/responses` | `OpenAIChatModel` | `@ai-sdk/openai-compatible` |
-| Tools | `../tools/*/tool.json`, loaded by the server (`tools_dir`) | `../tools/*/tool.json` → `Tool.from_schema` | `../tools/*/tool.json` → `z.fromJSONSchema` |
-| Argument validation | `jsonschema.validate` | `jsonschema.validate` | zod, from the same JSON schema |
-| Tool failure | `isError` result | `ToolFailed` | thrown `Error` → `tool-error` |
-| Running a script | the server, `asyncio.create_subprocess_exec` | `subprocess.run` in a worker thread | async `execFile`, no threads |
-| Conversation history | list of Responses items | `result.all_messages()` | `response.messages` |
-| Loop cap | `max_tool_calls=8` | `UsageLimits(tool_calls_limit=8)` | `stopWhen: isStepCount(9)` |
-| Tool calls of one response | one at a time: the server is single-flight | at the same time: `parallel_tool_calls` in `instructions.json` | at the same time: `parallel_tool_calls` in `instructions.json` (`oneAtATime()` when false) |
+- `session.py`: builds the Agent and displays its events.
+- `toolset.py`: turns shared tool manifests into Pydantic AI tools.
+- `context.py` and `profiles.py`: instructions, settings, and model selection.
 
-## Parallel tool calls
+`.venv/bin/python -m pydantic_agent` also launches it. The package name is deliberately different from the Pydantic dependency.
 
-The model only *asks* for tools; the agent code decides how to run them. When one model response
-contains several tool calls, they run at the same time
-(`parallel_tool_call_execution_mode("parallel")`), as `parallel_tool_calls` in
-[`instructions.json`](instructions.json) sets; `false` runs them one at a time. The same file adds
-lines to the shared instructions telling the model so: several calls go in one response only when
-none depends on another, so a build never starts before the edit it needs. It also gives the agent
-its name (`dantic`), which the shared identity line uses.
+Offline tests use a stand-in model with real tools:
+
+~~~bash
+.venv/bin/python -m unittest discover -s pydantic/tests
+~~~
+
+See the [main README](../README.md) for installation and the [tools guide](../tools/README.md) for what the agent can do.

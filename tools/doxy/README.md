@@ -1,49 +1,20 @@
-# Doxy Check
+# Documentation check
 
-Checks that C/C++ sources and headers are documented with Doxygen: every file has a `@file`
-block, and every function, parameter and return value is described. Read-only.
+`doxy` checks C/C++ files for Doxygen comments: a file block, function descriptions, parameters, and return values. It reads the sources without changing them.
 
-**Usage Example:**
+From the repository root:
 
-```bash
-bash doxy/doxy.sh ~/projects/core_dump/src
-bash doxy/doxy.sh -- "src/pi.c include/pi.h"   # several paths in one argument, as the agents pass them
-bash doxy/doxy.sh --help                        # usage; --version prints the script's version
-```
+~~~bash
+bash tools/doxy/doxy.sh -- core_dump/src
+bash tools/doxy/doxy.sh -- "core_dump/src/modules/pi.c core_dump/src/include/pi.h"
+~~~
 
-Each path is a file (`.c`, `.h`, `.cc`, `.cpp`, `.hpp`, `.cxx`, `.hh`) or a folder, searched
-recursively. Paths are relative to the tools folder, or absolute; a leading `~` is expanded.
+Folders are searched recursively. Files must be C/C++ sources or headers and must be inside permitted paths.
 
-## Result
+The result either says everything is documented or lists problems as `file:line: message`. The output is limited to 100 problem lines.
 
-Either `All documented: N file(s) checked, ...`, or the problems, one per line as
-`file:line: message` (at most 100 lines):
+A missing `@file` block is reported explicitly because Doxygen can otherwise ignore that file's contents. In core_dump, document a function once in its header and put the file block in its implementation.
 
-```text
-Documentation problems: 3 in 6 file(s) checked (doxygen 1.16.1, Doxyfile.check):
-src/modules/pi.c:1: error: File has no @file documentation block, so Doxygen does not check its contents.
-src/math.c:6: error: Member subtract(int a, int b) (function) of file math.c is not documented.
-src/math.c:13: error: The following parameter of multiply(int a, int b) is not documented:
-  parameter 'b'
-```
+**Exit status matters:** documentation problems are reported with exit status 0. A nonzero status means the check could not run. The PR gate reads the report to decide whether documentation passed.
 
-Documentation problems are the tool's result, so it exits 0. It exits nonzero only when the check
-cannot run: Doxygen is missing, a path does not exist or is not C/C++, or Doxygen itself fails.
-The result goes to stdout; why the check could not run goes to stderr, as `Error: <reason>`.
-
-## Settings
-
-[`Doxyfile.check`](Doxyfile.check) holds the Doxygen settings; edit it to change what is checked.
-The script keeps every setting except these, which it overrides:
-
-| Setting | Override | Why |
-| --- | --- | --- |
-| `INPUT` | The paths given to the tool | The tool checks what it is asked to |
-| `OUTPUT_DIRECTORY`, `WARN_LOGFILE` | A temporary folder, deleted afterwards | Nothing is written next to the sources |
-| `GENERATE_XML` | `YES` | Doxygen refuses to run with no output format |
-| `WARN_FORMAT` | `$file:$line: $text` | One parseable format |
-
-With `EXTRACT_ALL = NO`, Doxygen ignores everything in a file that has no `@file` block, without
-a warning. The script therefore also reports each such file itself.
-
-Requires Doxygen (`sudo dnf install doxygen` on Fedora, `sudo apt install doxygen` on Debian/Ubuntu).
+Requires Doxygen. [Doxyfile.check](https://github.com/emichael72/agents/blob/a2fe18a204843563134bb1ed0d7aaf63d558691e/tools/doxy/Doxyfile.check) holds the check settings. Both the coding agents and the PR gate use this same script.

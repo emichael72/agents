@@ -1,33 +1,35 @@
-# Skill
+# Skills
 
-Reads the agents' skills: step-by-step procedures for kinds of tasks, such as changing code and
-opening a pull request. Each skill is a folder in [`skills/`](../../skills) (`skills_dir` in
-[`context/agent.json`](../../context/agent.json)) holding a `SKILL.md`:
+A skill is a written procedure for a task. Tools perform individual actions; a skill explains which actions to take, in what order.
 
-```markdown
+For example, the pull-request skill tells the model to sync the repository, read the relevant code, edit it, add tests, run the checks, and submit the change.
+
+The agents list skill names and short descriptions at startup. When a task matches, the model uses this read-only tool to get the full procedure. A skill is not another agent or an executable program: the model follows the text using its available tools.
+
+## Read a skill
+
+From the repository root:
+
+~~~bash
+python3 tools/skill/skill.py
+python3 tools/skill/skill.py --name=pull-request
+~~~
+
+The first command lists skills; the second reads one.
+
+## Add a procedure
+
+Create `skills/<name>/SKILL.md` with a short header:
+
+~~~markdown
 ---
 name: pull-request
-description: Change code in a repository (a feature, a fix, a new module or option) and open a pull request (merge request, MR) for it.
+description: Make a code change and open a pull request.
 ---
 
-# Change code and open a pull request
+Write the procedure here.
+~~~
 
-1. Sync: ...
-```
+The folder name identifies the skill. The description says when to use it; the body gives the steps. The agents discover it on their next start. `skills_dir` in `context/agent.json` selects the folder.
 
-The header between the `---` lines gives the skill's `name` (its folder) and a one-line
-`description` that says when to use it. Every agent lists each skill's name and description at the
-end of its instructions when it starts, so the model knows which skills exist without loading them;
-when a task matches one, it reads the skill with this tool and follows its steps. Only that one
-line per skill is in every prompt; the procedure is read when needed.
-
-The tool only reads. Skill names are plain (letters, digits, `-` and `_`), so a name cannot reach
-outside the skills folder. To add a skill, add `skills/<name>/SKILL.md`; the agents list it on
-their next start.
-
-**Usage Example:**
-
-```bash
-python3 skill/skill.py                       # the skills, one line each
-python3 skill/skill.py --name=pull-request   # one skill's procedure
-```
+Skills guide the model's behavior. Actual access restrictions are enforced by the tools and gatekeepers.

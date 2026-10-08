@@ -1,27 +1,22 @@
-# PR Gate (status)
+# PR gate status
 
-The agents' view of the pull request gate: for each open pull request in the gated repository,
-whether the gate's service is running, and whether the request is blocked (build, tests,
-documentation, or a quiz waiting, with its link) or may merge.
+This is how an agent sees the pull request gate: which PRs are waiting, why a change is blocked, and where to take its quiz.
 
-With `action` set to `history`, it lists past assessments instead: when, the pull request and its
-title, the revision, the outcome and the attempts, as the gate's History page shows them.
+The tool reads assessments and checks the service. Quiz generation and grading belong to the separate [gate service](../../gatekeepers/pr/README.md).
 
-With `action` set to `start`, it starts the gate's own service (the `pr-gate` systemd user unit)
-and nothing else, then reports its state. The agents cannot stop or restart the gate: a gatekeeper
-the gated agent can switch off is no gatekeeper. That is left to the user, with
-`./install.sh --gate stop` or `restart`.
+## Use it
 
-The gate itself, its service, settings and documentation live in
-[`gatekeepers/pr`](../../gatekeepers/pr/README.md); this folder only holds the tool's manifest,
-which runs `gatekeepers/pr/pr_gate.sh status`.
+From the repository root:
 
-**Usage Example:**
+~~~bash
+bash gatekeepers/pr/pr_gate.sh status
+bash gatekeepers/pr/pr_gate.sh status --pr=8
+bash gatekeepers/pr/pr_gate.sh status --action=history --pr=8
+bash gatekeepers/pr/pr_gate.sh status --action=start
+~~~
 
-```bash
-bash ../gatekeepers/pr/pr_gate.sh status          # every open pull request
-bash ../gatekeepers/pr/pr_gate.sh status --pr 8   # one
-bash ../gatekeepers/pr/pr_gate.sh status --action history          # past assessments
-bash ../gatekeepers/pr/pr_gate.sh status --action history --pr 8   # one pull request's
-bash ../gatekeepers/pr/pr_gate.sh status --action start
-```
+Omit `--pr` to show all relevant requests. History shows previous assessments and their scores.
+
+The agent can start the systemd service, but it cannot stop or restart it through this tool. A person manages those actions with `./install.sh --gate stop` or `restart`.
+
+The result reports whether the gate permits merging. GitHub may still have other requirements. See the [walkthrough](../../gatekeepers/pr/FLOW.md) for how the status reaches GitHub.

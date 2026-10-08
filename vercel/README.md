@@ -1,76 +1,46 @@
-# Vercel Agent (`agents/vercel`)
+# Vercel agent
 
-A terminal agent built with Vercel's [AI SDK](https://ai-sdk.dev) (`ai` v7), the counterpart of the
-[pydantic agent](../pydantic) and [MCPAgent](../mcp). It uses the same model profiles
-([`../context/models.json`](../context/models.json)), the same instructions and the same tools, from
-the shared [tools folder](../tools). The agent loop is run by the SDK's `ToolLoopAgent`; this code
-only defines the tools and renders the stream in the terminal.
+This is the TypeScript version, using Vercel's AI SDK. `ToolLoopAgent` handles the model-and-tool loop; the surrounding code loads the shared settings, adapts the tools, and displays the conversation.
 
-## Layout
+## Run it
 
-```
-agent.ts                launcher that keeps the command: node vercel/agent.ts
-vercelagent/index.ts    public names: what the launcher and the tests import
-vercelagent/agent.ts    model, ToolLoopAgent and a thin terminal UI over its fullStream; main();
-                        shared ../context instructions
-vercelagent/tools.ts    loads ../tools/*/tool.json as AI SDK tools (zod-validated); REPO_ROOT
-tests/                  offline tests: the SDK's MockLanguageModelV4 replaces LM Studio, tools run for real
-```
+From the repository root, after installing:
 
-The package finds the repository's shared folders (`context/`, `tools/`) from `REPO_ROOT`, the
-nearest folder above it holding `pyproject.toml`, as the Python agents do.
+~~~bash
+node vercel/agent.ts
+node vercel/agent.ts -d --prompt "What time is it in Tokyo?"
+~~~
 
-Node 22.18+ runs the TypeScript files directly (type stripping), so there is no build step.
+Node.js 22.18 or later runs the TypeScript directly. If the installer downloaded Node into `.node/`, use `.node/bin/node` instead, or put `.node/bin` first in your PATH.
 
-## Setup
+`-d` shows tool calls and results. `--history` prints the exchanged messages after a one-prompt run. In a chat, use `/history`, `/reset`, and `exit`.
 
-The repository's [`install.sh`](../install.sh) checks Node.js (>= 22.18) and npm, then runs
-`npm ci` here to install exactly what `package-lock.json` records into `node_modules/`. When the
-system's Node.js is missing or older, it fetches a pinned Node.js 22 release from nodejs.org
-into the repository's `.node/` (checked against the release's SHA-256) and uses that; run the
-commands below with `.node/bin/node`, or with `.node/bin` first in `PATH`.
+The model options match the Python agents: `--profile NAME`, `--local`, `--openai`, `--model`, and `--base-url`.
 
-## Run
+## Parallel calls
 
-From the repository root:
+[instructions.json](https://github.com/emichael72/agents/blob/a2fe18a204843563134bb1ed0d7aaf63d558691e/vercel/instructions.json) currently enables `parallel_tool_calls`. Tool scripts run as concurrent child processes, so independent calls can overlap even though Node's JavaScript runs on an event loop.
 
-```bash
-node vercel/agent.ts                                # interactive chat, local tools
-node vercel/agent.ts --prompt "Time now" --history  # one prompt + raw message dump
-npm --prefix vercel test                            # offline tests
-npm --prefix vercel run typecheck                   # tsc --noEmit
-npm --prefix vercel run lint                        # Oxlint: likely bugs, not style (.oxlintrc.json)
-```
+Set the option to `false` to queue calls one at a time, and keep the accompanying instructions consistent. The launcher loads local tools. Its own instructions.json augments the shared context/instructions.json, including guidance to the model about independent and dependent calls.
 
-In the chat, `/history` prints the messages exchanged with the model, `/reset` clears them,
-and `exit` quits. A spinner ([ora](https://github.com/sindresorhus/ora)) shows what the agent is
-doing; with `-d` (`--debug`), tool calls are shown as `→ tool(args)`, results as `← tool: output`
-and failures as `✗ tool: error` instead.
+## Where the code is
 
-| Option / variable | Purpose |
-| --- | --- |
-| `--profile NAME`, `--local`, `--openai` | Model profile from `../context/models.json`; default: its `"default"` (`local`) |
-| `--model`, `--base-url` | Override the profile's model or server for this run |
+`agent.ts` is the launcher. Inside `vercelagent/`:
 
-## How it maps to the other two
+- `agent.ts` builds the model and agent and handles the chat.
+- `tools.ts` loads the tool manifests, validates arguments with Zod, and runs the scripts.
+- `index.ts` exposes the names used by the launcher and tests.
 
-| Concern | mcpagent | pydantic | vercel |
-| --- | --- | --- | --- |
-| Agent loop | `MCPAgent.ask()`, hand-written | `Agent.run_stream_events()` | `ToolLoopAgent.stream()` |
-| Instructions | `../context/instructions.json` (`instructions_file` in `mcpagent.json`), then `../mcp/instructions.json` (`agent_instructions_file`) | `../context/instructions.json`, then `instructions.json` → `AgentContext.system_prompt()` | `../context/instructions.json`, then `instructions.json` → `buildAgent()` |
-| Model provider | raw `httpx`, `/v1/responses` | `OpenAIChatModel` | `@ai-sdk/openai-compatible` |
-| Tools | `../tools/*/tool.json`, loaded by the server (`tools_dir`) | `../tools/*/tool.json` → `Tool.from_schema` | `../tools/*/tool.json` → `z.fromJSONSchema` |
-| Argument validation | `jsonschema.validate` | `jsonschema.validate` | zod, from the same JSON schema |
-| Tool failure | `isError` result | `ToolFailed` | thrown `Error` → `tool-error` |
-| Running a script | the server, `asyncio.create_subprocess_exec` | `subprocess.run` in a worker thread | async `execFile`, no threads |
-| Conversation history | list of Responses items | `result.all_messages()` | `response.messages` |
-| Loop cap | `max_tool_calls=8` | `UsageLimits(tool_calls_limit=8)` | `stopWhen: isStepCount(9)` |
-| Tool calls of one response | one at a time: the server is single-flight | at the same time: `parallel_tool_calls` in `instructions.json` | at the same time: `parallel_tool_calls` in `instructions.json` (`oneAtATime()` when false) |
+The model settings, tools, skills, and memory are shared with the Python agents.
 
-The AI SDK starts each tool as soon as its call arrives in the stream, so the tool calls of one
-response run at the same time. Node is single-threaded, but `execFile` is asynchronous, so the
-scripts run as concurrent child processes while the event loop waits. `parallel_tool_calls` in
-[`instructions.json`](instructions.json) turns this off: `vercelagent/tools.ts` then chains `execute`
-calls through a promise queue (`oneAtATime()`). The same file adds lines to the shared instructions
-telling the model that its calls run at the same time, so several go in one response only when
-none depends on another, and gives the agent its name (`vercel`).
+## Development checks
+
+~~~bash
+npm --prefix vercel test
+npm --prefix vercel run typecheck
+npm --prefix vercel run lint
+~~~
+
+Use `.node/bin/npm` if needed. The tests replace the model with a scripted stand-in.
+
+See the [main README](../README.md) for installation and the [shared tools](../tools/README.md).
