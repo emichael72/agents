@@ -16,6 +16,8 @@ Description:
       - r: read; w: write (create, change, delete); x: execute (run programs found there, or make,
         which runs the folder's Makefile).
       - An entry given as a plain string is read-only.
+    An entry may also set "pr_gated": true, which puts the git clone in that folder under the pull
+    request gate (gatekeepers/pr); this gate only records it.
 
     It lives in agents/gatekeepers/fs. Python tools load an `FsGate` and ask it; Bash tools run
     it, with the repository root on PYTHONPATH:
@@ -46,6 +48,7 @@ class Folder:
     path: Path
     access: str = "r"
     subpaths: dict[Path, str] = field(default_factory=dict)  # Absolute sub-folder -> access
+    pr_gated: bool = False  # Its git clone is under the pull request gate
 
     def access_at(self, target: Path) -> str:
         """
@@ -77,7 +80,7 @@ class FsGate:
     def load(cls, path: Optional[Path] = None) -> "FsGate":
         """
         Read the allowed folders. Each entry is a path string (read-only), or
-        {"path": ..., "access": "rwx", "subpaths": {"build": "rw", ...}}.
+        {"path": ..., "access": "rwx", "subpaths": {"build": "rw", ...}, "pr_gated": true}.
         Args:
             path: The JSON file; None uses FS_GATE_PATHS, then context/paths.json.
         Returns:
@@ -93,7 +96,10 @@ class FsGate:
             base = (REPO_ROOT / Path(entry["path"]).expanduser()).resolve()
             subpaths = {(base / sub).resolve(): cls.parse_access(access, f"{name}/{sub}")
                         for sub, access in entry.get("subpaths", {}).items()}
-            folders[name] = Folder(name, base, cls.parse_access(entry.get("access", "r"), name), subpaths)
+            gated = entry.get("pr_gated", False)
+            if not isinstance(gated, bool):
+                raise ValueError(f"pr_gated for {name} must be true or false.")
+            folders[name] = Folder(name, base, cls.parse_access(entry.get("access", "r"), name), subpaths, gated)
         return cls(folders)
 
     @staticmethod

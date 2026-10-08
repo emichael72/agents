@@ -2,8 +2,8 @@
 Module: clone.py
 
 Description:
-    Keeps a local clone of the gated repository current with GitHub, so agents always start from
-    the latest code: their shell has no network, and a model may forget the pr tool's sync action.
+    Keeps each gated project's local clone current with GitHub, so agents always start from the
+    latest code: their shell has no network, and a model may forget the pr tool's sync action.
 
     The service calls `LocalClone.sync` every few seconds (QUIZ_SYNC_SECONDS). It touches the clone
     only when that is safe, and then only fast-forwards:
@@ -19,7 +19,7 @@ from pathlib import Path
 
 class LocalClone:
     """
-    A local clone of the gated repository (QUIZ_LOCAL_CLONE), fast-forwarded only when it is safe.
+    A gated project's local clone (its folder in context/paths.json), fast-forwarded only when it is safe.
     """
 
     GIT = ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]

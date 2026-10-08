@@ -6,12 +6,15 @@
     "Each value is a path string (read-only), or an object: path (absolute, starting with ~,",
     "or relative to the agents repository), access (some of r = read, w = write, x = execute:",
     "run programs there, or make), and optional subpaths that override the access for sub-folders.",
-    "Access applies to everything inside a folder; nothing outside these folders can be reached."
+    "Access applies to everything inside a folder; nothing outside these folders can be reached.",
+    "pr_gated: true puts the folder's git clone under the pull request gate (gatekeepers/pr):",
+    "its origin must be on github.com, and gh must be signed in with write access to it."
   ],
   "paths": {
     "core_dump": {
       "path": "~/projects/core_dump",
-      "access": "rwx"
+      "access": "rwx",
+      "pr_gated": true
     },
     "tools": {
       "path": "tools",

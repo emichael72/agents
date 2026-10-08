@@ -3,11 +3,11 @@
 {% block title %}History · Pull Request Gate{% endblock %}
 
 {% block content %}
-  <p class="eyebrow">{{ repo }}</p>
+  <p class="eyebrow">{{ repo or 'All gated repositories' }}</p>
   <h1>History{% if pr %} of pull request #{{ pr }}{% endif %}</h1>
   <p class="muted">
     Every revision the gate assessed, newest first.
-    {% if pr %}<a href="/history">Show all pull requests</a>{% else %}Select a pull request to see only its revisions.{% endif %}
+    {% if repo %}<a href="/history">Show all pull requests</a>{% else %}Select a pull request to see only its revisions.{% endif %}
   </p>
 
   {% if rows %}
@@ -29,12 +29,12 @@
             <tr>
               <td>{{ local_time(row.created) }}</td>
               <td>
-                <a href="{{ request.url_for('history_page').path }}?pr={{ row.pr }}">#{{ row.pr }}</a>
+                <a href="{{ request.url_for('history_page').path }}?repo={{ row.repo | urlencode }}&amp;pr={{ row.pr }}">{{ row.repo }} #{{ row.pr }}</a>
                 {% if row.pr_title == not_found %}
                   <span class="muted">{{ row.pr_title }}</span>
                 {% else %}
                   {{ row.pr_title }}
-                  <a href="https://github.com/{{ repo }}/pull/{{ row.pr }}" rel="noreferrer" title="Open on GitHub">↗</a>
+                  <a href="https://github.com/{{ row.repo }}/pull/{{ row.pr }}" rel="noreferrer" title="Open on GitHub">↗</a>
                 {% endif %}
               </td>
               <td><code>{{ row.sha[:7] }}</code></td>

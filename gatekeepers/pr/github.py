@@ -4,7 +4,8 @@ Module: github.py
 Description:
     `GitHub`: the gate's side of GitHub, through the `gh` CLI, which supplies the credentials:
     reading pull requests and their diffs, posting the `developer-quiz` commit status that branch
-    protection on the gated repository requires, and keeping the gate's pull request comment.
+    protection on a gated repository requires, and keeping the gate's pull request comment. Each
+    gated repository has its own `GitHub`; they share gh's sign-in.
 """
 
 import json
@@ -26,6 +27,52 @@ class GitHub:
             repo: owner/name.
         """
         self.repo = repo
+        self._info: Optional[dict[str, Any]] = None
+
+    @classmethod
+    def login(cls) -> str:
+        """
+        The account gh is signed in as.
+        Returns:
+            str: Its login.
+        Raises:
+            RuntimeError: If gh is not signed in or GitHub cannot be reached.
+        """
+        return json.loads(cls("").run("api", "user"))["login"]
+
+    def info(self) -> dict[str, Any]:
+        """The repository, as GitHub describes it to this account; read once."""
+        if self._info is None:
+            self._info = json.loads(self.run("api", f"repos/{self.repo}"))
+        return self._info
+
+    def default_branch(self) -> str:
+        """The branch pull requests target, e.g. main."""
+        return self.info()["default_branch"]
+
+    def access_problems(self) -> list[str]:
+        """
+        What keeps the gate from gating this repository, and what lets merges past it.
+        Returns:
+            list[str]: "error: ..." when the gate cannot post its status (no access); "warning: ..."
+                when the default branch does not require the status, so a merge need not wait for it.
+        """
+        try:
+            info = self.info()
+        except (RuntimeError, ValueError, KeyError) as exc:
+            return [f"error: {self.repo} cannot be read with gh's sign-in: {exc}"]
+        if not info.get("permissions", {}).get("push"):
+            return [f"error: gh's account cannot post commit statuses to {self.repo} (it needs write access)."]
+        base = info["default_branch"]
+        try:
+            branch = json.loads(self.run("api", f"repos/{self.repo}/branches/{base}"))
+        except (RuntimeError, ValueError):
+            return []  # Not knowing the protection is no reason to stop gating
+        contexts = branch.get("protection", {}).get("required_status_checks", {}).get("contexts", [])
+        if self.STATUS_CONTEXT not in contexts:
+            return [f"warning: {self.repo}'s {base} does not require the {self.STATUS_CONTEXT} status, so merges "
+                    f"need not wait for the gate (set it in the branch protection rules)."]
+        return []
 
     def run(self, *args: str, payload: Optional[dict] = None) -> str:
         """
@@ -60,11 +107,12 @@ class GitHub:
 
     def open_prs(self) -> list[dict[str, Any]]:
         """
-        List the open pull requests that target main.
+        List the open pull requests that target the default branch.
         Returns:
             list[dict]: GitHub's pull request objects.
         """
-        return json.loads(self.run("api", f"repos/{self.repo}/pulls?state=open&base=main&per_page=100"))
+        base = self.default_branch()
+        return json.loads(self.run("api", f"repos/{self.repo}/pulls?state=open&base={base}&per_page=100"))
 
     def pr_diff(self, number: int) -> str:
         """The pull request's unified diff."""

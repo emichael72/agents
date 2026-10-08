@@ -10,8 +10,9 @@ Description:
       - `GateApp`, the web application: `/` lists the quizzes and what the poller is doing,
         `/history` every assessment, `/q/<id>` shows and grades a quiz, and `/health` answers
         liveness checks (no authentication).
-      - `Poller`, which lists the open PRs every few seconds and calls `QuizGate.create` for
-        each revision that has no quiz yet.
+      - `Poller`, which lists each gated project's open PRs every few seconds and calls
+        `QuizGate.create` for each revision that has no quiz yet. It also keeps the projects' local
+        clones current (LocalClone).
 
     Key design points:
       - Grading happens on the server; the browser only receives questions and choices.
@@ -44,15 +45,17 @@ from gatekeepers.pr import TEMPLATES_DIR
 from gatekeepers.pr.clone import LocalClone
 from gatekeepers.pr.gate import QuizGate
 from gatekeepers.pr.quiz import Quiz
+from gatekeepers.pr.settings import Project
 
 logger = logging.getLogger("pr_gate")
 
 
 class Poller:
     """
-    Watches the repository's open PRs and creates a quiz for each new revision.
+    Watches the gated projects' open PRs and creates a quiz for each new revision.
     A revision whose quiz cannot be generated is retried on the next polls, up to
-    MAX_FAILURES times; pushing a new commit starts over.
+    MAX_FAILURES times; pushing a new commit starts over. One project's failure does not stop
+    the others from being polled.
     """
 
     MAX_FAILURES = 3  # Generation attempts per revision before the poller gives up on it
@@ -69,11 +72,12 @@ class Poller:
         self._profile = profile
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self._failures: dict[tuple[int, str, str], int] = {}
-        self.working: Optional[int] = None  # The PR being quizzed right now, for the home page
+        self._failures: dict[tuple[str, int, str, str], int] = {}  # (repo, PR, head, base) -> failures
+        self.working: Optional[str] = None  # The PR being quizzed right now ("core_dump #3"), for the home page
         self.last_poll: Optional[str] = None
         self.last_error: Optional[str] = None
-        self.last_sync: Optional[str] = None  # The local clone's last sync, for the home page
+        self.last_sync: dict[str, str] = {}  # Each project's last clone sync, for the home page
+        self._sync_messages: dict[str, str] = {}  # Each project's last sync message, to log only changes
         self._next_sync = 0.0
 
     def start(self) -> None:
@@ -100,66 +104,90 @@ class Poller:
 
     def sync_clone(self) -> None:
         """
-        Every SYNC_SECONDS, fast-forward the local clone (QUIZ_LOCAL_CLONE) to GitHub when it is
-        safe (see LocalClone.sync), so agents start from current code. Logged when it changes.
+        Every SYNC_SECONDS, fast-forward each gated project's local clone to GitHub when it is safe
+        (see LocalClone.sync), so agents start from current code. Logged when it changes.
         """
         settings = self.gate.settings
-        if not settings.local_clone or time.monotonic() < self._next_sync:
+        if settings.sync_seconds <= 0 or time.monotonic() < self._next_sync:
             return
         self._next_sync = time.monotonic() + settings.sync_seconds
-        try:
-            outcome, message = LocalClone(settings.local_clone).sync()
-        except Exception as exc:  # Never stop polling for this
-            outcome, message = "skipped", str(exc)
-        if outcome == "updated" or (outcome == "skipped" and message != self.last_sync):
-            logger.info("Local clone: %s", message)
-        self.last_sync = f"{message} ({time.strftime('%H:%M:%S')})"
+        for project in list(self.gate.projects.values()):
+            try:
+                outcome, message = LocalClone(str(project.path)).sync()
+            except Exception as exc:  # Never stop polling for this
+                outcome, message = "skipped", str(exc)
+            if outcome == "updated" or (outcome == "skipped" and message != self._sync_messages.get(project.name)):
+                logger.info("Local clone of %s: %s", project.name, message)
+            self._sync_messages[project.name] = message
+            self.last_sync[project.name] = f"{message} ({time.strftime('%H:%M:%S')})"
 
-    def poll_once(self) -> list[int]:
+    def poll_once(self) -> list[tuple[str, int]]:
         """
-        Create the missing quizzes for the open PRs.
+        Create the missing quizzes for every gated project's open PRs.
+        Returns:
+            list[tuple[str, int]]: The repository (owner/name) and number of each PR a quiz was created for.
+        Raises:
+            RuntimeError: Naming each project that could not be polled, after polling the others.
+        """
+        created, errors = [], []
+        for project in list(self.gate.projects.values()):
+            try:
+                created += [(project.repo, number) for number in self.poll_project(project)]
+            except Exception as exc:  # One project's trouble must not stop the others
+                errors.append(f"{project.name}: {exc}")
+        self.last_poll = time.strftime("%Y-%m-%d %H:%M:%S")
+        if errors:
+            raise RuntimeError("; ".join(errors))
+        return created
+
+    def poll_project(self, project: Project) -> list[int]:
+        """
+        Create the missing quizzes for one project's open PRs.
+        Args:
+            project: The gated project.
         Returns:
             list[int]: The PRs a quiz was created for.
         """
         created = []
-        for pr in self.gate.github.open_prs():
-            if pr["user"]["login"] != self.gate.settings.developer:
+        repo = project.repo
+        for pr in self.gate.github(repo).open_prs():
+            if pr["user"]["login"] != self.gate.developer:
                 continue
             number, head, base = pr["number"], pr["head"]["sha"], pr["base"]["sha"]
-            key = (number, head, base)
+            key = (repo, number, head, base)
             if self.gate.find_quiz(*key) or self._failures.get(key, 0) >= self.MAX_FAILURES:
                 continue
-            logger.info("PR #%s at %s has no quiz; generating one", number, head[:7])
-            self.working = number
+            logger.info("%s PR #%s at %s has no quiz; generating one", project.name, number, head[:7])
+            self.working = f"{project.name} #{number}"
             try:
-                row = self.gate.create(number, self._profile)
+                row = self.gate.create(repo, number, self._profile)
             except (ValueError, RuntimeError, httpx.HTTPError) as exc:
                 self._record_failure(key, exc)
                 continue
             finally:
                 self.working = None
-            logger.info("PR #%s: quiz ready at %s", number, self.gate.quiz_url(row["id"]))
+            logger.info("%s PR #%s: quiz ready at %s", project.name, number, self.gate.quiz_url(row["id"]))
             created.append(number)
-        self.last_poll = time.strftime("%Y-%m-%d %H:%M:%S")
         return created
 
-    def _record_failure(self, key: tuple[int, str, str], exc: Exception) -> None:
+    def _record_failure(self, key: tuple[str, int, str, str], exc: Exception) -> None:
         """
         Count a failed generation; after the last attempt, tell the PR so it does not wait forever.
         Args:
-            key: (PR number, head SHA, base SHA).
+            key: (repository, PR number, head SHA, base SHA).
             exc: What went wrong.
         """
+        repo, number, head, _ = key
         self._failures[key] = self._failures.get(key, 0) + 1
-        logger.warning("PR #%s: quiz generation failed (%s/%s): %s",
-                       key[0], self._failures[key], self.MAX_FAILURES, exc)
+        logger.warning("%s PR #%s: quiz generation failed (%s/%s): %s",
+                       repo, number, self._failures[key], self.MAX_FAILURES, exc)
         if self._failures[key] >= self.MAX_FAILURES:
             try:
-                self.gate.github.publish_status(key[1], "error",
-                                                "Quiz generation failed; push again or create it by hand",
-                                                self.gate.settings.base_url + "/")
+                self.gate.github(repo).publish_status(head, "error",
+                                                      "Quiz generation failed; push again or create it by hand",
+                                                      self.gate.settings.base_url + "/")
             except RuntimeError as status_exc:
-                logger.warning("PR #%s: could not post the error status: %s", key[0], status_exc)
+                logger.warning("%s PR #%s: could not post the error status: %s", repo, number, status_exc)
 
 
 class GateApp:
@@ -179,7 +207,7 @@ class GateApp:
         """
         self.gate = gate
         self.poller = poller
-        self.secret = gate.store.init()
+        self.secret = gate.init_store()
         self.templates = Jinja2Templates(directory=TEMPLATES_DIR)
         self.submission_lock = threading.Lock()  # One submission or skip at a time
         self.app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=self.lifespan)
@@ -297,14 +325,15 @@ class GateApp:
         """GET /: the assessments and what the poller is doing."""
         user = self.authenticate(request)
         return self.templates.TemplateResponse(request=request, name="home.html", context={
-            "rows": self.gate.store.quizzes(), "repo": self.gate.settings.repo, "user": user, "poller": self.poller})
+            "rows": self.gate.store.quizzes(), "projects": list(self.gate.projects.values()), "user": user,
+            "poller": self.poller})
 
-    def history_page(self, request: Request, pr: Optional[int] = None):
-        """GET /history: every assessment, or one pull request's."""
+    def history_page(self, request: Request, repo: Optional[str] = None, pr: Optional[int] = None):
+        """GET /history: every assessment, or one repository's (?repo=owner/name), or one pull request's (&pr=N)."""
         self.authenticate(request)
         return self.templates.TemplateResponse(request=request, name="history.html", context={
-            "rows": self.gate.history(pr), "repo": self.gate.settings.repo, "pr": pr, "local_time": self.local_time,
-            "not_found": self.gate.NOT_FOUND})
+            "rows": self.gate.history(repo, pr if repo else None), "repo": repo, "pr": pr if repo else None,
+            "local_time": self.local_time, "not_found": self.gate.NOT_FOUND})
 
     def quiz_page(self, qid: str, request: Request):
         """GET /q/<id>: a revision's assessment, and its quiz when it takes one."""
@@ -319,7 +348,7 @@ class GateApp:
         state, description = self.gate.gate_state(row)
         return self.templates.TemplateResponse(request=request, name="quiz.html", context={
             "row": row, "title": content.title, "questions": questions, "csrf": self.csrf(qid),
-            "repo": self.gate.settings.repo, "state": state, "description": description,
+            "repo": row["repo"], "state": state, "description": description,
             "allow_skip": self.gate.settings.allow_skip})
 
     async def grade(self, qid: str, request: Request):
@@ -343,7 +372,7 @@ class GateApp:
         except (RuntimeError, TimeoutError):
             raise HTTPException(502, "GitHub could not confirm the result. Retry this submission.") from None
         return self.templates.TemplateResponse(request=request, name="result.html",
-                                               context={"result": result, "row": row, "repo": self.gate.settings.repo})
+                                               context={"result": result, "row": row, "repo": row["repo"]})
 
     async def skip(self, qid: str, request: Request):
         """POST /q/<id>/skip: skip the quiz (proof-of-concept mode) and post the result."""
@@ -361,4 +390,4 @@ class GateApp:
         except (RuntimeError, TimeoutError):
             raise HTTPException(502, "GitHub could not confirm the result. Retry.") from None
         return self.templates.TemplateResponse(request=request, name="result.html",
-                                               context={"result": result, "row": row, "repo": self.gate.settings.repo})
+                                               context={"result": result, "row": row, "repo": row["repo"]})

@@ -229,8 +229,8 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             run('git', 'push', '-q', 'origin', 'main', cwd=repo)
             run('git', 'remote', 'set-head', 'origin', 'main', cwd=repo)
             allowed = root / 'paths.json'
-            allowed.write_text(json.dumps({'paths': {'proj': {'path': str(repo), 'access': 'rw'},
-                                                     'look': {'path': str(repo), 'access': 'r'}}}))
+            allowed.write_text(json.dumps({'paths': {'proj': {'path': str(repo), 'access': 'rw', 'pr_gated': True},
+                                                     'look': {'path': str(repo), 'access': 'r', 'pr_gated': True}}}))
             env = {'FS_GATE_PATHS': str(allowed), 'PATH': f"{bin_dir}:{os.environ['PATH']}",
                    'GIT_AUTHOR_NAME': 'T', 'GIT_AUTHOR_EMAIL': 't@x', 'GIT_COMMITTER_NAME': 'T', 'GIT_COMMITTER_EMAIL': 't@x'}
 

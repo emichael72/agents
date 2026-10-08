@@ -20,7 +20,8 @@ from gatekeepers.pr.changes import ChangeInspector  # noqa: E402
 
 
 class PrToolTests(unittest.TestCase):
-    """The check action, and open's refusal of a change that fails the gate's checks."""
+    """The check action, open's refusal of a change that fails the gate's checks, and open without
+    them in a folder that is not under the gate."""
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -35,9 +36,14 @@ class PrToolTests(unittest.TestCase):
         self.git("add", "--all")
         self.git("commit", "-q", "-m", "start")
         self.git("push", "-q", "origin", "main")
-        paths = root / "paths.json"
-        paths.write_text(json.dumps({"paths": {"proj": {"path": str(self.repo), "access": "rwx"}}}))
-        self.tool = PullRequests(gate=FsGate.load(paths))
+        self.paths = root / "paths.json"
+        self.tool = self.make_tool(gated=True)
+
+    def make_tool(self, gated: bool) -> PullRequests:
+        """The pr tool over the repository as the allowed folder "proj", under the gate or not."""
+        self.paths.write_text(json.dumps({"paths": {"proj": {"path": str(self.repo), "access": "rwx",
+                                                             "pr_gated": gated}}}))
+        return PullRequests(gate=FsGate.load(self.paths), wait_check="developer-quiz", wait_seconds=1)
 
     def git(self, *args, cwd=None):
         subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", *args],
@@ -69,7 +75,7 @@ class PrToolTests(unittest.TestCase):
             return True, "All documented."
 
         with patch.object(ChangeInspector, "check_build", build), patch.object(ChangeInspector, "check_docs", staticmethod(docs)):
-            ok, report = PullRequests.check_tree(self.repo)
+            ok, report = PullRequests.check_tree(self.repo, "proj")
         self.assertTrue(ok)
         self.assertEqual(seen["files"], [".gitignore", "a.c", "new.c", "x y.h"])
         self.assertEqual(seen["changed"], ["a.c", "new.c", "x y.h"])
@@ -80,7 +86,7 @@ class PrToolTests(unittest.TestCase):
         self.change()
         (self.repo / "prog2").write_bytes(b"\x7fELF\0\0binary")  # Compiled by hand in the repository
         with patch.object(ChangeInspector, "check_build") as build:
-            ok, report = PullRequests.check_tree(self.repo)
+            ok, report = PullRequests.check_tree(self.repo, "proj")
         self.assertFalse(ok)
         self.assertTrue(report.startswith("Binary files: prog2. A pull request holds source only"))
         build.assert_not_called()
@@ -104,6 +110,25 @@ class PrToolTests(unittest.TestCase):
                                   capture_output=True, text=True).stdout.split()
         self.assertEqual(branches, ["main"])  # No branch, no commit
         self.assertEqual(sorted(PullRequests.changed_files(self.repo)), ["a.c", "new.c", "x y.h"])  # Work kept
+
+    def test_open_in_a_folder_not_under_the_gate_skips_its_checks(self):
+        self.change()
+        tool = self.make_tool(gated=False)
+        real_run = subprocess.run
+
+        def run(command, *args, **kwargs):  # gh answers as GitHub would; git runs for real
+            if command[0] == "gh":
+                return subprocess.CompletedProcess(command, 0, "https://github.com/owner/name/pull/1\n", "")
+            return real_run(command, *args, **kwargs)
+
+        with patch.object(PullRequests, "check_tree") as check, patch.object(PullRequests, "wait_for_check") as wait, \
+                patch.object(PullRequests, "format_changes", return_value=[]), \
+                patch("tools.pr.pr.subprocess.run", side_effect=run):
+            text = tool.open_pr("proj", "Change things")
+        check.assert_not_called()
+        wait.assert_not_called()
+        self.assertIn("Opened https://github.com/owner/name/pull/1", text)
+        self.assertIn("proj is not under the merge gate", text)
 
 
 if __name__ == "__main__":

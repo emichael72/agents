@@ -86,9 +86,10 @@ The **[pr tool](../../tools/pr/README.md)** checks uncommitted changes using the
 branch's PR against the default branch. Its manifest allows a wait of up to 100 seconds for the quiz link. It does not
 wait for the person to finish the quiz.
 
-The **poller** asks GitHub for open PRs targeting main, roughly five seconds after each polling round. It handles the
-configured developer and looks for a stored assessment matching the PR number, PR commit, and base commit. Existing
-assessments are reused.
+The **poller** asks GitHub for each gated project's open PRs targeting its default branch, roughly five seconds after
+each polling round. It handles the developer's PRs and looks for a stored assessment matching the repository, PR number,
+PR commit, and base commit. Existing assessments are reused. A project GitHub cannot answer for is reported without
+stopping the others.
 
 The **model** receives the diff, PR description, build/test output, and the service's analysis of code changes. The
 service validates the returned questions, choices, correct answers, and explanations, then shuffles choices while
@@ -117,8 +118,8 @@ Quiz answers cannot override those failures.
 
 ## Why GitHub waits
 
-The repository's rule for main must require the **developer-quiz** status. The service uses its `gh` login to post a
-status on the exact PR commit:
+Each gated repository's rule for its default branch must require the **developer-quiz** status. The service uses its
+`gh` login to post a status on the exact PR commit:
 
 ~~~text
 Name:    developer-quiz
@@ -130,8 +131,9 @@ GitHub checks this reported state before allowing a merge. It does not read SQLi
 failed, or error result cannot satisfy the required status. Success satisfies this gate; other merge conditions may
 still apply. Administrator bypass rules are a separate setting.
 
-The service installer does not create that rule. The PR comment and quiz link help people find the assessment; the
-commit status is what enforces the requirement.
+The service installer does not create that rule; the service logs a warning at startup for a repository whose
+default branch does not require it. The PR comment and quiz link help people find the assessment; the commit status is
+what enforces the requirement.
 
 ## Stored quizzes and retries
 
@@ -139,7 +141,7 @@ commit status is what enforces the requirement.
 |----------------------------------------------------------------------------------|---------------------------------------------------------|
 | Questions, choices, key, explanations, model used, PR version, and check reports | SQLite `quizzes` table on minion                        |
 | Each attempt's score, total, pass/fail, and timestamp                            | SQLite `attempts` table                                 |
-| The code tests that `make check` runs                                            | Submitted project files, currently core_dump's Makefile |
+| The code tests that `make check` runs                                            | Submitted project files: the project's Makefile         |
 | Required merge rule and reported commit statuses                                 | GitHub                                                  |
 
 The default database is `gatekeepers/pr/data/quiz.sqlite3` in the repository checkout. `QUIZ_DATA_DIR` can move it. It
@@ -159,6 +161,36 @@ is not automatically withdrawn just because the service stopped.
 
 The service saves a score before posting it. If GitHub cannot be reached, resubmitting can publish the saved result.
 Quizzes survive restarts; the poller's temporary generation-retry counters do not.
+
+## Gated projects
+
+A project is gated by marking its folder in [context/paths.json](../../context/paths.json):
+
+~~~json
+"core_dump": {
+  "path": "~/projects/core_dump",
+  "access": "rwx",
+  "pr_gated": true
+}
+~~~
+
+The folder must hold a git clone whose `origin` is on github.com; that remote names the repository (`owner/name`), so
+it is not configured twice. Only GitHub is supported. The service's `gh` login needs write access to the repository to
+post the status. At startup the service checks each project: one it cannot read or post to is logged and left out, and
+a folder whose clone is missing or not on GitHub is logged as skipped.
+
+Any number of folders can be gated. Each quiz records its repository, so pull request numbers do not collide, and each
+project's clone is kept current with GitHub (`QUIZ_SYNC_SECONDS`; 0 turns it off). Quizzes stored before the gate
+served several repositories are given to the gated project when there is exactly one.
+
+The build settings `QUIZ_BUILD_COMMAND`, `QUIZ_TEST_TARGET`, and `QUIZ_FAIL_ON_WARNINGS` apply to every project. A
+project can replace them in the `projects` section of [settings.json](settings.json), keyed by folder name:
+
+~~~json
+"projects": {"core_dump": {"QUIZ_TEST_TARGET": "test"}}
+~~~
+
+Only PRs by one developer are assessed: `QUIZ_DEVELOPER`, or when it is empty, the account `gh` is signed in as.
 
 ## Run and manage it
 

@@ -1,7 +1,8 @@
 {
   "description": [
-    "Reports and controls the pull request gate (gatekeepers/pr) for the core_dump GitHub repository:",
-    "whether its service is running, and for each open PR whether it is blocked",
+    "Reports and controls the pull request gate (gatekeepers/pr) for the gated GitHub repositories",
+    "(the allowed folders marked pr_gated): whether its service is running, and for each gated",
+    "project's open PRs whether each is blocked",
     "(build, tests, documentation, or a quiz waiting, with its link) or may merge.",
     "With action history it lists past assessments (quizzes)",
     "with their pull request, time, outcome and attempts.",
@@ -13,7 +14,8 @@
   "timeout": 60,
   "params": [
     {"name": "action", "type": "string", "description": "status (default): open pull requests; history: past assessments; start: start the gate's service if it is not running", "style": "flag", "required": false},
-    {"name": "pr", "type": "integer", "description": "Only this pull request number (for status or history); omit it for all", "style": "flag", "required": false}
+    {"name": "project", "type": "string", "description": "Only this gated project: its allowed folder name, e.g. core_dump; omit it for all", "style": "flag", "required": false},
+    {"name": "pr", "type": "integer", "description": "Only this pull request number (for status or history), of project when several are gated; omit it for all", "style": "flag", "required": false}
   ],
   "resource": "pr_gate/README.md"
 }

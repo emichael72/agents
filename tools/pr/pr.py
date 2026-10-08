@@ -9,17 +9,20 @@ Description:
     This is the one tool that reaches GitHub, with the credentials of the user running the agent
     (git and gh). With action sync, it brings the default branch up to date with GitHub
     (fast-forward only), which the agents' sandboxed shell cannot do. With action check, it runs the
-    merge gate's own checks on the uncommitted changes: build and tests, and documentation. The
-    open action creates a pull request, the same way every time:
+    merge gate's own checks on the uncommitted changes: build and tests, and documentation, with the
+    folder's build settings (gatekeepers/pr/settings.json). The open action creates a pull request,
+    the same way every time:
       1. Check the repository: on its default branch, no commits of its own, changes to submit.
       2. Bring the default branch up to date with GitHub (fast-forward only).
       3. Format the changed C/C++ files with clang-format (the repository's .clang-format, else
          the agents' template, context/clang-format.yaml), so every pull request follows the style.
-      4. Run the gate's checks, as action check does; if one fails, stop: nothing is committed.
+      4. For a folder under the merge gate ("pr_gated" in context/paths.json), run the gate's
+         checks, as action check does; if one fails, stop: nothing is committed.
       5. Create the branch (new, never the default branch), commit everything, push it.
       6. Open the pull request, then switch back to the default branch.
-      7. Wait for the merge gate's check (PR_WAIT_CHECK, e.g. pr_gate's developer-quiz) on the new
-         commit, up to PR_WAIT_SECONDS, and report it: for pr_gate, the quiz the reviewer must pass.
+      7. For a gated folder, wait for the merge gate's check (PR_WAIT_CHECK, e.g. pr_gate's
+         developer-quiz) on the new commit, up to PR_WAIT_SECONDS, and report it: for pr_gate, the
+         quiz the reviewer must pass.
     It never pushes to the default branch, never force-pushes and never merges: merging stays with
     the people (and gates) of the repository.
 """
@@ -41,7 +44,7 @@ from typing import Optional
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents
                             if (p / "pyproject.toml").is_file())))
 from gatekeepers import CONTEXT_DIR
-from gatekeepers.fs.fs_gate import FsGate
+from gatekeepers.fs.fs_gate import Folder, FsGate
 from gatekeepers.pr.changes import C_EXTENSIONS, ChangeInspector
 from gatekeepers.pr.settings import GateSettings
 from tools.common.cli import ToolArgumentParser
@@ -140,28 +143,39 @@ class PullRequests:
                 changed.append(path)
         return changed
 
+    def folder_of(self, repo: Path) -> Folder:
+        """
+        The allowed folder a repository is in.
+        Args:
+            repo: The repository's top folder.
+        Returns:
+            Folder: The folder, whose name and pr_gated mark apply to the repository.
+        Raises:
+            ValueError: If the repository starts outside the allowed folders.
+        """
+        located = self.gate.locate(repo)
+        if located is None:
+            raise ValueError(f"The repository at {repo} starts outside the allowed folders.")
+        return located[0]
+
     @classmethod
-    def check_tree(cls, repo: Path) -> tuple[bool, str]:
+    def check_tree(cls, repo: Path, project: str) -> tuple[bool, str]:
         """
         Run the merge gate's checks on a repository as a commit would hold it now: a copy of its
         tracked and new files (not ignored ones, so no old build output), built and tested in the
         shell tool's sandbox, and the changed C/C++ files checked with doxy. A changed binary file,
         such as a program compiled by hand, fails the check before anything is built: a pull request
-        holds source, and make builds the rest. The settings are the
-        gate's (QUIZ_BUILD_COMMAND, QUIZ_TEST_TARGET, QUIZ_FAIL_ON_WARNINGS), so a change that passes
-        here passes the gate's build and documentation checks.
+        holds source, and make builds the rest. The build settings are the gate's for this project
+        (GateSettings.build_options), so a change that passes here passes the gate's build and
+        documentation checks.
         Args:
             repo: The repository.
+            project: The allowed folder's name, e.g. core_dump, which selects its build settings.
         Returns:
             tuple[bool, str]: Whether every check passed, and the report.
         """
-        def setting(name: str) -> str:
-            return GateSettings.setting(name, required=False)
-
         inspector = ChangeInspector(gh=lambda *_: "", repo="",  # No GitHub: the tree is local
-                                    build_command=setting("QUIZ_BUILD_COMMAND"),
-                                    test_target=setting("QUIZ_TEST_TARGET"),
-                                    fail_on_warnings=setting("QUIZ_FAIL_ON_WARNINGS").lower() in ("true", "1", "yes"))
+                                    **GateSettings.build_options(project))
         changed = cls.changed_files(repo)
         binaries = [path for path in changed if cls.is_binary(repo / path)]
         if binaries:
@@ -210,7 +224,7 @@ class PullRequests:
         """
         folder, shown = self.gate.resolve(path, "dir", "rx")
         repo = Path(self.git(folder, "rev-parse", "--show-toplevel")).resolve()
-        ok, report = self.check_tree(repo)
+        ok, report = self.check_tree(repo, self.folder_of(repo).name)
         if not ok:
             raise ValueError(f"{shown} is not ready for a pull request: fix what failed, then check again.\n\n{report}")
         return f"{shown} is ready for a pull request: the gate's build, tests and documentation checks pass.\n\n{report}"
@@ -318,10 +332,9 @@ class PullRequests:
         title = title.strip()
         if not 3 <= len(title) <= 120:
             raise ValueError("Give a title of 3 to 120 characters: what the change does.")
-        folder, shown = self.gate.resolve(path, "dir", "w")
+        folder, _ = self.gate.resolve(path, "dir", "w")
         repo = Path(self.git(folder, "rev-parse", "--show-toplevel")).resolve()
-        if not self.gate.locate(repo):
-            raise ValueError(f"The repository of '{shown}' starts outside the allowed folders.")
+        project = self.folder_of(repo)
 
         base = self.default_branch(repo)
         if self.git(repo, "branch", "--show-current") != base:
@@ -342,10 +355,11 @@ class PullRequests:
         agent = os.environ.get("AGENT_NAME")
         description = body.strip() + (f"\n\nOpened by the {agent}." if agent else "")
         formatted = self.format_changes(repo)
-        ok, report = self.check_tree(repo)
-        if not ok:
-            raise ValueError(f"Not opened: the change would fail the merge gate. Fix what failed, check again "
-                             f"(action check), then open the pull request.\n\n{report}")
+        if project.pr_gated:
+            ok, report = self.check_tree(repo, project.name)
+            if not ok:
+                raise ValueError(f"Not opened: the change would fail the merge gate. Fix what failed, check again "
+                                 f"(action check), then open the pull request.\n\n{report}")
         self.git(repo, "switch", "--quiet", "-c", name)
         try:
             self.git(repo, "add", "--all")
@@ -362,7 +376,8 @@ class PullRequests:
             url = result.stdout.strip().splitlines()[-1]
         finally:
             self.git(repo, "switch", "--quiet", base, check=False)  # The changes now live on the branch
-        check = self.wait_for_check(repo, sha)
+        check = self.wait_for_check(repo, sha) if project.pr_gated else \
+            f"{project.name} is not under the merge gate (pr_gated in context/paths.json): no quiz to wait for."
         note = f"\nFormatted with clang-format: {', '.join(formatted)}" if formatted else ""
         return f"Opened {url}\nbranch {name} (commit {commit}) into {base}:\n{changed}{note}" + (f"\n\n{check}" if check else "")
 

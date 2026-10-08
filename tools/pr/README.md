@@ -23,12 +23,14 @@ for syncing and opening a PR.
 **sync** updates the default branch by fast-forwarding. It refuses if you have uncommitted work, local commits, or the
 wrong branch checked out.
 
-**check** copies the files that would be submitted, then runs the gate's build, test, and documentation checks. It does
-not commit or open anything. Changed binary files are refused. Fix the reported problems and check again.
+**check** copies the files that would be submitted, then runs the gate's build, test, and documentation checks, with
+the folder's build settings from the [gate's settings](../../gatekeepers/pr/settings.json). It does not commit or open
+anything. Changed binary files are refused. Fix the reported problems and check again.
 
 **open** is the default action. Start with uncommitted changes on the default branch, normally main, and no local
-commits ahead of GitHub. The tool updates the base, formats changed C/C++ files when clang-format is available, and
-checks the change again. If checks fail, it stops before committing.
+commits ahead of GitHub. The tool updates the base and formats changed C/C++ files when clang-format is available. In a
+folder under the merge gate (`"pr_gated": true` in [context/paths.json](../../context/paths.json)) it checks the change
+again and stops before committing if a check fails. Other folders get no gate checks and no quiz wait.
 
 Once ready, it creates a fresh `agent/<title>` branch, commits and pushes the changes, and opens the PR. `--branch`
 selects another new branch name. The local checkout then switches back to the default branch.

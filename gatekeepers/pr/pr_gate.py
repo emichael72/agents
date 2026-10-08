@@ -6,12 +6,17 @@ Description:
     (python -m gatekeepers.pr.pr_gate, through pr_gate.sh).
 
     Commands:
-      - status [--pr N] [--action status|history|start]: The open PRs and their quiz state, with
-        links (the agents' tool); past assessments; or start the service first. The agents cannot
-        stop or restart the gate: that is the user's, with ./install.sh --gate stop|restart.
-      - create PR [--profile NAME] [--fixed FILE]: Create (or re-post) the quiz for a PR now.
+      - status [--project NAME] [--pr N] [--action status|history|start]: Each gated project's open
+        PRs and their quiz state, with links (the agents' tool); past assessments; or start the
+        service first. The agents cannot stop or restart the gate: that is the user's, with
+        ./install.sh --gate stop|restart.
+      - create PR [--project NAME] [--profile NAME] [--fixed FILE]: Create (or re-post) the quiz
+        for a PR now.
       - list: Every stored quiz, as JSON.
       - serve [--host --port --poll --profile]: Run the web service and the GitHub poller.
+
+    A project is a folder marked "pr_gated" in context/paths.json, named by its folder name
+    (core_dump) or its repository (owner/name); --project may be left out when only one is gated.
 """
 
 import argparse
@@ -83,59 +88,88 @@ class PrGateCli:
             time.sleep(0.5)
         return f"Started the {unit} service, but it does not answer yet; see ./install.sh --gate logs."
 
-    def history(self, pr: Optional[int] = None, limit: int = 30) -> str:
+    def history(self, project: Optional[str] = None, pr: Optional[int] = None, limit: int = 30) -> str:
         """
         Describe past assessments, newest first, as the History page shows them.
         Args:
-            pr: Only this pull request; None for all.
+            project: Only this project (folder name or owner/name); None for all.
+            pr: Only this pull request, of the one project; needs project when several are gated.
             limit: At most this many assessments.
         Returns:
-            str: One line per assessment: when (UTC), pull request and title, revision, outcome,
-                attempts and best score; then the History page's link.
+            str: One line per assessment: when (UTC), repository, pull request and title, revision,
+                outcome, attempts and best score; then the History page's link.
         """
-        self.gate.store.init()
-        rows = self.gate.history(pr)
+        self.gate.init_store()
+        repo = self.gate.project(project).repo if project or pr else None
+        rows = self.gate.history(repo, pr)
         if not rows:
-            return "No assessments yet" + (f" for PR #{pr}." if pr else ".")
+            return "No assessments yet" + (f" for {repo} PR #{pr}." if pr else f" for {repo}." if repo else ".")
         lines = [f"{len(rows)} assessment(s){f' of PR #{pr}' if pr else ''}, newest first (times in UTC):"]
         for row in rows[:limit]:
             attempts = (f"{row['attempts']} attempt(s), best {row['best']}/{row['total']}" if row["attempts"]
                         else "no attempts")
-            lines.append(f"{row['created'][:16]}  PR #{row['pr']} {row['pr_title']}  {row['sha'][:7]}  "
+            lines.append(f"{row['created'][:16]}  {row['repo']} PR #{row['pr']} {row['pr_title']}  {row['sha'][:7]}  "
                          f"{row['outcome']}  ({attempts})")
         if len(rows) > limit:
             lines.append(f"... {len(rows) - limit} older assessment(s)")
-        lines.append(f"History page: {self.gate.settings.base_url}/history" + (f"?pr={pr}" if pr else ""))
+        query = (f"?repo={repo}" + (f"&pr={pr}" if pr else "")) if repo else ""
+        lines.append(f"History page: {self.gate.settings.base_url}/history{query}")
         return "\n".join(lines)
 
-    def status(self, pr: Optional[int] = None, port: int = 8000) -> str:
+    def status(self, project: Optional[str] = None, pr: Optional[int] = None, port: int = 8000) -> str:
         """
-        Describe the open PRs and their quizzes.
+        Describe each gated project's open PRs and their quizzes.
         Args:
-            pr: Only this PR; None for every open PR that targets main.
+            project: Only this project (folder name or owner/name); None for all.
+            pr: Only this PR, of the one project; needs project when several are gated.
             port: The local service port, for the health check.
         Returns:
-            str: One line about the service, then one line per PR.
+            str: One line about the service, then per project a line naming it and one line per PR.
         """
         gate, settings = self.gate, self.gate.settings
-        gate.store.init()
+        gate.init_store()
         if self.running(port):
             lines = [f"pr_gate service: running at {settings.base_url}"]
         else:
             lines = ["pr_gate service: not running, so new commits are not assessed (start it with action start)"]
+        projects = [gate.project(project)] if project or pr else list(gate.projects.values())
+        if not projects:
+            lines.append("No gated projects: set \"pr_gated\": true on a folder in context/paths.json.")
+        lines += [f"Not gated: {line}" for line in settings.skipped]
+        for gated in projects:
+            lines += self.project_status(gated.repo, gated.name, pr)
+        if any("quiz waiting" in line for line in lines):
+            lines.append("A waiting quiz is for the pull request's author, a person, to take: checking again will not "
+                         "change it. Give the user the quiz link and stop.")
+        return "\n".join(lines)
 
-        prs = [gate.github.pr_info(pr)] if pr else gate.github.open_prs()
+    def project_status(self, repo: str, name: str, pr: Optional[int] = None) -> list[str]:
+        """
+        Describe one project's open PRs and their quizzes.
+        Args:
+            repo: The repository, owner/name.
+            name: The project's folder name.
+            pr: Only this PR; None for every open PR that targets the default branch.
+        Returns:
+            list[str]: A line naming the project, then one line per PR, or why GitHub could not tell.
+        """
+        gate, github = self.gate, self.gate.github(repo)
+        lines = [f"{name} ({repo}):"]
+        try:
+            prs = [github.pr_info(pr)] if pr else github.open_prs()
+        except RuntimeError as exc:  # One repository's trouble must not hide the others
+            return lines + [f"  Could not read its pull requests: {exc}"]
         if not prs:
-            lines.append(f"No open pull requests target main in {settings.repo}.")
+            lines.append(f"  No open pull requests target {github.default_branch()}.")
         for info in prs:
             head = info["head"]["sha"]
-            title = f"PR #{info['number']} '{info['title']}' by {info['user']['login']} at {head[:7]}"
+            title = f"  PR #{info['number']} '{info['title']}' by {info['user']['login']} at {head[:7]}"
             if info["state"] != "open":
                 state = f"{info['state']}, not assessed"
-            elif info["user"]["login"] != settings.developer:
-                state = f"not assessed (only {settings.developer}'s PRs are)"
+            elif info["user"]["login"] != gate.developer:
+                state = f"not assessed (only {gate.developer}'s PRs are)"
             else:
-                row = gate.find_quiz(info["number"], head, info["base"]["sha"])
+                row = gate.find_quiz(repo, info["number"], head, info["base"]["sha"])
                 if row is None:
                     state = "no assessment yet; the service makes one within a minute"
                 elif not row["build_ok"]:
@@ -151,28 +185,26 @@ class PrGateCli:
                 else:
                     state = f"quiz waiting, merge blocked: {gate.quiz_url(row['id'])}"
             lines.append(f"{title}: {state}")
-        if any("quiz waiting" in line for line in lines):
-            lines.append("A waiting quiz is for the pull request's author, a person, to take: checking again will not "
-                         "change it. Give the user the quiz link and stop.")
-        return "\n".join(lines)
+        return lines
 
-    def create(self, pr: int, profile: Optional[str], fixed: Optional[str]) -> str:
+    def create(self, pr: int, project: Optional[str], profile: Optional[str], fixed: Optional[str]) -> str:
         """
         Assess a PR's current revision now, or re-post its status.
         Args:
             pr: The PR number.
+            project: Its project (folder name or owner/name); None when only one is gated.
             profile: The model profile; None uses the default.
             fixed: A JSON quiz file to use instead of the model.
         Returns:
-            str: The quiz's id, PR, revision, source and link, as JSON.
+            str: The quiz's id, repository, PR, revision, source and link, as JSON.
         """
-        row = self.gate.create(pr, profile, fixed)
-        return json.dumps({"id": row["id"], "pr": row["pr"], "sha": row["sha"], "source": row["source"],
-                           "url": self.gate.quiz_url(row["id"])}, indent=2)
+        row = self.gate.create(self.gate.project(project).repo, pr, profile, fixed)
+        return json.dumps({"id": row["id"], "repo": row["repo"], "pr": row["pr"], "sha": row["sha"],
+                           "source": row["source"], "url": self.gate.quiz_url(row["id"])}, indent=2)
 
     def quizzes(self) -> str:
         """Every stored quiz, as JSON."""
-        self.gate.store.init()
+        self.gate.init_store()
         return json.dumps(self.gate.store.quizzes(), indent=2)
 
     def serve(self, host: str, port: int, poll: float, profile: Optional[str]) -> None:
@@ -189,10 +221,13 @@ class PrGateCli:
 
         gate, settings = self.gate, self.gate.settings
         logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)-8s] %(message)s")
+        log = logging.getLogger("pr_gate")
         model = gate.generator.resolve_model(profile or settings.profile)  # Fail now, not at the first push
-        logging.getLogger("pr_gate").info("Quizzes for %s by %s, model %s / %s, links at %s",
-                                          settings.repo, settings.developer, model["name"], model["model"],
-                                          settings.base_url)
+        for problem in gate.access_problems():  # Drops the projects gh's sign-in cannot gate
+            log.warning("%s", problem)
+        projects = ", ".join(f"{p.name} ({p.repo})" for p in gate.projects.values()) or "no projects"
+        log.info("Quizzes for %s by %s, model %s / %s, links at %s", projects, gate.developer, model["name"],
+                 model["model"], settings.base_url)
         app = GateApp(gate, Poller(gate, poll, profile) if poll > 0 else None).app
         uvicorn.run(app, host=host, port=port, access_log=False)
 
@@ -206,13 +241,13 @@ class PrGateCli:
         """
         if args.command == "status":
             if args.action == "history":
-                print(self.history(args.pr))
+                print(self.history(args.project, args.pr))
                 return 0
             if args.action != "status":
                 print(self.control(args.action, args.port))
-            print(self.status(args.pr, args.port))
+            print(self.status(args.project, args.pr, args.port))
         elif args.command == "create":
-            print(self.create(args.pr, args.profile, args.fixed))
+            print(self.create(args.pr, args.project, args.profile, args.fixed))
         elif args.command == "list":
             print(self.quizzes())
         else:
@@ -232,8 +267,11 @@ class PrGateCli:
         parser.add_argument("-v", "--version", action="version", version=f"pr_gate {__version__}")
         sub = parser.add_subparsers(dest="command", required=True)
 
+        project_help = "The gated project: its folder name in context/paths.json or owner/name; " \
+                       "optional when only one is gated"
         status_cmd = sub.add_parser("status", help="Show the open PRs and their quiz state")
-        status_cmd.add_argument("--pr", type=int, help="Only this PR")
+        status_cmd.add_argument("--project", help=project_help + " (default: all)")
+        status_cmd.add_argument("--pr", type=int, help="Only this PR (of --project)")
         status_cmd.add_argument("--port", type=int, default=8000, help="Local service port (default 8000)")
         status_cmd.add_argument("--action", default="status", choices=("status", "history", *cls.SERVICE_ACTIONS),
                                 help="status (default), history of past assessments, or start the pr-gate "
@@ -241,6 +279,7 @@ class PrGateCli:
 
         create_cmd = sub.add_parser("create", help="Create (or re-post) the quiz for a PR's current revision")
         create_cmd.add_argument("pr", type=int)
+        create_cmd.add_argument("--project", help=project_help)
         create_cmd.add_argument("--profile", help="Model profile from context/models.json (local or openai)")
         create_cmd.add_argument("--fixed", help="Use a JSON quiz file instead of the model")
 

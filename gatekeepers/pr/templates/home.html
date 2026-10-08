@@ -10,16 +10,19 @@
 
   {# What the GitHub poller is doing #}
   <p class="muted">
-    {{ repo }}
+    {% for project in projects %}{{ project.name }} ({{ project.repo }}){% if not loop.last %}, {% endif %}
+    {% else %}No gated projects: set "pr_gated": true on a folder in context/paths.json.{% endfor %}
     {% if poller %}
       · watching for new commits{% if poller.last_poll %}, last checked {{ poller.last_poll }}{% endif %}
     {% endif %}
   </p>
-  {% if poller and poller.last_sync %}
-    <p class="muted">Local clone: {{ poller.last_sync }}</p>
+  {% if poller %}
+    {% for name, sync in poller.last_sync.items() %}
+      <p class="muted">Local clone of {{ name }}: {{ sync }}</p>
+    {% endfor %}
   {% endif %}
   {% if poller and poller.working %}
-    <section class="card">Generating a quiz for pull request #{{ poller.working }}… reload in a minute.</section>
+    <section class="card">Generating a quiz for {{ poller.working }}… reload in a minute.</section>
   {% endif %}
   {% if poller and poller.last_error %}
     <section class="card failure">Last poll failed: {{ poller.last_error }}</section>
@@ -29,7 +32,7 @@
   {% for row in rows %}
     <section class="card">
       <div class="meta">
-        <strong>Pull request #{{ row.pr }}</strong>
+        <strong>{{ row.repo }} #{{ row.pr }}</strong>
         <code>{{ row.sha[:7] }}</code>
         <span class="status">
           {% if not row.build_ok %}Build or tests failed
@@ -45,7 +48,8 @@
     </section>
   {% else %}
     <section class="card">
-      No assessments yet. Open a pull request against main and one is generated automatically.
+      No assessments yet. Open a pull request against a gated project's default branch and one is generated
+      automatically.
     </section>
   {% endfor %}
 

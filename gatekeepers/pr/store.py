@@ -65,11 +65,12 @@ class QuizStore:
               passed INTEGER NOT NULL, created TEXT DEFAULT CURRENT_TIMESTAMP
             );
             """)
-            # Columns added after the first version; older databases get them with these defaults
+            # Columns added after the first version; older databases get them with these defaults.
+            # repo is "" for a quiz from when the gate served one repository (see adopt).
             for column in ("pr_title TEXT NOT NULL DEFAULT ''", "skipped INTEGER NOT NULL DEFAULT 0",
                            "build_ok INTEGER NOT NULL DEFAULT 1", "build_report TEXT NOT NULL DEFAULT ''",
                            "docs_ok INTEGER NOT NULL DEFAULT 1", "docs_report TEXT NOT NULL DEFAULT ''",
-                           "cosmetic INTEGER NOT NULL DEFAULT 0"):
+                           "cosmetic INTEGER NOT NULL DEFAULT 0", "repo TEXT NOT NULL DEFAULT ''"):
                 try:
                     # noinspection SqlNoDataSourceInspection
                     db.execute("ALTER TABLE quizzes ADD COLUMN " + column)
@@ -86,17 +87,29 @@ class QuizStore:
                     f.write(secrets.token_urlsafe(32))
         return secret_file.read_text().strip()
 
+    def adopt(self, repo: str) -> int:
+        """
+        Give the quizzes from when the gate served one repository (repo "") to that repository.
+        Args:
+            repo: owner/name.
+        Returns:
+            int: How many quizzes it took.
+        """
+        with self.connect() as db:
+            # noinspection SqlNoDataSourceInspection
+            return db.execute("UPDATE quizzes SET repo=? WHERE repo=''", (repo,)).rowcount
+
     def add(self, row: dict[str, Any]) -> dict[str, Any]:
         """
         Store a new quiz.
         Args:
-            row: id, pr, sha, base_sha, developer, content, source, build_ok, build_report,
+            row: id, repo, pr, sha, base_sha, developer, content, source, build_ok, build_report,
                 docs_ok, docs_report, cosmetic and pr_title.
         Returns:
             dict: The stored row, as `get` reads it.
         """
-        columns = ("id", "pr", "sha", "base_sha", "developer", "content", "source", "build_ok", "build_report",
-                   "docs_ok", "docs_report", "cosmetic", "pr_title")
+        columns = ("id", "repo", "pr", "sha", "base_sha", "developer", "content", "source", "build_ok",
+                   "build_report", "docs_ok", "docs_report", "cosmetic", "pr_title")
         with self.connect() as db:
             # noinspection SqlNoDataSourceInspection
             db.execute(f"INSERT INTO quizzes({','.join(columns)}) VALUES({','.join('?' * len(columns))})",
@@ -120,10 +133,11 @@ class QuizStore:
             raise KeyError(qid)
         return dict(row)
 
-    def find(self, number: int, sha: str, base_sha: str, developer: str) -> Optional[dict[str, Any]]:
+    def find(self, repo: str, number: int, sha: str, base_sha: str, developer: str) -> Optional[dict[str, Any]]:
         """
         Find the latest quiz for one revision of a PR.
         Args:
+            repo: The repository, owner/name.
             number: The PR number.
             sha: The head SHA.
             base_sha: The base SHA.
@@ -134,26 +148,27 @@ class QuizStore:
         with self.connect() as db:
             # noinspection SqlNoDataSourceInspection
             row = db.execute(
-                "SELECT * FROM quizzes WHERE pr=? AND sha=? AND base_sha=? AND developer=? "
-                "ORDER BY created DESC LIMIT 1", (number, sha, base_sha, developer)).fetchone()
+                "SELECT * FROM quizzes WHERE repo=? AND pr=? AND sha=? AND base_sha=? AND developer=? "
+                "ORDER BY created DESC LIMIT 1", (repo, number, sha, base_sha, developer)).fetchone()
         return dict(row) if row else None
 
     def quizzes(self) -> list[dict[str, Any]]:
         """
         List every quiz, newest first, without content or answer keys.
         Returns:
-            list[dict]: id, pr, sha, passed, build_ok, docs_ok, cosmetic, published and created per quiz.
+            list[dict]: id, repo, pr, sha, passed, build_ok, docs_ok, cosmetic, published and created per quiz.
         """
         with self.connect() as db:
             # noinspection SqlNoDataSourceInspection
             return [dict(r) for r in db.execute(
-                "SELECT id,pr,sha,passed,skipped,build_ok,docs_ok,cosmetic,published,created FROM quizzes "
+                "SELECT id,repo,pr,sha,passed,skipped,build_ok,docs_ok,cosmetic,published,created FROM quizzes "
                 "ORDER BY created DESC")]
 
-    def assessments(self, pr: Optional[int] = None) -> list[dict[str, Any]]:
+    def assessments(self, repo: Optional[str] = None, pr: Optional[int] = None) -> list[dict[str, Any]]:
         """
         Every quiz, newest first, with its attempts summarized.
         Args:
+            repo: Only this repository (owner/name); None for all.
             pr: Only this pull request; None for all.
         Returns:
             list[dict]: Each quiz's row (without content or answer keys), plus attempts (count),
@@ -162,11 +177,12 @@ class QuizStore:
         with self.connect() as db:
             # noinspection SqlNoDataSourceInspection
             return [dict(r) for r in db.execute(
-                "SELECT q.id, q.pr, q.pr_title, q.sha, q.source, q.passed, q.skipped, q.build_ok, q.docs_ok, "
+                "SELECT q.id, q.repo, q.pr, q.pr_title, q.sha, q.source, q.passed, q.skipped, q.build_ok, q.docs_ok, "
                 "q.cosmetic, q.created, q.rowid AS position, COUNT(a.id) AS attempts, MAX(a.score) AS best, "
                 "MAX(a.total) AS total, MAX(a.created) AS last_attempt FROM quizzes q "
                 "LEFT JOIN attempts a ON a.quiz_id = q.id "
-                "WHERE ? IS NULL OR q.pr = ? GROUP BY q.id ORDER BY q.created DESC, position DESC", (pr, pr))]
+                "WHERE (? IS NULL OR q.repo = ?) AND (? IS NULL OR q.pr = ?) "
+                "GROUP BY q.id ORDER BY q.created DESC, position DESC", (repo, repo, pr, pr))]
 
     def set_title(self, qid: str, title: str) -> None:
         """Save the title of a quiz's pull request."""

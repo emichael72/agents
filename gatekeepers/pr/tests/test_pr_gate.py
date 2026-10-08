@@ -28,12 +28,13 @@ from gatekeepers.pr.github import GitHub
 from gatekeepers.pr.pr_gate import PrGateCli
 from gatekeepers.pr.quiz import Quiz
 from gatekeepers.pr.server import GateApp, Poller
-from gatekeepers.pr.settings import GateSettings
+from gatekeepers.pr.settings import GateSettings, Project
 
-# Fixed settings, so the tests depend on neither settings.json nor the environment; each test
-# gives the gate its own temporary data folder
-SETTINGS = GateSettings(repo="owner/name", developer="dev", base_url="http://gate.test", pr_comment=False,
-                        allow_skip=False, data_dir=Path("/nonexistent"))
+# Fixed settings, so the tests depend on neither settings.json, paths.json nor the environment; each
+# test gives the gate its own temporary data folder
+REPO = "owner/name"
+SETTINGS = GateSettings(base_url="http://gate.test", developer="dev", projects=(Project("proj", REPO),),
+                        pr_comment=False, allow_skip=False, data_dir=Path("/nonexistent"))
 
 FIXTURE: dict[str, Any] = {"title": "C math quiz", "questions": [
     {"question": f"What does the changed code do in case {i}?",
@@ -61,15 +62,17 @@ class QuizTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.gate = QuizGate(replace(SETTINGS, data_dir=Path(self.temp.name)))
-        self.info = patch.object(self.gate.github, "pr_info", return_value=copy.deepcopy(INFO))
+        self.branch = patch.object(GitHub, "default_branch", return_value="main")
+        self.branch.start()
+        self.info = patch.object(GitHub, "pr_info", return_value=copy.deepcopy(INFO))
         self.mock_info = self.info.start()
-        self.gh = patch.object(self.gate.github, "run", return_value="diff --git a/pi.c b/pi.c")
+        self.gh = patch.object(GitHub, "run", return_value="diff --git a/pi.c b/pi.c")
         self.mock_gh = self.gh.start()
         self.model = patch.object(self.gate.generator, "generate", return_value=(Quiz.model_validate(FIXTURE), "test model"))
         self.mock_generate = self.model.start()
         self.inspect = patch.object(ChangeInspector, "inspect", return_value=dict(CODE_CHANGE))
         self.mock_inspect = self.inspect.start()
-        self.row = self.gate.create(1)
+        self.row = self.gate.create(REPO, 1)
         self.qid = self.row["id"]
         self.content = Quiz.model_validate_json(self.gate.store.get(self.qid)["content"])
         self.answers = [q.correct for q in self.content.questions]
@@ -83,6 +86,7 @@ class QuizTests(unittest.TestCase):
         self.model.stop()
         self.gh.stop()
         self.info.stop()
+        self.branch.stop()
         self.temp.cleanup()
 
     def enabled(self, **changes):
@@ -195,20 +199,20 @@ class QuizTests(unittest.TestCase):
                 Quiz.model_validate(fixture)
 
     def test_same_revision_reuses_quiz(self):
-        self.assertEqual(self.gate.create(1)["id"], self.qid)
+        self.assertEqual(self.gate.create(REPO, 1)["id"], self.qid)
 
     def test_new_revision_gets_new_quiz(self):
         info = copy.deepcopy(INFO)
         info["head"]["sha"] = "d" * 40
         self.mock_info.return_value = info
-        row = self.gate.create(1)
+        row = self.gate.create(REPO, 1)
         self.assertNotEqual(row["id"], self.qid)
         self.assertEqual(row["sha"], "d" * 40)
 
     def test_mid_generation_change_rejected(self):
         self.mock_info.side_effect = [dict(INFO, head={"sha": "e" * 40}), dict(INFO, head={"sha": "f" * 40})]
         with self.assertRaises(ValueError):
-            self.gate.create(1)
+            self.gate.create(REPO, 1)
 
     def test_html_escapes_model_text(self):
         fixture = copy.deepcopy(FIXTURE)
@@ -227,7 +231,7 @@ class QuizTests(unittest.TestCase):
         self.mock_inspect.return_value = inspection
         if content is not None:
             self.mock_generate.return_value = (Quiz.model_validate(content), "test model")
-        return self.gate.create(1)
+        return self.gate.create(REPO, 1)
 
     def test_documentation_problems_fail_the_check_and_show_on_the_page(self):
         report = "src/pi.c:6: error: Member print_pi() (function) of file pi.c is not documented."
@@ -253,7 +257,7 @@ class QuizTests(unittest.TestCase):
                 comments[0]["body"] = payload["body"]
             return "{}"
 
-        with self.enabled(pr_comment=True), patch.object(self.gate.github, "run", side_effect=fake_gh):
+        with self.enabled(pr_comment=True), patch.object(GitHub, "run", side_effect=fake_gh):
             row = self.gate.store.get(self.qid)
             self.gate.publish(row)
             self.assertEqual(len(comments), 1)
@@ -300,7 +304,7 @@ class QuizTests(unittest.TestCase):
         with self.gate.store.connect() as db:  # An assessment from before titles were stored
             db.execute("UPDATE quizzes SET pr_title=''")
         commits = json.dumps([{"sha": "a" * 40}])  # PR #1's commits: only the first revision's
-        with patch.object(self.gate.github, "run", return_value=commits):
+        with patch.object(GitHub, "run", return_value=commits):
             rows = self.gate.history()
         self.assertEqual([row["outcome"] for row in rows],
                          ["Documentation problems in the changed files; see Details",
@@ -312,13 +316,13 @@ class QuizTests(unittest.TestCase):
         self.assertIn("Compute pi", page)
         self.assertIn("2 (best 3/3)", page)
         self.assertIn(f'href="/q/{self.qid}"', page)
-        self.assertEqual(len(self.gate.history(pr=999)), 0)
-        self.assertIn("Show all pull requests", self.client.get("/history?pr=1").text)
+        self.assertEqual(len(self.gate.history(REPO, pr=999)), 0)
+        self.assertIn("Show all pull requests", self.client.get(f"/history?repo={REPO}&pr=1").text)
         self.assertEqual(self.client.get("/history", follow_redirects=False).status_code, 200)
         text = PrGateCli(self.gate).history(pr=1)  # The agents' pr_gate tool, action history
-        self.assertIn("PR #1 Compute pi", text)
+        self.assertIn(f"{REPO} PR #1 Compute pi", text)
         self.assertIn("(2 attempt(s), best 3/3)", text)
-        self.assertTrue(text.endswith(f"{SETTINGS.base_url}/history?pr=1"))
+        self.assertTrue(text.endswith(f"{SETTINGS.base_url}/history?repo={REPO}&pr=1"))
         self.assertEqual(TestClient(self.app).get("/history", follow_redirects=False).status_code, 303)  # Sign-in
 
     def test_failed_build_or_tests_fail_the_check_and_show_on_the_page(self):
@@ -354,7 +358,7 @@ class QuizTests(unittest.TestCase):
         info["head"]["sha"] = "9" * 40
         self.mock_info.return_value = info
         with self.assertRaisesRegex(ValueError, "cosmetic"):
-            self.gate.create(1, fixed=str(fixture))
+            self.gate.create(REPO, 1, fixed=str(fixture))
 
     def test_quiz_kind_and_question_count_must_match(self):
         with self.assertRaises(ValueError):
@@ -371,9 +375,9 @@ class ModelTests(unittest.TestCase):
 
     def test_settings_come_from_the_manifest_and_the_environment_overrides_them(self):
         manifest = json.loads(SETTINGS_FILE.read_text())["settings"]
-        self.assertEqual(GateSettings.setting("QUIZ_DEVELOPER"), os.environ.get("QUIZ_DEVELOPER") or manifest["QUIZ_DEVELOPER"])
-        with patch.dict(os.environ, {"QUIZ_REPO": "someone/else"}):
-            self.assertEqual(GateSettings.setting("QUIZ_REPO"), "someone/else")
+        self.assertEqual(GateSettings.setting("QUIZ_BASE_URL"), os.environ.get("QUIZ_BASE_URL") or manifest["QUIZ_BASE_URL"])
+        with patch.dict(os.environ, {"QUIZ_BASE_URL": "http://elsewhere:8000"}):
+            self.assertEqual(GateSettings.setting("QUIZ_BASE_URL"), "http://elsewhere:8000")
         with self.assertRaisesRegex(ValueError, "QUIZ_NOT_SET"):
             GateSettings.setting("QUIZ_NOT_SET")
         self.assertEqual(GateSettings.setting("QUIZ_NOT_SET", required=False), "")
@@ -455,10 +459,11 @@ class PollerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.gate = QuizGate(replace(SETTINGS, data_dir=Path(self.temp.name)))
-        patches = [patch.object(self.gate.github, "run", return_value="diff --git a/pi.c b/pi.c"),
-                   patch.object(self.gate.github, "pr_info", return_value=copy.deepcopy(INFO)),
+        patches = [patch.object(GitHub, "run", return_value="diff --git a/pi.c b/pi.c"),
+                   patch.object(GitHub, "pr_info", return_value=copy.deepcopy(INFO)),
+                   patch.object(GitHub, "default_branch", return_value="main"),
                    patch.object(ChangeInspector, "inspect", return_value=dict(CODE_CHANGE)),
-                   patch.object(self.gate.github, "open_prs",
+                   patch.object(GitHub, "open_prs",
                                 return_value=[copy.deepcopy(INFO), dict(INFO, number=2, user={"login": "someone-else"})])]
         self.mocks = [p.start() for p in patches]
         self.mock_gh = self.mocks[0]
@@ -470,7 +475,7 @@ class PollerTests(unittest.TestCase):
     def test_new_revision_gets_a_quiz_once_and_other_authors_are_skipped(self):
         poller = Poller(self.gate)
         with patch.object(self.gate.generator, "generate", return_value=(Quiz.model_validate(FIXTURE), "test")) as generate:
-            self.assertEqual(poller.poll_once(), [1])
+            self.assertEqual(poller.poll_once(), [(REPO, 1)])
             self.assertEqual(poller.poll_once(), [])
         generate.assert_called_once()
         self.assertEqual(len(self.gate.store.quizzes()), 1)
@@ -560,7 +565,7 @@ class StatusTests(unittest.TestCase):
         pr = {"number": 7, "title": "Add a module", "state": "open", "user": {"login": "dev"},
               "head": {"sha": "a" * 40}, "base": {"sha": "b" * 40}}
         waiting = {"id": "q1", "build_ok": 1, "docs_ok": 1, "cosmetic": 0, "passed": 0, "skipped": 0}
-        with patch.object(gate.store, "init"), patch.object(gate.github, "open_prs", return_value=[pr]), \
+        with patch.object(gate, "init_store"), patch.object(GitHub, "open_prs", return_value=[pr]), \
                 patch.object(gate, "find_quiz", return_value=waiting), \
                 patch.object(PrGateCli, "running", return_value=True):
             text = PrGateCli(gate).status()
@@ -568,6 +573,21 @@ class StatusTests(unittest.TestCase):
             self.assertTrue(text.endswith("checking again will not change it. Give the user the quiz link and stop."))
             with patch.object(gate, "find_quiz", return_value={**waiting, "passed": 1}):
                 self.assertNotIn("checking again", PrGateCli(gate).status())  # Nothing to wait for
+
+    def test_one_unreadable_project_does_not_hide_the_others(self):
+        gate = QuizGate(replace(SETTINGS, projects=(Project("one", "o/one"), Project("two", "o/two"))))
+
+        def open_prs(github):
+            if github.repo == "o/one":
+                raise RuntimeError("GitHub request failed: not found")
+            return []
+
+        with patch.object(gate, "init_store"), patch.object(PrGateCli, "running", return_value=True), \
+                patch.object(GitHub, "open_prs", autospec=True, side_effect=open_prs), \
+                patch.object(GitHub, "default_branch", return_value="main"):
+            text = PrGateCli(gate).status()
+        self.assertIn("one (o/one):\n  Could not read its pull requests: GitHub request failed: not found", text)
+        self.assertIn("two (o/two):\n  No open pull requests target main.", text)
 
 
 class ServiceControlTests(unittest.TestCase):
@@ -651,17 +671,171 @@ class CloneSyncTests(unittest.TestCase):
         self.assertEqual(LocalClone(str(Path(self.temp.name))).sync()[0], "skipped")  # Not a clone
 
     def test_the_poller_syncs_on_its_own_schedule(self):
-        settings = replace(SETTINGS, data_dir=Path(self.temp.name), local_clone=str(self.clone), sync_seconds=60)
+        settings = replace(SETTINGS, data_dir=Path(self.temp.name), projects=(Project("proj", REPO, self.clone),),
+                           sync_seconds=60)
         poller = Poller(QuizGate(settings))
         self.commit(self.other, "b.c", "Second")
         poller.sync_clone()
         self.assertTrue((self.clone / "b.c").exists())
-        self.assertIsNotNone(poller.last_sync)
-        assert poller.last_sync is not None
-        self.assertIn("fast-forwarded by 1 commit", poller.last_sync)
+        self.assertIn("fast-forwarded by 1 commit", poller.last_sync["proj"])
         self.commit(self.other, "c.c", "Third")
         poller.sync_clone()  # Not due yet
         self.assertFalse((self.clone / "c.c").exists())
+
+
+class ProjectSettingsTests(unittest.TestCase):
+    """The gated projects come from context/paths.json, and their repositories from their clones."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def clone(self, name: str, origin: str = "") -> Path:
+        """A git repository named name, with origin set when given."""
+        folder = self.root / name
+        folder.mkdir()
+        subprocess.run(["git", "init", "-q", str(folder)], check=True)
+        if origin:
+            subprocess.run(["git", "-C", str(folder), "remote", "add", "origin", origin], check=True)
+        return folder
+
+    def test_github_remotes_name_the_repository(self):
+        for n, url in enumerate(("https://github.com/o/n.git", "https://github.com/o/n", "git@github.com:o/n.git",
+                                 "ssh://git@github.com/o/n.git")):
+            self.assertEqual(Project.github_repo(self.clone(f"r{n}", url)), "o/n", url)
+        with self.assertRaisesRegex(ValueError, "only GitHub is supported"):
+            Project.github_repo(self.clone("lab", "https://gitlab.com/o/n.git"))
+        with self.assertRaisesRegex(ValueError, "not a git clone"):
+            Project.github_repo(self.root)
+
+    def test_gated_folders_become_projects_with_their_build_settings(self):
+        gated, plain = self.clone("gated", "git@github.com:o/gated.git"), self.clone("plain", "git@github.com:o/plain.git")
+        lab = self.clone("lab", "https://gitlab.com/o/lab.git")
+        (self.root / "empty").mkdir()
+        paths = self.root / "paths.json"
+        paths.write_text(json.dumps({"paths": {
+            "gated": {"path": str(gated), "access": "rwx", "pr_gated": True},
+            "plain": {"path": str(plain), "access": "rwx"},
+            "lab": {"path": str(lab), "access": "rwx", "pr_gated": True},
+            "empty": {"path": str(self.root / "empty"), "pr_gated": True}}}))
+        settings_file = self.root / "settings.json"
+        settings_file.write_text(json.dumps({
+            "settings": {"QUIZ_BASE_URL": "http://gate.test/", "QUIZ_POLL_SECONDS": "5", "QUIZ_WEB_USER": "u",
+                         "QUIZ_WEB_PASSWORD": "p", "QUIZ_BUILD_COMMAND": "make", "QUIZ_TEST_TARGET": "check",
+                         "QUIZ_FAIL_ON_WARNINGS": "true"},
+            "projects": {"gated": {"QUIZ_TEST_TARGET": "test", "QUIZ_FAIL_ON_WARNINGS": False}}}))
+        clean = {k: v for k, v in os.environ.items() if not k.startswith("QUIZ_")}
+        with patch.dict(os.environ, clean, clear=True):
+            settings = GateSettings.load(settings_file, paths)
+        self.assertEqual(settings.projects, (Project("gated", "o/gated", gated.resolve(), "make", "test", False),))
+        self.assertEqual([line.split(":")[0] for line in settings.skipped], ["lab", "empty"])
+        self.assertEqual((settings.base_url, settings.developer), ("http://gate.test", ""))
+        paths.write_text(json.dumps({"paths": {"gated": {"path": str(gated), "pr_gated": "yes"}}}))
+        with self.assertRaisesRegex(ValueError, "pr_gated for gated must be true or false"):
+            GateSettings.load(settings_file, paths)
+
+
+class MultiRepositoryTests(unittest.TestCase):
+    """Two gated repositories: their quizzes, branches and polls stay apart."""
+
+    ONE, TWO = "o/one", "o/two"
+    BRANCHES = {ONE: "main", TWO: "develop"}
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        settings = replace(SETTINGS, data_dir=Path(self.temp.name),
+                           projects=(Project("one", self.ONE), Project("two", self.TWO)))
+        self.gate = QuizGate(settings)
+
+        def pr_info(github, number):
+            info = copy.deepcopy(INFO)
+            info["number"], info["base"]["ref"] = number, self.BRANCHES[github.repo]
+            return info
+
+        patches = [patch.object(GitHub, "default_branch", autospec=True,
+                                side_effect=lambda github: self.BRANCHES[github.repo]),
+                   patch.object(GitHub, "pr_info", autospec=True, side_effect=pr_info),
+                   patch.object(GitHub, "run", return_value="diff --git a/pi.c b/pi.c"),
+                   patch.object(ChangeInspector, "inspect", return_value=dict(CODE_CHANGE)),
+                   patch.object(self.gate.generator, "generate", return_value=(Quiz.model_validate(FIXTURE), "test"))]
+        self.mocks = [p.start() for p in patches]
+        self.mock_info, self.mock_gh = self.mocks[1], self.mocks[2]
+        for p in patches:
+            self.addCleanup(p.stop)
+
+    def test_the_same_pr_number_in_two_repositories_gets_two_quizzes(self):
+        one, two = self.gate.create(self.ONE, 1), self.gate.create(self.TWO, 1)
+        self.assertNotEqual(one["id"], two["id"])
+        self.assertEqual((one["repo"], two["repo"]), (self.ONE, self.TWO))
+        self.assertEqual(self.gate.find_quiz(self.TWO, 1, INFO["head"]["sha"], INFO["base"]["sha"])["id"], two["id"])
+        statuses = [c.args[1] for c in self.mock_gh.call_args_list if "/statuses/" in c.args[1]]
+        self.assertTrue(any(s.startswith("repos/o/one/") for s in statuses))
+        self.assertTrue(any(s.startswith("repos/o/two/") for s in statuses))
+        self.assertEqual([r["repo"] for r in self.gate.history(self.TWO)], [self.TWO])
+
+    def test_a_pr_must_target_its_repositorys_default_branch(self):
+        self.mock_info.side_effect = lambda github, number: copy.deepcopy(INFO)  # Targets main
+        with self.assertRaisesRegex(ValueError, "target develop"):
+            self.gate.create(self.TWO, 1)
+        self.assertEqual(self.gate.create(self.ONE, 1)["repo"], self.ONE)
+
+    def test_only_gated_repositories_are_assessed_and_named(self):
+        with self.assertRaisesRegex(ValueError, "'x/y' is not a gated project"):
+            self.gate.create("x/y", 1)
+        self.assertEqual((self.gate.project("one").repo, self.gate.project(self.TWO).name), (self.ONE, "two"))
+        with self.assertRaisesRegex(ValueError, "Name the project; the gated projects are: one, two"):
+            self.gate.project()
+
+    def test_open_prs_target_the_default_branch(self):
+        with patch.object(GitHub, "run", return_value="[]") as run:
+            self.assertEqual(GitHub(self.TWO).open_prs(), [])
+        self.assertEqual(run.call_args.args, ("api", "repos/o/two/pulls?state=open&base=develop&per_page=100"))
+
+    def test_one_failing_project_does_not_stop_the_others(self):
+        def open_prs(github):
+            if github.repo == self.ONE:
+                raise RuntimeError("GitHub request failed: not found")
+            return [dict(copy.deepcopy(INFO), base={"ref": "develop", "sha": "b" * 40})]
+
+        self.gate.init_store()  # As the web application does before the poller starts
+        poller = Poller(self.gate)
+        with patch.object(GitHub, "open_prs", autospec=True, side_effect=open_prs), \
+                self.assertRaisesRegex(RuntimeError, "one: GitHub request failed: not found"):
+            poller.poll_once()
+        self.assertEqual([row["repo"] for row in self.gate.store.quizzes()], [self.TWO])
+        self.assertIsNotNone(poller.last_poll)
+
+    def test_projects_the_gh_account_cannot_gate_are_dropped(self):
+        infos = {self.ONE: {"default_branch": "main", "permissions": {"push": False}},
+                 self.TWO: {"default_branch": "develop", "permissions": {"push": True}}}
+        unprotected = json.dumps({"name": "develop", "protection": {"required_status_checks": {"contexts": []}}})
+        gate = QuizGate(replace(self.gate.settings, skipped=("three: not a git clone",)))
+        with patch.object(GitHub, "info", autospec=True, side_effect=lambda github: infos[github.repo]), \
+                patch.object(GitHub, "run", return_value=unprotected):
+            problems = gate.access_problems()
+        self.assertEqual(problems[0], "three: not a git clone (skipped)")
+        self.assertRegex(problems[1], r"^one: error: gh's account cannot post commit statuses to o/one")
+        self.assertRegex(problems[2], r"^two: warning: o/two's develop does not require the developer-quiz status")
+        self.assertEqual(list(gate.projects), [self.TWO])  # A warning keeps the project
+
+    def test_old_quizzes_are_adopted_only_by_a_single_project(self):
+        row = self.gate.create(self.ONE, 1)
+        with self.gate.store.connect() as db:
+            db.execute("UPDATE quizzes SET repo=''")
+        self.gate.init_store()  # Two projects: whose they were is unknown
+        self.assertEqual(self.gate.store.get(row["id"])["repo"], "")
+        single = QuizGate(replace(self.gate.settings, projects=(Project("one", self.ONE),)))
+        single.init_store()
+        self.assertEqual(single.store.get(row["id"])["repo"], self.ONE)
+
+    def test_the_developer_is_the_gh_account_unless_set(self):
+        gate = QuizGate(replace(self.gate.settings, developer=""))
+        with patch.object(GitHub, "login", return_value="me") as login:
+            self.assertEqual((gate.developer, gate.developer), ("me", "me"))
+        login.assert_called_once()
+        self.assertEqual(self.gate.developer, "dev")
 
 
 if __name__ == "__main__":

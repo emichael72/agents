@@ -5,15 +5,65 @@ Description:
     `GateSettings`: the pull request gate's settings, read once when the service or a command
     starts. Each comes from the environment first, then settings.json, which the service and the
     agents' pr_gate tool share: it is the place to change them.
+
+    `Project`: one gated repository. The folders marked "pr_gated" in context/paths.json are the
+    gated projects; each must hold a git clone whose origin is on github.com, which names the
+    repository (owner/name). settings.json's "projects" may override the build settings per folder.
 """
 
 import json
 import os
+import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from gatekeepers.fs.fs_gate import FsGate
 from gatekeepers.pr import DATA_DIR, SETTINGS_FILE
+
+# A GitHub remote: https://github.com/owner/name(.git), git@github.com:owner/name(.git) or
+# ssh://git@github.com/owner/name(.git)
+GITHUB_REMOTE = re.compile(r"^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)"
+                           r"(?P<owner>[\w.-]+)/(?P<name>[\w.-]+?)(?:\.git)?/?$")
+
+
+@dataclass(frozen=True)
+class Project:
+    """
+    One gated repository: a folder of context/paths.json marked "pr_gated".
+    """
+
+    name: str  # The folder's name in paths.json, e.g. core_dump
+    repo: str  # owner/name on GitHub, from the clone's origin
+    path: Path = Path()  # The local clone, kept current with GitHub
+    build_command: str = "make"  # QUIZ_BUILD_COMMAND; "" skips the build check
+    test_target: str = "check"  # QUIZ_TEST_TARGET
+    fail_on_warnings: bool = True  # QUIZ_FAIL_ON_WARNINGS
+
+    @staticmethod
+    def github_repo(path: Path) -> str:
+        """
+        Name the GitHub repository a clone comes from.
+        Args:
+            path: The clone.
+        Returns:
+            str: owner/name.
+        Raises:
+            ValueError: If the folder is not a git clone, or its origin is not on github.com.
+        """
+        try:
+            result = subprocess.run(["git", "-C", str(path), "remote", "get-url", "origin"], capture_output=True,
+                                    text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ValueError(f"cannot read {path}'s origin: {exc}") from None
+        if result.returncode != 0:
+            raise ValueError(f"{path} is not a git clone with an origin remote.")
+        url = result.stdout.strip()
+        match = GITHUB_REMOTE.match(url)
+        if not match:
+            raise ValueError(f"its origin, {url}, is not a github.com repository; only GitHub is supported.")
+        return f"{match['owner']}/{match['name']}"
 
 
 @dataclass(frozen=True)
@@ -22,28 +72,26 @@ class GateSettings:
     The gate's settings (README.md, "Settings").
     """
 
-    repo: str  # QUIZ_REPO: owner/name of the gated repository
-    developer: str  # QUIZ_DEVELOPER: the only author whose pull requests are assessed
     base_url: str  # QUIZ_BASE_URL: where the quiz pages are served, without a trailing /
-    poll_seconds: float = 5  # QUIZ_POLL_SECONDS: each idle poll costs one GitHub API request
+    developer: str = ""  # QUIZ_DEVELOPER: the only author assessed; "" for the account gh is signed in as
+    projects: tuple[Project, ...] = ()  # The gated repositories (pr_gated in context/paths.json)
+    skipped: tuple[str, ...] = ()  # Gated folders that cannot be used, each with why
+    poll_seconds: float = 5  # QUIZ_POLL_SECONDS: each idle poll costs one GitHub API request per project
     profile: Optional[str] = None  # QUIZ_MODEL_PROFILE; None uses the models file's default
     web_user: str = "user"  # QUIZ_WEB_USER: demo sign-in, shown on the sign-in page
     web_password: str = "pass"  # QUIZ_WEB_PASSWORD
-    build_command: str = "make"  # QUIZ_BUILD_COMMAND; "" skips the build check
-    test_target: str = "check"  # QUIZ_TEST_TARGET
-    fail_on_warnings: bool = True  # QUIZ_FAIL_ON_WARNINGS
-    local_clone: str = ""  # QUIZ_LOCAL_CLONE: kept current with GitHub; "" for none
-    sync_seconds: float = 30  # QUIZ_SYNC_SECONDS
+    sync_seconds: float = 30  # QUIZ_SYNC_SECONDS: how often the clones are fast-forwarded; 0 never
     pr_comment: bool = True  # QUIZ_PR_COMMENT: keep a comment on the pull request
     allow_skip: bool = False  # QUIZ_ALLOW_SKIP: proof-of-concept mode
     data_dir: Path = DATA_DIR  # QUIZ_DATA_DIR: the quiz database and the secret key
 
     @classmethod
-    def load(cls, path: Path = SETTINGS_FILE) -> "GateSettings":
+    def load(cls, path: Path = SETTINGS_FILE, paths: Optional[Path] = None) -> "GateSettings":
         """
-        Read every setting.
+        Read every setting, and the gated projects.
         Args:
             path: The settings file (default: gatekeepers/pr/settings.json).
+            paths: The allowed folders; None uses FS_GATE_PATHS, then context/paths.json.
         Returns:
             GateSettings: The settings.
         Raises:
@@ -57,18 +105,24 @@ class GateSettings:
         def flag(name: str) -> bool:
             return text(name).lower() in ("true", "1", "yes")
 
+        projects, skipped = [], []
+        for folder in FsGate.load(paths).folders.values():
+            if not folder.pr_gated:
+                continue
+            try:
+                projects.append(Project(folder.name, Project.github_repo(folder.path), folder.path,
+                                        **cls.build_options(folder.name, path)))
+            except ValueError as exc:
+                skipped.append(f"{folder.name}: {exc}")
         return cls(
-            repo=text("QUIZ_REPO", True),
-            developer=text("QUIZ_DEVELOPER", True),
             base_url=text("QUIZ_BASE_URL", True).rstrip("/"),
+            developer=text("QUIZ_DEVELOPER"),
+            projects=tuple(projects),
+            skipped=tuple(skipped),
             poll_seconds=float(text("QUIZ_POLL_SECONDS", True)),
             profile=text("QUIZ_MODEL_PROFILE") or None,
             web_user=text("QUIZ_WEB_USER", True),
             web_password=text("QUIZ_WEB_PASSWORD", True),
-            build_command=text("QUIZ_BUILD_COMMAND"),
-            test_target=text("QUIZ_TEST_TARGET"),
-            fail_on_warnings=flag("QUIZ_FAIL_ON_WARNINGS"),
-            local_clone=text("QUIZ_LOCAL_CLONE"),
             sync_seconds=float(text("QUIZ_SYNC_SECONDS") or 30),
             pr_comment=flag("QUIZ_PR_COMMENT"),
             allow_skip=flag("QUIZ_ALLOW_SKIP"),
@@ -76,11 +130,31 @@ class GateSettings:
         )
 
     @classmethod
+    def build_options(cls, name: str, path: Path = SETTINGS_FILE) -> dict[str, Any]:
+        """
+        One project's build settings: its entry in settings.json's "projects", else the shared
+        QUIZ_BUILD_COMMAND, QUIZ_TEST_TARGET and QUIZ_FAIL_ON_WARNINGS.
+        Args:
+            name: The project's folder name in context/paths.json, e.g. core_dump.
+            path: The settings file.
+        Returns:
+            dict[str, Any]: build_command, test_target and fail_on_warnings.
+        """
+        content = json.loads(path.read_text(encoding="utf-8"))
+        own = content.get("projects", {}).get(name, {})
+
+        def text(setting: str) -> str:
+            return str(own[setting]) if setting in own else cls.pick(content.get("settings", {}), setting, False, path)
+
+        return {"build_command": text("QUIZ_BUILD_COMMAND"), "test_target": text("QUIZ_TEST_TARGET"),
+                "fail_on_warnings": text("QUIZ_FAIL_ON_WARNINGS").lower() in ("true", "1", "yes")}
+
+    @classmethod
     def setting(cls, name: str, required: bool = True, path: Path = SETTINGS_FILE) -> str:
         """
         Read one setting.
         Args:
-            name: The setting, e.g. "QUIZ_REPO".
+            name: The setting, e.g. "QUIZ_BASE_URL".
             required: Fail if neither place sets it.
             path: The settings file.
         Returns:
