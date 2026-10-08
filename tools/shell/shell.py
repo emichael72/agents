@@ -496,6 +496,7 @@ class Shell:
             with tempfile.TemporaryDirectory(prefix="shell-identity-") as identity:
                 result = subprocess.run([*self.sandbox(folder, self.identity_files(Path(identity))),
                                          "/usr/bin/bash", "--noprofile", "--norc", "-c", command],
+                                        stdin=subprocess.DEVNULL,  # No input: rg or cat with no file must not wait
                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
                                         env={}, timeout=self.TIMEOUT)  # Nothing of the caller's environment
         except subprocess.TimeoutExpired:

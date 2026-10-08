@@ -96,6 +96,7 @@
     "readlink": "show where a link points (readlink -f resolves it fully)",
     "realpath": "resolve a path",
     "rev": "reverse each line",
+    "rg": "ripgrep: fast recursive search (rg -n pattern src; -t c for C files only, -l lists files, -w whole words)",
     "rm": "delete files",
     "rmdir": "remove empty folders",
     "sdiff": "compare files side by side",

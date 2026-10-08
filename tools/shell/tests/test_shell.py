@@ -99,6 +99,23 @@ class ShellConfigTests(unittest.TestCase):
         self.assertIn("1|Test Agent|proj/bin:/usr/bin:/bin", text)  # Output shows /work/proj as proj
         self.assertIn("proj tool ran", text)
 
+    @unittest.skipUnless(shutil.which("bwrap"), "bubblewrap is not installed")
+    def test_commands_get_no_input(self):
+        shell = self.shell()
+        shell.commands["cat"] = {"about": "print files"}
+        shell.TIMEOUT = 5
+        # An open pipe as this process's input, as the MCP server's protocol pipe is
+        read_end, write_end = os.pipe()
+        saved = os.dup(0)
+        os.dup2(read_end, 0)
+        try:
+            ok, text = shell.run("proj", "cat")  # Reads its input: must end at once, not wait for the timeout
+        finally:
+            os.dup2(saved, 0)
+            for fd in (saved, read_end, write_end):
+                os.close(fd)
+        self.assertTrue(ok, text)
+
 
 if __name__ == "__main__":
     unittest.main()
