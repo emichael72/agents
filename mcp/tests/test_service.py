@@ -66,12 +66,13 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         for name, args, expected in [
             ('sysinfo', {'section': 'software'}, 'python (running this tool)'),
             ('sysinfo', {}, '[cpu]'),
-            ('time', {'timezone': 'UTC'}, 'UTC (UTC+00:00)'),
-            ('time', {}, ':'),  # no time zone: local time
-            ('shell', {'cwd': 'tools', 'command': 'ls time'}, 'tool.json'),
+            ('skill', {'name': 'pull-request'}, '# Change code and open a pull request'),
+            ('skill', {}, '- pull-request: '),  # no name: the list
+            ('shell', {'command': "TZ=UTC date '+%Z (UTC%:z)'"}, 'UTC (UTC+00:00)'),
+            ('shell', {'cwd': 'tools', 'command': 'ls skill'}, 'tool.json'),
             ('shell', {'cwd': 'tools', 'command': 'help'}, 'Allowed folders'),
-            ('shell', {'cwd': 'tools/time', 'command': 'grep -n timezone time.sh | head -1'}, 'timezone'),
-            ('shell', {'cwd': 'tools', 'command': 'cat -n time/tool.json | wc -l'}, ''),
+            ('shell', {'cwd': 'tools/skill', 'command': 'grep -n "def read" skill.py | head -1'}, 'def read'),
+            ('shell', {'cwd': 'tools', 'command': 'cat -n skill/tool.json | wc -l'}, ''),
         ]:
             result = (await self.rpc('tools/call', {'name': name, 'arguments': args}))['result']
             self.assertFalse(result['isError'], result)
@@ -106,16 +107,16 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue((await check(f'{folder}/good.c'))['isError'])  # Absolute paths are not allowed
 
     async def test_path_tools_stay_inside_the_allowed_folders(self):
-        for path in ('tools/..', 'tools/time/../..', 'etc', '/etc'):
+        for path in ('tools/..', 'tools/skill/../..', 'etc', '/etc'):
             for name, args in [('shell', {'cwd': path, 'command': 'ls'}), ('doxy', {'paths': path}),
                                ('ed', {'path': path + '/passwd', 'action': 'write', 'new': 'x'})]:
                 result = (await self.rpc('tools/call', {'name': name, 'arguments': args}))['result']
                 self.assertTrue(result['isError'], (name, path))
-        link = REPO_ROOT / 'tools' / 'time' / 'escape-test-link'
+        link = REPO_ROOT / 'tools' / 'skill' / 'escape-test-link'
         link.symlink_to('/etc')
         try:
             result = (await self.rpc('tools/call', {'name': 'shell', 'arguments': {
-                'cwd': 'tools/time/escape-test-link', 'command': 'ls'}}))['result']
+                'cwd': 'tools/skill/escape-test-link', 'command': 'ls'}}))['result']
             self.assertTrue(result['isError'])
             self.assertIn('outside the allowed folder', result['content'][0]['text'])
         finally:
@@ -130,6 +131,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             (Path(folder) / 'rw' / 'hello.c').write_text(source)
             (Path(folder) / 'rw' / 'Makefile').write_text(
                 'CFLAGS += -Wall\nhello: hello.c\n\tcc $(CPPFLAGS) $(CFLAGS) -o hello hello.c\n')
+            (Path(folder) / 'rw' / 'build.ninja').write_text('rule cc\n  command = cc -o $out $in\nbuild hello-ninja: cc hello.c\n')
             (Path(folder) / 'rw' / 'locked').mkdir()
             (Path(folder) / 'ro').mkdir()
             (Path(folder) / 'ro' / 'Makefile').write_text('all:\n\ttrue\n')
@@ -164,6 +166,10 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(error, text)
             self.assertIn('hi', text)
             self.assertIn('hello.c:2:', text.replace('proj/', ''))  # gcc's warning, paths as the model sees them
+            if shutil.which('ninja'):
+                error, text = await shell('proj', 'ninja && ./hello-ninja')
+                self.assertFalse(error, text)
+                self.assertIn('hi', text)
             # Build flags set before make add to the Makefile's own (make CFLAGS=... would replace them)
             error, text = await shell('proj', "CPPFLAGS=-DGREETING=1 CFLAGS='-Wno-unused-variable -O0' make -B -n")
             self.assertFalse(error, text)
@@ -173,7 +179,9 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                                  ('proj', 'echo a#b; python3'), ('proj', 'cd .. && ls'), ('proj', 'make -C /work/docs'),
                                  ('docs', 'make'), ('docs', './x'), ('proj', 'ls\npython3'), ('proj', 'PATH=/tmp make'),
                                  ('proj', 'CFLAGS=-g ls'), ('proj', 'LD_PRELOAD=x.so make'), ('proj', '"CFLAGS=/x" make'),
-                                 ('proj', 'CFLAGS\\=/x make'), ('docs', 'CFLAGS=-g make')):
+                                 ('proj', 'CFLAGS\\=/x make'), ('docs', 'CFLAGS=-g make'), ('proj', 'TZ=UTC ls'),
+                                 ('proj', 'TZ=Not/AZone date'), ('proj', 'TZ=../../etc/passwd date'), ('proj', 'ninja -C /work/docs'),
+                                 ('proj', 'ninja -f /work/docs/build.ninja'), ('docs', 'ninja')):
                 self.assertTrue((await shell(cwd, command))[0], command)
             with patch.dict(os.environ, {'FS_GATE_PATHS': str(allowed)}):  # No cwd: the first allowed folder
                 result = (await self.rpc('tools/call', {'name': 'shell', 'arguments': {'command': 'pwd'}}))['result']
@@ -364,11 +372,11 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tools["hello"]["resource"], str(Path(folder) / "hello" / "README.md"))
 
     async def test_errors(self):
-        # A missing time zone is valid (local time); a wrong type, extra field or non-object is not.
-        for arguments in ({'timezone': 123}, {'timezone': 'UTC', 'extra': True}, []):
-            result = await self.rpc('tools/call', {'name': 'time', 'arguments': arguments})
+        # A missing name is valid (the list); a wrong type, extra field or non-object is not.
+        for arguments in ({'name': 123}, {'name': 'pull-request', 'extra': True}, []):
+            result = await self.rpc('tools/call', {'name': 'skill', 'arguments': arguments})
             self.assertEqual(result['error']['code'], -32602)
-        for name, args in [('time', {'timezone': 'Not/AZone'}), ('shell', {'cwd': 'missing-file', 'command': 'ls'})]:
+        for name, args in [('skill', {'name': 'no-such-skill'}), ('shell', {'cwd': 'missing-file', 'command': 'ls'})]:
             result = await self.rpc('tools/call', {'name': name, 'arguments': args})
             self.assertTrue(result['result']['isError'])
 
@@ -400,13 +408,13 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         reader = asyncio.StreamReader()
         reader.feed_data((json.dumps(ping) + '\n' + notification + '\n').encode())
         reader.feed_data((json.dumps({'jsonrpc': '2.0', 'id': 8, 'method': 'tools/call',
-                                      'params': {'name': 'time', 'arguments': {'timezone': 'UTC'}}}) + '\n').encode())
+                                      'params': {'name': 'skill', 'arguments': {'name': 'pull-request'}}}) + '\n').encode())
         reader.feed_eof()
         written = []
         self.assertEqual(await self.service.run_stdio(reader, written.append), 0)
         self.assertEqual([json.loads(line)['id'] for line in written], [7, 8])
         self.assertEqual(self.log[0], f'started, {len(self.service._tools_registry)} tools from tools/')
-        self.assertRegex(self.log[1], r'^ran time: bash time/time\.sh --timezone=UTC \(exit 0, \d+\.\ds\)$')
+        self.assertRegex(self.log[1], r'^ran skill: python3 skill/skill\.py --name=pull-request \(exit 0, \d+\.\ds\)$')
         self.assertEqual(len(self.log), 2)
 
     def test_the_server_does_not_run_on_its_own(self):
@@ -530,7 +538,7 @@ class ConfigLoadingTests(unittest.TestCase):
             config_file = self.write({'tools_dir': 'tools'})
             self.assertEqual(MCPService.serve(config_file), 0)
             run.assert_called_once()
-            self.assertIn('time', served_services[0]._tools_data)  # tools_dir read from the repository root
+            self.assertIn('skill', served_services[0]._tools_data)  # tools_dir read from the repository root
             self.assertEqual(Path.cwd(), old_cwd)
             run.reset_mock()
             config_file = self.write({'tools_dir': 123})

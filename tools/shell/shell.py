@@ -16,8 +16,8 @@ Description:
         dedicated tool wins.
       - No redirection (< >), background (&), subshells or groups, $(...) or backticks, or
         line breaks. "2>&1" and "2>/dev/null" are dropped: errors already appear in the output.
-      - Commands marked "needs": "x" (make) need execute access where they run; cd is followed to
-        know where that is.
+      - Commands marked "needs": "x" (make, ninja) need execute access where they run; cd is
+        followed to know where that is. make and ninja must run where their build files are.
     The check is stricter than bash, never looser: it may refuse an unusual line, but it cannot
     pass a line in which bash would find a command it did not see.
 
@@ -66,9 +66,14 @@ class Shell:
                      "rev-parse", "restore"}
     GIT_LIST_ONLY = {"branch": {"-a", "-r", "-v", "-vv", "--all", "--remotes", "--list", "-l", "--show-current"},
                      "tag": {"-l", "--list", "-n"}}
-    # The only variables a command line may set, and only for make (CFLAGS='-DX' make): set in the
-    # environment, the Makefile's own "CFLAGS += ..." still applies, as it does not to make CFLAGS=...
-    BUILD_VARIABLES = ("CPPFLAGS", "CFLAGS", "CXXFLAGS", "LDFLAGS", "LDLIBS")
+    # The only variables a command line may set, each only before its command: build flags for make
+    # (CFLAGS='-DX' make; set in the environment, the Makefile's own "CFLAGS += ..." still applies, as
+    # it does not to make CFLAGS=...), and a time zone for date (TZ=Asia/Tokyo date)
+    COMMAND_VARIABLES = {"make": ("CPPFLAGS", "CFLAGS", "CXXFLAGS", "LDFLAGS", "LDLIBS"), "date": ("TZ",)}
+    ZONEINFO = Path("/usr/share/zoneinfo")  # The IANA time zones TZ may name; the sandbox sees /usr
+    # Options that would point a build tool at another folder's build files, which execute access
+    # where it runs does not cover: the build runs where its files are (cd there)
+    ELSEWHERE_OPTIONS = {"make": ("-C", "-f", "--directory", "--file", "--makefile"), "ninja": ("-C", "-f")}
     ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=")
     OPERATOR_CHARACTERS = "();<>|&"  # shlex's punctuation_chars
     # Harmless habits: errors already appear in the output, so these are dropped before the check
@@ -155,18 +160,23 @@ class Shell:
         for segment_index, words in enumerate(segments):
             if not words:
                 raise ValueError("Empty command between separators.")
-            assigned = []
+            assigned: dict[str, str] = {}
             while words and (assignment := self.ASSIGNMENT.match(words[0])) is not None:
-                assigned.append(assignment.group(1))
+                assigned[assignment.group(1)] = words[0][assignment.end():]
                 words = words[1:]
             if assigned and not self.bare_assignments(command, len(assigned), segment_index):
-                raise ValueError("Write a variable before make as NAME=value, with no quotes or backslashes in "
-                                 "NAME= (CFLAGS='-DDEBUG -O0' make).")
+                raise ValueError("Write a variable before its command as NAME=value, with no quotes or backslashes "
+                                 "in NAME= (CFLAGS='-DDEBUG -O0' make).")
             if assigned:
-                refused = [v for v in assigned if v not in self.BUILD_VARIABLES]
-                if refused or not words or words[0] != "make":
-                    raise ValueError(f"Only {', '.join(self.BUILD_VARIABLES)} may be set before a command, and only "
-                                     f"before make (CFLAGS='-DDEBUG' make), not {' '.join(refused or assigned)}.")
+                allowed = self.COMMAND_VARIABLES.get(words[0], ()) if words else ()
+                refused = [v for v in assigned if v not in allowed]
+                if refused or not words:
+                    raise ValueError(f"Only {', '.join(self.COMMAND_VARIABLES['make'])} may be set before make "
+                                     f"(CFLAGS='-DDEBUG' make), and TZ before date (TZ=Asia/Tokyo date), "
+                                     f"not {' '.join(refused or assigned)}.")
+                if "TZ" in assigned and not self.known_time_zone(assigned["TZ"]):
+                    raise ValueError(f"Unknown time zone '{assigned['TZ']}': use an IANA name such as Europe/London, "
+                                     f"or UTC.")
             name = words[0]
             if "/" in name:  # A program in an allowed folder: needs execute access there
                 program = self.to_host(name, current)
@@ -201,8 +211,9 @@ class Shell:
                 missing = [r for r in commands[name]["needs"] if r not in folder.access_at(current)]
                 if missing:
                     raise ValueError(f"{name} needs {'/'.join(missing)} access, which {shown} does not have.")
-                if name == "make" and any(w in ("-C", "-f", "--directory", "--file", "--makefile") or w.startswith(
-                        ("-C", "-f", "--directory=", "--file=", "--makefile=")) for w in words[1:]):
+                elsewhere = self.ELSEWHERE_OPTIONS.get(name, ())
+                prefixes = tuple(o if len(o) == 2 else o + "=" for o in elsewhere)
+                if elsewhere and any(w in elsewhere or w.startswith(prefixes) for w in words[1:]):
                     raise ValueError(f"{name}: run it where its files are (cd there) instead of using -C or -f.")
 
     @classmethod
@@ -245,6 +256,20 @@ class Shell:
         if word:
             words.append(word)
         return words
+
+    @classmethod
+    def known_time_zone(cls, zone: str) -> bool:
+        """
+        Whether a TZ value names an installed IANA time zone, such as Asia/Tokyo or UTC.
+        Args:
+            zone: The value, as written after TZ=.
+        Returns:
+            bool: True for a zone file under ZONEINFO.
+        """
+        parts = PurePosixPath(zone).parts
+        if not parts or zone.startswith("/") or ".." in parts:
+            return False
+        return (cls.ZONEINFO / zone).is_file()
 
     @classmethod
     def bare_assignments(cls, command: str, count: int, segment_index: int) -> bool:

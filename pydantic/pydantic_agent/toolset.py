@@ -40,7 +40,7 @@ class LocalTools:
         """
         Run a tool command from the tools folder and return its output.
         Args:
-            *command: The program and its arguments, e.g. ("bash", "time/time.sh").
+            *command: The program and its arguments, e.g. ("python3", "skill/skill.py").
             env: Extra environment variables for the command (AGENT_NAME is always set).
             timeout: Seconds to wait (a manifest's "timeout", default SCRIPT_TIMEOUT).
         Returns:

@@ -24,8 +24,10 @@ multiline commands are refused. Use [ed](../ed/README.md) to write files.
 Git is mostly for inspection: status, logs, diffs, and similar reads. `git restore` can undo uncommitted edits. Syncing,
 creating branches, committing, and opening PRs belong to the [pr tool](../pr/README.md).
 
-Programs inside project folders and Makefiles need execute permission (`x`). Build variables such as CFLAGS can be
-supplied before make; arbitrary environment assignments are refused.
+Programs inside project folders, Makefiles, and ninja builds need execute permission (`x`). make and ninja run in the
+folder holding their build files (`cd build && ninja`), not through `-C` or `-f`. Build variables such as CFLAGS can be
+supplied before make, and a time zone before date (`TZ=Asia/Tokyo date`; the zone must be installed). Other
+environment assignments are refused.
 
 ## What the sandbox sees
 

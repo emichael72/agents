@@ -19,8 +19,8 @@ Description:
         notification gets no response. stdout carries only protocol messages.
       - Single-flight: only one tool runs at a time; a concurrent `tools/call` is rejected
         with a JSON-RPC "Busy" error.
-      - Its log is a few short lines on stderr ("started, 9 tools from tools/", "ran time: bash
-        time/time.sh --timezone=UTC (exit 0, 0.0s)", errors), which the client shows as "server ..."
+      - Its log is a few short lines on stderr ("started, 8 tools from tools/", "ran skill: python3
+        skill/skill.py --name=pull-request (exit 0, 0.0s)", errors), which the client shows as "server ..."
         among its own gray debug lines when asked to (server_output in the client config).
 """
 

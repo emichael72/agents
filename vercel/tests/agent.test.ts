@@ -88,11 +88,12 @@ test('a call repeated too often is not run', async () => {
   const saved = repeatGuard.limit;
   repeatGuard.limit = 2;
   try {
-    const same: [string, object][] = [['time', { timezone: 'UTC' }], ['time', { timezone: 'UTC' }], ['time', { timezone: 'UTC' }]];
-    const messages = await ask(buildAgent(scriptedModel(same), localTools, false), 'Keep checking the time', [], quiet);
+    const read: [string, object] = ['skill', { name: 'pull-request' }];
+    const same: [string, object][] = [read, read, read];
+    const messages = await ask(buildAgent(scriptedModel(same), localTools, false), 'Keep reading the skill', [], quiet);
     const answer = JSON.stringify(messages.at(-1));
-    assert.equal(answer.match(/\(UTC\+00:00\)/g)?.length, 2); // Two calls ran
-    assert.match(answer, /Not run: you made this same time call, with the same arguments, 2 times in a row/);
+    assert.equal(answer.match(/# Change code and open a pull request/g)?.length, 2); // Two calls ran
+    assert.match(answer, /Not run: you made this same skill call, with the same arguments, 2 times in a row/);
     const again = await ask(buildAgent(scriptedModel(same.slice(0, 1)), localTools, false), 'And now?', [], quiet);
     assert.doesNotMatch(JSON.stringify(again.at(-1)), /Not run/); // A new turn: the count starts again
   } finally {
@@ -105,9 +106,9 @@ test('tools are told which agent runs them', async () => {
 });
 
 test('an omitted optional argument runs the tool without it', async () => {
-  const agent = buildAgent(scriptedModel([['time', {}]]), localTools);
-  const answer = JSON.stringify((await ask(agent, 'What time is it?', [], quiet)).at(-1));
-  assert.match(answer, /\d{2}:\d{2}/);
+  const agent = buildAgent(scriptedModel([['skill', {}]]), localTools);
+  const answer = JSON.stringify((await ask(agent, 'Which skills are there?', [], quiet)).at(-1));
+  assert.match(answer, /- pull-request: /);
 });
 
 test('a tool added to the tools folder is discovered and validated', async () => {

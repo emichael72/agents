@@ -10,14 +10,13 @@ run the scripts locally.
 
 | Tool                         | Use it for                                      |
 |------------------------------|-------------------------------------------------|
-| [shell](shell/README.md)     | Read files, search, build, and run tests        |
+| [shell](shell/README.md)     | Read files, search, build, test, get the time   |
 | [ed](ed/README.md)           | Edit or create text files                       |
 | [pr](pr/README.md)           | Sync a repository, check changes, and open a PR |
 | [pr_gate](pr_gate/README.md) | See gate status, quiz links, and history        |
 | [doxy](doxy/README.md)       | Check Doxygen documentation                     |
 | [memory](memory/README.md)   | Keep notes between chats                        |
 | [skill](skill/README.md)     | Read a procedure for the current task           |
-| [time](time/README.md)       | Get the date and time                           |
 | [sysinfo](sysinfo/README.md) | Inspect the machine running the tools           |
 
 All command examples in these pages run from the **repository root**.

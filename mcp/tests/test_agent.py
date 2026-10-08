@@ -132,16 +132,16 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(step['output'], results[n]['output'])
 
     async def test_real_tool_and_followup_history(self):
-        self.outputs = [[call(self.aliases['time'], {"timezone": "UTC"})],
-                        [message('It is noon in UTC.')], [message('You asked about UTC.')]]
-        self.assertEqual(await self.agent.ask('What time is it in UTC?'), 'It is noon in UTC.')
+        self.outputs = [[call(self.aliases['skill'], {"name": "pull-request"})],
+                        [message('Follow its steps.')], [message('You asked about pull requests.')]]
+        self.assertEqual(await self.agent.ask('How do I open a pull request?'), 'Follow its steps.')
         result = self.requests[1]['input'][-1]
         self.assertEqual(result['type'], 'function_call_output')
-        self.assertIn('(UTC+00:00)', result['output'])
+        self.assertIn('# Change code and open a pull request', result['output'])
         self.assertEqual(result['call_id'], 'call-1')
         self.assertFalse(self.requests[0]['store'])
-        await self.agent.ask('Which time zone did I use?')
-        self.assertIn('What time is it in UTC?', json.dumps(self.requests[2]['input']))
+        await self.agent.ask('What did I ask about?')
+        self.assertIn('How do I open a pull request?', json.dumps(self.requests[2]['input']))
         self.assertNotIn('test-key-not-real', json.dumps(self.requests) + ''.join(self.traces))
         conn = self.agent.mcp._get_connection('tools')
         assert conn is not None
@@ -149,7 +149,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conn.protocol_version, '2025-06-18')
 
     async def test_unknown_tool_and_bad_arguments_do_not_execute(self):
-        for name, arguments in [('not_discovered', {}), (self.aliases['time'], {'timezone': 123})]:
+        for name, arguments in [('not_discovered', {}), (self.aliases['skill'], {'name': 123})]:
             self.outputs = [[call(name, arguments)], [message('Invalid tool call')]]
             await self.agent.ask('Try a tool')
             result = json.loads(self.requests[-1]['input'][-1]['output'])
@@ -157,39 +157,39 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         # Both calls are shown, then rejected before anything runs (no "←" result line)
         self.assertEqual(self.traces, [
             '→ not_discovered({})', '✗ not_discovered: The requested tool is not in the discovered tool list',
-            '→ time({"timezone":123})', "✗ time: 123 is not of type 'string'",
+            '→ skill({"name":123})', "✗ skill: 123 is not of type 'string'",
         ])
 
     async def test_streaming_tool_loop_and_incremental_text(self):
         chunks = []
         requests = []
-        alias = self.aliases['time']
+        alias = self.aliases['skill']
 
         async def stream(request):
             requests.append(await request.json())
             response = web.StreamResponse(headers={'Content-Type': 'text/event-stream'})
             await response.prepare(request)
             if len(requests) == 1:
-                output = [call(alias, {'timezone': 'UTC'})]
+                output = [call(alias, {'name': 'pull-request'})]
             else:
-                for text in ['It is ', 'noon.']:
+                for text in ['Follow ', 'its steps.']:
                     event = {'type': 'response.output_text.delta', 'delta': text}
                     encoded = ('data: ' + json.dumps(event) + '\n\n').encode()
                     # Exercise events split across network chunks.
                     await response.write(encoded[:13])
                     await response.write(encoded[13:])
-                output = [message('It is noon.')]
+                output = [message('Follow its steps.')]
             event = {'type': 'response.completed', 'response': {'status': 'completed', 'output': output}}
             await response.write(('data: ' + json.dumps(event) + '\n\n').encode())
             await response.write_eof()
             return response
 
         self.model_handler = stream
-        self.assertEqual(await self.agent.ask('Time in UTC?', on_text=chunks.append), 'It is noon.')
-        self.assertEqual(chunks, ['It is ', 'noon.'])
+        self.assertEqual(await self.agent.ask('How do I open a PR?', on_text=chunks.append), 'Follow its steps.')
+        self.assertEqual(chunks, ['Follow ', 'its steps.'])
         self.assertTrue(all(request['stream'] for request in requests))
-        self.assertIn('(UTC+00:00)', requests[1]['input'][-1]['output'])
-        self.assertEqual(self.agent.history[-1], message('It is noon.'))
+        self.assertIn('# Change code and open a pull request', requests[1]['input'][-1]['output'])
+        self.assertEqual(self.agent.history[-1], message('Follow its steps.'))
 
     async def test_interrupted_stream_clears_history_without_retry(self):
         requests = []
@@ -243,11 +243,11 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_zero_means_no_tool_call_limit(self):
         self.agent.max_tool_calls = 0
-        self.outputs = [[call(self.aliases['time'], {'timezone': 'UTC'}, f'call-{n}')] for n in range(4)] + [[message('Done')]]
+        self.outputs = [[call(self.aliases['skill'], {'name': 'pull-request'}, f'call-{n}')] for n in range(4)] + [[message('Done')]]
         self.assertEqual(await self.agent.ask('Keep calling'), 'Done')  # Four calls, past the fixture's limit of 2
 
     async def test_call_limit_stops_repeated_execution(self):
-        self.outputs = [[call(self.aliases['time'], {'timezone': 'UTC'}, f'call-{n}')] for n in range(3)]
+        self.outputs = [[call(self.aliases['skill'], {'name': 'pull-request'}, f'call-{n}')] for n in range(3)]
         with patch.object(self.agent.mcp, 'request', wraps=self.agent.mcp.request) as request:
             with self.assertRaisesRegex(RuntimeError, 'limit'):
                 await self.agent.ask('Keep calling')
@@ -257,14 +257,14 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_call_repeated_too_often_is_not_run(self):
         self.agent.max_tool_calls = 0  # The guard, not the call limit, must stop it
         self.agent.guard.limit = 2
-        repeat = call(self.aliases['time'], {'timezone': 'UTC'})
-        self.outputs = [[repeat], [repeat], [repeat], [message('It is noon.')], [repeat], [message('Still noon.')]]
+        repeat = call(self.aliases['skill'], {'name': 'pull-request'})
+        self.outputs = [[repeat], [repeat], [repeat], [message('Done.')], [repeat], [message('Done again.')]]
         with patch.object(self.agent.mcp, 'request', wraps=self.agent.mcp.request) as request:
-            self.assertEqual(await self.agent.ask('Keep checking the time'), 'It is noon.')
+            self.assertEqual(await self.agent.ask('Keep reading the skill'), 'Done.')
             self.assertEqual(sum(c.args[0] == 'tools/call' for c in request.call_args_list), 2)  # The third did not run
             refused = json.loads(self.requests[3]['input'][-1]['output'])
             self.assertTrue(refused['isError'])
-            self.assertIn('Not run: you made this same time call, with the same arguments, 2 times in a row',
+            self.assertIn('Not run: you made this same skill call, with the same arguments, 2 times in a row',
                           refused['content'][0]['text'])
             await self.agent.ask('And now?')  # A new turn: the count starts again
             self.assertEqual(sum(c.args[0] == 'tools/call' for c in request.call_args_list), 3)
@@ -289,13 +289,13 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(process.returncode)  # Started by connect, still running
         lines = []
         self.agent.mcp.on_server_output(lines.append)
-        self.outputs = [[call(self.aliases['time'], {'timezone': 'UTC'})], [message('Noon')]]
-        await self.agent.ask('What time is it?')
+        self.outputs = [[call(self.aliases['skill'], {'name': 'pull-request'})], [message('Done')]]
+        await self.agent.ask('How do I open a PR?')
         for _ in range(50):  # The log line arrives on its own stream
             if lines:
                 break
             await asyncio.sleep(0.02)
-        self.assertRegex(lines[0], r'^ran time: bash time/time\.sh --timezone=UTC \(exit 0, \d+\.\ds\)$')
+        self.assertRegex(lines[0], r'^ran skill: python3 skill/skill\.py --name=pull-request \(exit 0, \d+\.\ds\)$')
         await self.agent.close()
         self.assertEqual(process.returncode, 0)  # stdin closed: it exited by itself
 
@@ -412,7 +412,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(AgentContext.worth_saving([]))
         self.assertFalse(AgentContext.worth_saving([ask, answer]))
         self.assertTrue(AgentContext.worth_saving([ask, answer, ask, answer]))
-        self.assertTrue(AgentContext.worth_saving([ask, call('time', {}), answer]))
+        self.assertTrue(AgentContext.worth_saving([ask, call('skill', {}), answer]))
 
     async def test_missing_key_and_unknown_profile(self):
         profiles = self.shipped_models()

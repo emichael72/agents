@@ -22,10 +22,10 @@
       "output": "not an allowed folder"
     },
     {
-      "tool": "time",
-      "arguments": {"timezone": "UTC"},
+      "tool": "skill",
+      "arguments": {"name": "pull-request"},
       "outcome": "ok",
-      "output": "(UTC+00:00)"
+      "output": "# Change code and open a pull request"
     }
   ]
 }

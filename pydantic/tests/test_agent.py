@@ -180,19 +180,19 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(AgentContext.memory_text(None), "")
 
     def test_a_call_repeated_too_often_is_not_run(self):
-        manifest = json.loads((TOOLS_DIR / "time" / "tool.json").read_text())
-        time_tool = LocalTools.tool("time", manifest).function
+        manifest = json.loads((TOOLS_DIR / "skill" / "tool.json").read_text())
+        skill_tool = LocalTools.tool("skill", manifest).function
         with patch.object(LocalTools, "guard", RepeatGuard(2)):
-            with patch.object(LocalTools, "run_script", return_value="12:00") as run:
-                self.assertEqual(time_tool(timezone="UTC"), "12:00")
-                self.assertEqual(time_tool(timezone="UTC"), "12:00")
-                with self.assertRaisesRegex(ToolFailed, "Not run: you made this same time call, with the same "
+            with patch.object(LocalTools, "run_script", return_value="Steps") as run:
+                self.assertEqual(skill_tool(name="pull-request"), "Steps")
+                self.assertEqual(skill_tool(name="pull-request"), "Steps")
+                with self.assertRaisesRegex(ToolFailed, "Not run: you made this same skill call, with the same "
                                                         "arguments, 2 times in a row"):
-                    time_tool(timezone="UTC")
+                    skill_tool(name="pull-request")
                 self.assertEqual(run.call_count, 2)  # The third did not run
-                self.assertEqual(time_tool(timezone="Asia/Tokyo"), "12:00")  # Another call runs
+                self.assertEqual(skill_tool(name="build"), "Steps")  # Another call runs
                 LocalTools.guard.reset()  # A new turn
-                time_tool(timezone="UTC"), time_tool(timezone="UTC")
+                skill_tool(name="pull-request"), skill_tool(name="pull-request")
                 self.assertEqual(run.call_count, 5)
 
     def test_the_skills_join_the_instructions(self):
@@ -212,7 +212,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(json.loads(AGENT_FILE.read_text())["save_on_exit"])
         ask = ModelRequest(parts=[UserPromptPart("hi")])
         answer = ModelResponse(parts=[TextPart("hello")], provider_details=None, provider_response_id=None)
-        call = ModelResponse(parts=[ToolCallPart("time", {})], provider_details=None, provider_response_id=None)
+        call = ModelResponse(parts=[ToolCallPart("skill", {})], provider_details=None, provider_response_id=None)
         self.assertFalse(AgentContext.worth_saving([]))
         self.assertFalse(AgentContext.worth_saving([ask, answer]))
         self.assertTrue(AgentContext.worth_saving([ask, answer, ask, answer]))
@@ -246,9 +246,9 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(LocalTools.run_script("printenv", "AGENT_NAME"), "Pydantic Agent")
 
     def test_an_omitted_optional_argument_may_be_null(self):
-        clock = tool_function(LocalTools.load(), "time")
-        self.assertIn("(UTC+00:00)", clock(timezone="UTC"))
-        self.assertEqual(clock(timezone=None)[:4], clock()[:4])  # null means omitted: local time
+        skill = tool_function(LocalTools.load(), "skill")
+        self.assertIn("# Change code and open a pull request", skill(name="pull-request"))
+        self.assertEqual(skill(name=None), skill())  # null means omitted: the list
 
     async def test_history_carries_across_turns(self):
         async def remember(messages, _info):
