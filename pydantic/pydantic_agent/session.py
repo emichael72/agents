@@ -17,7 +17,7 @@ from typing import Any, Optional
 import pydantic_ai
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import ANSI
-from pydantic_ai import Agent, AgentRunResultEvent, UnexpectedModelBehavior, capture_run_messages
+from pydantic_ai import Agent, AgentRetries, AgentRunResultEvent, UnexpectedModelBehavior, capture_run_messages
 from pydantic_ai.messages import (FunctionToolCallEvent, FunctionToolResultEvent, ModelMessage, ModelResponse,
                                   PartDeltaEvent, PartStartEvent, TextPart, TextPartDelta, ToolReturnPart)
 from pydantic_ai.models import Model
@@ -74,7 +74,7 @@ class AgentSession:
         self.tools = tools
         LocalTools.guard = RepeatGuard(int(self.settings.get("max_repeated_calls", 0)))
         return Agent(model, instructions=self.context.system_prompt(self.settings), toolsets=[tools],
-                     retries={"tools": self.tool_retries})
+                     retries=AgentRetries(tools=self.tool_retries))
 
     async def run(self, profile: Optional[str] = None, model: Optional[str] = None, base_url: Optional[str] = None,
                   prompt: Optional[str] = None, show_history: bool = False) -> int:
