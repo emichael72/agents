@@ -357,6 +357,13 @@ says. Change a call there and all three agents are tested on it.
 npm --prefix vercel test
 ```
 
+The pull request gate and the `pr` tool have their own offline tests:
+
+```bash
+.venv/bin/python -m unittest discover -s gatekeepers/pr/tests
+.venv/bin/python -m unittest discover -s tools/pr/tests
+```
+
 ## Shared settings
 
 The model settings live in `context/models.json` (see "Context" above). With the default `local`

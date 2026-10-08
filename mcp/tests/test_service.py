@@ -230,7 +230,14 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                 return result['isError'], result['content'][0]['text']
 
             self.assertIn('no changes', (await pr({'path': 'proj', 'title': 'Nothing yet'}))[1])
-            (repo / 'b.c').write_text('int  b( void ){return 1;}\n')  # Not in the template's style
+            (repo / 'b.c').write_text('int b(void);\n')  # Undocumented: the gate's checks refuse it
+            error, text = await pr({'path': 'proj', 'title': 'Add b.c'})
+            self.assertTrue(error)
+            self.assertIn('Not opened: the change would fail the merge gate', text)
+            self.assertIn('b.c:1: error: File has no @file', text)
+            self.assertEqual(run('git', 'branch', '--list', 'agent/*', cwd=repo).stdout.decode(), '')  # Nothing made
+            doc = '/**\n * @file b.c\n * @brief The b function.\n */\n\n/**\n * @brief Return one.\n * @return 1.\n */\n'
+            (repo / 'b.c').write_text(doc + 'int  b( void ){return 1;}\n')  # Documented, not in the template's style
             self.assertTrue((await pr({'path': 'look', 'title': 'Read-only folder'}))[0])
             error, text = await pr({'path': 'proj', 'title': 'Add b.c', 'body': 'A second file.'})
             self.assertFalse(error, text)
@@ -240,7 +247,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             if shutil.which('clang-format'):  # The change was formatted before it was committed
                 self.assertIn('Formatted with clang-format: b.c', text)
                 committed = run('git', 'show', 'agent/add-b-c:b.c', cwd=repo).stdout.decode()
-                self.assertEqual(committed, 'int b(void)\n{\n    return 1;\n}\n')
+                self.assertEqual(committed, doc + 'int b(void)\n{\n    return 1;\n}\n')
             self.assertIn('--base main --head agent/add-b-c --title Add b.c', (bin_dir / 'gh-args').read_text())
             heads = run('git', 'ls-remote', '--heads', str(remote)).stdout.decode()
             self.assertIn('refs/heads/agent/add-b-c', heads)

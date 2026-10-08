@@ -8,15 +8,17 @@ Description:
 
     This is the one tool that reaches GitHub, with the credentials of the user running the agent
     (git and gh). With action sync, it brings the default branch up to date with GitHub
-    (fast-forward only), which the agents' sandboxed shell cannot do. The open action creates a pull
-    request, the same way every time:
+    (fast-forward only), which the agents' sandboxed shell cannot do. With action check, it runs the
+    merge gate's own checks on the uncommitted changes: build and tests, and documentation. The
+    open action creates a pull request, the same way every time:
       1. Check the repository: on its default branch, no commits of its own, changes to submit.
       2. Bring the default branch up to date with GitHub (fast-forward only).
       3. Format the changed C/C++ files with clang-format (the repository's .clang-format, else
          the agents' template, context/clang-format.yaml), so every pull request follows the style.
-      4. Create the branch (new, never the default branch), commit everything, push it.
-      5. Open the pull request, then switch back to the default branch.
-      6. Wait for the merge gate's check (PR_WAIT_CHECK, e.g. pr_gate's developer-quiz) on the new
+      4. Run the gate's checks, as action check does; if one fails, stop: nothing is committed.
+      5. Create the branch (new, never the default branch), commit everything, push it.
+      6. Open the pull request, then switch back to the default branch.
+      7. Wait for the merge gate's check (PR_WAIT_CHECK, e.g. pr_gate's developer-quiz) on the new
          commit, up to PR_WAIT_SECONDS, and report it: for pr_gate, the quiz the reviewer must pass.
     It never pushes to the default branch, never force-pushes and never merges: merging stays with
     the people (and gates) of the repository.
@@ -29,6 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Optional
@@ -39,6 +42,8 @@ sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents
                             if (p / "pyproject.toml").is_file())))
 from gatekeepers import CONTEXT_DIR
 from gatekeepers.fs.fs_gate import FsGate
+from gatekeepers.pr.changes import C_EXTENSIONS, ChangeInspector
+from gatekeepers.pr.settings import GateSettings
 from tools.common.cli import ToolArgumentParser
 
 
@@ -47,7 +52,7 @@ class PullRequests:
     Opens pull requests from, and syncs, the repositories in the allowed folders.
     """
 
-    VERSION = "1.0.0"
+    VERSION = "1.1.0"
     CLANG_FORMAT = CONTEXT_DIR / "clang-format.yaml"  # The default style
     FORMATTED = {".c", ".h", ".cc", ".cpp", ".hpp", ".cxx", ".hh"}
     POLL_SECONDS = 3
@@ -68,28 +73,48 @@ class PullRequests:
         self.wait_seconds = wait_seconds
 
     @classmethod
-    def git(cls, repo: Path, *args: str, check: bool = True) -> str:
+    def git(cls, repo: Path, *args: str, check: bool = True, strip: bool = True) -> str:
         """
         Run git in a repository.
         Args:
             repo: The repository.
             *args: git's arguments.
             check: Raise if git fails.
+            strip: Strip the output; off where leading spaces matter, as in git status --porcelain.
         Returns:
-            str: Its output, stripped.
+            str: Its output.
         Raises:
             ValueError: If git fails and check is set.
         """
         result = subprocess.run([*cls.GIT, "-C", str(repo), *args], capture_output=True, text=True, timeout=cls.TIMEOUT)
         if check and result.returncode != 0:
             raise ValueError(f"git {args[0]} failed: {(result.stderr or result.stdout).strip()[:500]}")
-        return result.stdout.strip()
+        return result.stdout.strip() if strip else result.stdout
 
     @classmethod
     def default_branch(cls, repo: Path) -> str:
         """The branch the remote's HEAD points to (usually main)."""
         head = cls.git(repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD", check=False)
         return head.removeprefix("origin/") or "main"
+
+    @classmethod
+    def changed_files(cls, repo: Path) -> list[str]:
+        """
+        The changed and new files of a repository that a commit would hold, not the deleted ones.
+        Args:
+            repo: The repository.
+        Returns:
+            list[str]: Their paths, relative to the repository.
+        """
+        paths = []
+        entries = iter(cls.git(repo, "status", "--porcelain", "-z", "--untracked-files=all", strip=False).split("\0"))
+        for entry in entries:
+            status, path = entry[:2], entry[3:]
+            if "R" in status or "C" in status:
+                next(entries, None)  # -z puts a rename's old path in the next entry
+            if path and "D" not in status and (repo / path).is_file():
+                paths.append(path)
+        return paths
 
     @classmethod
     def format_changes(cls, repo: Path) -> list[str]:
@@ -103,11 +128,7 @@ class PullRequests:
         """
         if not shutil.which("clang-format"):
             return []
-        paths = []
-        for line in cls.git(repo, "status", "--porcelain", "--untracked-files=all").splitlines():
-            status, path = line[:2], line[3:].split(" -> ")[-1].strip('"')
-            if "D" not in status and Path(path).suffix.lower() in cls.FORMATTED and (repo / path).is_file():
-                paths.append(path)
+        paths = [path for path in cls.changed_files(repo) if Path(path).suffix.lower() in cls.FORMATTED]
         own_style = any((repo / name).is_file() for name in (".clang-format", "_clang-format"))
         style = "file" if own_style else f"file:{cls.CLANG_FORMAT}"
         changed = []
@@ -118,6 +139,60 @@ class PullRequests:
             if (repo / path).read_bytes() != before:
                 changed.append(path)
         return changed
+
+    @classmethod
+    def check_tree(cls, repo: Path) -> tuple[bool, str]:
+        """
+        Run the merge gate's checks on a repository as a commit would hold it now: a copy of its
+        tracked and new files (not ignored ones, so no old build output), built and tested in the
+        shell tool's sandbox, and the changed C/C++ files checked with doxy. The settings are the
+        gate's (QUIZ_BUILD_COMMAND, QUIZ_TEST_TARGET, QUIZ_FAIL_ON_WARNINGS), so a change that passes
+        here passes the gate's build and documentation checks.
+        Args:
+            repo: The repository.
+        Returns:
+            tuple[bool, str]: Whether every check passed, and the report.
+        """
+        def setting(name: str) -> str:
+            return GateSettings.setting(name, required=False)
+
+        inspector = ChangeInspector(gh=lambda *_: "", repo="",  # No GitHub: the tree is local
+                                    build_command=setting("QUIZ_BUILD_COMMAND"),
+                                    test_target=setting("QUIZ_TEST_TARGET"),
+                                    fail_on_warnings=setting("QUIZ_FAIL_ON_WARNINGS").lower() in ("true", "1", "yes"))
+        changed_c = [path for path in cls.changed_files(repo) if Path(path).suffix.lower() in C_EXTENSIONS]
+        with tempfile.TemporaryDirectory() as work:
+            tree = Path(work) / "tree"
+            listed = cls.git(repo, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+            for path in filter(None, listed.split("\0")):
+                source = repo / path
+                if source.is_file() or source.is_symlink():
+                    (tree / path).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, tree / path, follow_symlinks=False)
+            build_ok, build_report = inspector.check_build(tree)
+            docs_ok, docs_report = inspector.check_docs(tree, changed_c)
+        if build_ok:  # Only the summary line: the output matters when something fails
+            build_report = build_report.splitlines()[0]
+        mark = {True: "passed", False: "FAILED"}
+        return build_ok and docs_ok, (f"Build and tests: {mark[build_ok]}\n{build_report}\n\n"
+                                      f"Documentation: {mark[docs_ok]}\n{docs_report}")
+
+    def check(self, path: str) -> str:
+        """
+        Run the merge gate's checks on a repository's uncommitted changes, before opening a pull request.
+        Args:
+            path: <allowed name>/<folder> in the repository; it needs read and execute access.
+        Returns:
+            str: The report, when every check passed.
+        Raises:
+            ValueError: With the report, when a check failed.
+        """
+        folder, shown = self.gate.resolve(path, "dir", "rx")
+        repo = Path(self.git(folder, "rev-parse", "--show-toplevel")).resolve()
+        ok, report = self.check_tree(repo)
+        if not ok:
+            raise ValueError(f"{shown} is not ready for a pull request: fix what failed, then check again.\n\n{report}")
+        return f"{shown} is ready for a pull request: the gate's build, tests and documentation checks pass.\n\n{report}"
 
     @classmethod
     def branch_name(cls, title: str, branch: Optional[str]) -> str:
@@ -246,6 +321,10 @@ class PullRequests:
         agent = os.environ.get("AGENT_NAME")
         description = body.strip() + (f"\n\nOpened by the {agent}." if agent else "")
         formatted = self.format_changes(repo)
+        ok, report = self.check_tree(repo)
+        if not ok:
+            raise ValueError(f"Not opened: the change would fail the merge gate. Fix what failed, check again "
+                             f"(action check), then open the pull request.\n\n{report}")
         self.git(repo, "switch", "--quiet", "-c", name)
         try:
             self.git(repo, "add", "--all")
@@ -269,14 +348,15 @@ class PullRequests:
     @classmethod
     def build_parser(cls) -> ToolArgumentParser:
         """
-        The command line: "[--action=open|sync] [--title=...] [--body=...] [--branch=...] -- <path>".
+        The command line: "[--action=open|sync|check] [--title=...] [--body=...] [--branch=...] -- <path>".
         Returns:
             ToolArgumentParser: The parser.
         """
         parser = ToolArgumentParser("pr", cls.VERSION, "Open a pull request from a repository's changes, or sync it.")
         parser.add_argument("path", nargs="?", help="<allowed name>/<folder> in the repository, e.g. core_dump")
         parser.add_argument("--action", default="open", help="open (default): open a pull request; sync: update "
-                                                             "the default branch from GitHub")
+                                                             "the default branch from GitHub; check: run the merge "
+                                                             "gate's checks on the changes")
         parser.add_argument("--title", help="open: the title, also the commit message's first line")
         parser.add_argument("--body", default="", help="open: the description, also the rest of the commit message")
         parser.add_argument("--branch", help="open: the branch to create; omit it to derive one from the title")
@@ -284,7 +364,7 @@ class PullRequests:
 
     def run(self, args: argparse.Namespace) -> str:
         """
-        Run the action a command line asks for: open a pull request (the default), or sync.
+        Run the action a command line asks for: open a pull request (the default), sync, or check.
         Args:
             args: The command line, from `build_parser`.
         Returns:
@@ -296,8 +376,10 @@ class PullRequests:
             raise ValueError("Give the repository folder, e.g. core_dump.")
         if args.action == "sync":
             return self.sync(args.path)
+        if args.action == "check":
+            return self.check(args.path)
         if args.action != "open":
-            raise ValueError(f"Unknown action '{args.action}'; use open (the default) or sync.")
+            raise ValueError(f"Unknown action '{args.action}'; use open (the default), sync or check.")
         if args.title is None:
             raise ValueError("Give a title for the pull request.")
         return self.open_pr(args.path, args.title, args.body, args.branch)
