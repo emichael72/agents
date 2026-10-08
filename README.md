@@ -134,8 +134,8 @@ profile, model and server it is using when it starts.
 Every agent scans this folder at startup, so a tool added there is available to all three
 without code changes. [tools/README.md](tools/README.md) describes the manifest and how to add
 a tool. Current tools: `shell` (ls, cat, grep, find, sed, make, gcc, git and more, in a sandbox),
-`ed` (edit files), `pr` (open a pull request, also called a merge request or MR), `memory` (notes
-kept between runs), `time`, `sysinfo`, `doxy` (checks Doxygen documentation of C/C++ sources) and
+`ed` (edit files), `pr` (check a change as the gate will, and open a pull request, also called a
+merge request or MR), `skill` (read a [skill](#skills)), `memory` (notes kept between runs), `time`, `sysinfo`, `doxy` (checks Doxygen documentation of C/C++ sources) and
 `pr_gate` (Pull Request Gate: a merge gate that quizzes a developer on their pull request; see
 [gatekeepers/pr/README.md](gatekeepers/pr/README.md)).
 Tools that take a path only reach the folders named in
@@ -144,6 +144,21 @@ Tools that take a path only reach the folders named in
 ```bash
 bash tools/time/time.sh --timezone=UTC  # run a tool's script by hand
 ```
+
+## Skills
+
+`skills/` holds step-by-step procedures for kinds of tasks, one `<name>/SKILL.md` per skill. A
+header gives the skill's name and a one-line description of when to use it; the rest is the
+procedure. Every agent lists each skill's name and description at the end of its instructions when
+it starts, and the model reads a whole skill with the [`skill`](tools/skill/README.md) tool when a
+task matches it. Only one line per skill is in every prompt, so procedures can be detailed without
+making each model call longer.
+
+- `pull-request`: change code in a repository and open a pull request: sync, read, edit with `ed`,
+  add tests to `make check`, check with the `pr` tool, then open the pull request.
+
+Add a skill by adding `skills/<name>/SKILL.md`; the agents pick it up on their next start
+(`skills_dir` in `context/agent.json`).
 
 ## Gatekeepers
 
@@ -165,11 +180,20 @@ change on its next start. None of this is hard-coded in the agents.
   lines.
 - `context/agent.json`: the agent loop: `max_tool_calls`, the most tool calls the model may make while
   answering one prompt; `0` (the setting now) means no limit, so stop a runaway answer with Ctrl+C.
-  `memory_index` names the memory index every agent loads (see "Memory" below), `save_on_exit`
-  turns on the save turn before exit, and `names` gives each agent its name (`mcp`, `dantic`,
-  `vercel`), which it answers with when asked.
+  `memory_index` names the memory index every agent loads (see "Memory" below), `skills_dir` the
+  folder of [skills](#skills) every agent lists, and `save_on_exit` turns on the save turn before
+  exit.
 - `context/instructions.json` also holds `identity`, the line naming the agent at the top of its
   instructions, and `on_exit`, the prompt of the save turn before exit.
+- Each agent's own `instructions.json`, in its folder (`mcp/`, `pydantic/`, `vercel/`), gives its
+  `name` (`mcp`, `dantic`, `vercel`), which the `identity` line uses and the agent answers with when
+  asked, and adds its own `instructions` lines after the shared ones, for what is particular to it.
+  The Pydantic and Vercel Agents' files also give `display_name`, the name tools such as `pr` report
+  (`AGENT_NAME`); MCPAgent's is `tools_env` in `mcp/mcpagent/jsons/mcpagent.json`, as its server runs
+  the tools.
+  MCPAgent's say that its tools run one at a time (its MCP server is single-flight); the Pydantic
+  and Vercel Agents run the tool calls of one response at the same time (`parallel_tool_calls`),
+  and theirs tell the model to put only independent calls together.
 - `context/output.json`: the terminal layout: `width` (120) and `show_time` (true). See
   "Terminal output" below.
 - `context/clang-format.yaml`: the C/C++ style (4-space indents, function braces on their own
@@ -292,7 +316,8 @@ Response time: 6.3s · tokens: 4,313 in, 53 out · 2 model calls
    streams. `"links": false` turns this off; piped output is always plain.
 4. **The answer has one blank line before it, and the response time right under it**, then one
    blank line before the next prompt. Text the model writes between tool calls is set off by one
-   blank line. A tool call prints together with its result, in the order they ran (with `-d`).
+   blank line. A tool call prints together with its result (with `-d`), in the order they finish:
+   the Pydantic and Vercel Agents run the calls of one response at the same time.
 5. **Each response ends with its time and tokens**: `Response time: N.Ns` from sending the prompt
    to the end of the answer, tools included; then the tokens the model calls used, as the server
    reports them: *in* (sent to the model: instructions, tool list, history, tool results, added
@@ -323,7 +348,6 @@ The same agent with pydantic-ai running the loop; the tools run in-process. See
 ```bash
 .venv/bin/python pydantic/agent.py                                # interactive chat
 .venv/bin/python pydantic/agent.py --prompt "Time now" --history  # one prompt + raw message dump
-.venv/bin/python pydantic/agent.py --parallel                     # run a response's tool calls concurrently
 .venv/bin/python -m unittest discover -s pydantic/tests           # offline tests
 ```
 
@@ -335,7 +359,6 @@ directly. See [vercel/README.md](vercel/README.md).
 ```bash
 node vercel/agent.ts                                # interactive chat
 node vercel/agent.ts --prompt "Time now" --history  # one prompt + raw message dump
-node vercel/agent.ts --parallel                     # run a response's tool calls concurrently
 npm --prefix vercel test                            # offline tests
 npm --prefix vercel run lint                        # Oxlint: likely bugs
 ```
@@ -357,11 +380,12 @@ says. Change a call there and all three agents are tested on it.
 npm --prefix vercel test
 ```
 
-The pull request gate and the `pr` tool have their own offline tests:
+The pull request gate and the `pr` and `skill` tools have their own offline tests:
 
 ```bash
 .venv/bin/python -m unittest discover -s gatekeepers/pr/tests
 .venv/bin/python -m unittest discover -s tools/pr/tests
+.venv/bin/python -m unittest discover -s tools/skill/tests
 ```
 
 ## Shared settings

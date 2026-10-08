@@ -37,7 +37,6 @@ From the repository root:
 ```bash
 node vercel/agent.ts                                # interactive chat, local tools
 node vercel/agent.ts --prompt "Time now" --history  # one prompt + raw message dump
-node vercel/agent.ts --parallel                     # run a response's tool calls concurrently
 npm --prefix vercel test                            # offline tests
 npm --prefix vercel run typecheck                   # tsc --noEmit
 npm --prefix vercel run lint                        # Oxlint: likely bugs, not style (.oxlintrc.json)
@@ -52,14 +51,13 @@ and failures as `✗ tool: error` instead.
 | --- | --- |
 | `--profile NAME`, `--local`, `--openai` | Model profile from `../context/models.json`; default: its `"default"` (`local`) |
 | `--model`, `--base-url` | Override the profile's model or server for this run |
-| `--parallel` | Run the tool calls from one model response concurrently |
 
 ## How it maps to the other two
 
 | Concern | mcpagent | pydantic | vercel |
 | --- | --- | --- | --- |
 | Agent loop | `MCPAgent.ask()`, hand-written | `Agent.run_stream_events()` | `ToolLoopAgent.stream()` |
-| Instructions | `../context/instructions.json`, named by `instructions_file` in `mcpagent.json` | `../context/instructions.json` → `AgentContext.instructions()` | `../context/instructions.json` → `loadInstructions()` |
+| Instructions | `../context/instructions.json` (`instructions_file` in `mcpagent.json`), then `../mcp/instructions.json` (`agent_instructions_file`) | `../context/instructions.json`, then `instructions.json` → `AgentContext.system_prompt()` | `../context/instructions.json`, then `instructions.json` → `buildAgent()` |
 | Model provider | raw `httpx`, `/v1/responses` | `OpenAIChatModel` | `@ai-sdk/openai-compatible` |
 | Tools | `../tools/*/tool.json`, loaded by the server (`tools_dir`) | `../tools/*/tool.json` → `Tool.from_schema` | `../tools/*/tool.json` → `z.fromJSONSchema` |
 | Argument validation | `jsonschema.validate` | `jsonschema.validate` | zod, from the same JSON schema |
@@ -67,9 +65,12 @@ and failures as `✗ tool: error` instead.
 | Running a script | the server, `asyncio.create_subprocess_exec` | `subprocess.run` in a worker thread | async `execFile`, no threads |
 | Conversation history | list of Responses items | `result.all_messages()` | `response.messages` |
 | Loop cap | `max_tool_calls=8` | `UsageLimits(tool_calls_limit=8)` | `stopWhen: isStepCount(9)` |
-| One tool at a time | always | `parallel_tool_call_execution_mode` | `oneAtATime()` wrapper in `vercelagent/tools.ts` |
+| Tool calls of one response | one at a time: the server is single-flight | at the same time: `parallel_tool_calls` in `instructions.json` | at the same time: `parallel_tool_calls` in `instructions.json` (`oneAtATime()` when false) |
 
-The AI SDK starts each tool as soon as its call arrives in the stream and has no sequential mode,
-so `vercelagent/tools.ts` chains `execute` calls through a promise queue unless `--parallel` is given. Node is
-single-threaded, but `execFile` is asynchronous, so in parallel mode the scripts still run as
-concurrent child processes while the event loop waits.
+The AI SDK starts each tool as soon as its call arrives in the stream, so the tool calls of one
+response run at the same time. Node is single-threaded, but `execFile` is asynchronous, so the
+scripts run as concurrent child processes while the event loop waits. `parallel_tool_calls` in
+[`instructions.json`](instructions.json) turns this off: `vercelagent/tools.ts` then chains `execute`
+calls through a promise queue (`oneAtATime()`). The same file adds lines to the shared instructions
+telling the model that its calls run at the same time, so several go in one response only when
+none depends on another, and gives the agent its name (`vercel`).

@@ -10,6 +10,7 @@
     "  tools_env: environment variables every tool gets, e.g. which agent runs it.",
     "client: the agent: its log level, the shared context files and the MCP servers it uses.",
     "  instructions_file, models_file, output_file, agent_file: shared by all three agents;",
+    "  agent_instructions_file: MCPAgent's own name and instructions, added to the shared ones;",
     "  --profile, --local or --openai picks a model profile, else models_file's \"default\".",
     "  servers: an HTTP server without \"config\" is the server section's, at its address and port."
   ],
@@ -26,6 +27,7 @@
   "client": {
     "log_level": "ERROR",
     "instructions_file": "context/instructions.json",
+    "agent_instructions_file": "mcp/instructions.json",
     "models_file": "context/models.json",
     "output_file": "context/output.json",
     "agent_file": "context/agent.json",

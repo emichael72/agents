@@ -1,6 +1,7 @@
 {
   "description": [
-    "Agent loop settings shared by all three agents.",
+    "Agent loop settings shared by all three agents. Each agent's name and its own instructions are",
+    "in its folder's instructions.json (mcp/, pydantic/, vercel/).",
     "max_tool_calls: the most tool calls the model may make while answering one prompt;",
     "0 means no limit (a model stuck in a loop then runs until stopped with Ctrl+C).",
     "A multi-step task (read a project, change it, build, open a pull request) needs 20 or more.",
@@ -9,14 +10,11 @@
     "save_on_exit: when the user types exit in the interactive chat, first give the model one",
     "turn to save what is worth remembering (the on_exit prompt in instructions.json); skipped",
     "for a session with no tool call and a single exchange, and by Ctrl+C or a --prompt run.",
-    "names: each agent's name (the identity lines in instructions.json), which it gives when asked."
+    "skills_dir: the skills folder (relative to the repository): one <name>/SKILL.md per skill, whose",
+    "name and description are listed in the agents' instructions at start-up; the skill tool reads them."
   ],
   "max_tool_calls": 0,
   "memory_index": ".memory/index.md",
   "save_on_exit": true,
-  "names": {
-    "mcpagent": "mcp",
-    "pydantic": "dantic",
-    "vercel": "vercel"
-  }
+  "skills_dir": "skills"
 }

@@ -1,0 +1,14 @@
+{
+  "description": [
+    "Reads a skill: the step-by-step procedure for a kind of task.",
+    "The skills and when to use each are listed at the end of your instructions;",
+    "before a task that matches one, read it and follow its steps in order.",
+    "Omit name to list the skills."
+  ],
+  "command": "python3",
+  "args": ["skill/skill.py"],
+  "params": [
+    {"name": "name", "type": "string", "description": "The skill to read, e.g. pull-request; omit it for the list", "style": "flag", "required": false}
+  ],
+  "resource": "skill/README.md"
+}

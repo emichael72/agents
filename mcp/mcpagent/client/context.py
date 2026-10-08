@@ -4,7 +4,8 @@ Module: context.py
 Description:
     `AgentContext`: what the three agents share besides tools, read from the files the client
     config names (all relative to the repository): the model's instructions and identity lines
-    (context/instructions.json), the agent loop settings (context/agent.json), the terminal
+    (context/instructions.json), this agent's name and own instructions (mcp/instructions.json),
+    the agent loop settings (context/agent.json), the terminal
     layout (context/output.json), and the memory index those settings point at.
 """
 import json
@@ -19,12 +20,11 @@ class AgentContext:
     The shared context the client config names.
     """
 
-    NAME_KEY = "mcpagent"  # This agent's key in context/agent.json's "names"
-
     def __init__(self, client_config: dict[str, Any]) -> None:
         """
         Args:
-            client_config: The client config: "instructions_file", "agent_file", "output_file".
+            client_config: The client config: "instructions_file", "agent_instructions_file",
+                "agent_file", "output_file".
         """
         self.config = client_config
 
@@ -40,11 +40,20 @@ class AgentContext:
         data = self._read("instructions_file")
         return "\n".join(data.get(key, [])) if data is not None else ""
 
+    def own(self) -> dict[str, Any]:
+        """
+        Read this agent's own file, which the client config names: its "name", and its own
+        "instructions" lines, added to the shared ones.
+        Returns:
+            dict[str, Any]: The file's contents, or {} if none is configured.
+        """
+        return self._read("agent_instructions_file") or {}
+
     def identity(self, name: Optional[str]) -> str:
         """
         The identity lines that open the instructions, naming the agent.
         Args:
-            name: The agent's name (context/agent.json's names); None when not configured.
+            name: The agent's name (its own file's name); None when not configured.
         Returns:
             str: The lines with {name} filled in, and a blank line after them; "" without a name.
         """
@@ -55,7 +64,7 @@ class AgentContext:
         """
         Read the agent loop settings from the file the client config names.
         Returns:
-            dict[str, Any]: "max_tool_calls", "memory_index", "save_on_exit" and "names", or {}
+            dict[str, Any]: "max_tool_calls", "memory_index", "save_on_exit" and "skills_dir", or {}
                 (the defaults) if none is configured.
         """
         return self._read("agent_file") or {}
@@ -70,16 +79,45 @@ class AgentContext:
 
     def system_prompt(self, settings: dict[str, Any]) -> str:
         """
-        The model's full instructions: this agent's identity, the shared instructions, and the
-        topics in its memory.
+        The model's full instructions: this agent's identity, the shared instructions, its own
+        instructions, its skills, and the topics in its memory.
         Args:
             settings: The agent loop settings, from `agent_settings`.
         Returns:
             str: The instructions.
         """
         index: Optional[str] = settings.get("memory_index")  # Relative to the repository
-        return (self.identity(settings.get("names", {}).get(self.NAME_KEY)) + self.instructions()
+        skills: Optional[str] = settings.get("skills_dir")
+        own = self.own()
+        own_lines = "\n".join(own.get("instructions", []))
+        return (self.identity(own.get("name")) + self.instructions() + ("\n\n" + own_lines if own_lines else "")
+                + self.skills_text(MCPAgentConfig.repo_path(skills) if skills else None)
                 + self.memory_text(MCPAgentConfig.repo_path(index) if index else None))
+
+    # Keep the skills listing consistent across the independent agent implementations.
+    # noinspection DuplicatedCode
+    @staticmethod
+    def skills_text(folder: Optional[Path]) -> str:
+        """
+        The agents' skills, to append to their instructions: each skill's name and description, from
+        the header of its <name>/SKILL.md, so the model knows when to read one with the skill tool.
+        Args:
+            folder: The skills folder (context/agent.json's skills_dir); None when not configured.
+        Returns:
+            str: A paragraph listing the skills; "" without a folder or skills.
+        """
+        if folder is None or not folder.is_dir():
+            return ""
+        lines = []
+        for file in sorted(folder.glob("*/SKILL.md")):
+            header = file.read_text(encoding="utf-8").split("\n---", 1)[0]  # The header ends at its second ---
+            description = next((line.partition(":")[2].strip() for line in header.splitlines()
+                                if line.startswith("description:")), "")
+            lines.append(f"- {file.parent.name}: {description}")
+        if not lines:
+            return ""
+        return ("\n\nYour skills (before a task that matches one, read it with the skill tool and follow it):\n"
+                + "\n".join(lines))
 
     # Keep the memory instructions consistent across the independent agent implementations.
     # noinspection DuplicatedCode

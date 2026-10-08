@@ -94,6 +94,10 @@
           "type": "string",
           "description": "JSON file whose \"instructions\" lines form the model's instructions."
         },
+        "agent_instructions_file": {
+          "type": "string",
+          "description": "JSON file with this agent's \"name\" and its own \"instructions\" lines, added to the shared ones."
+        },
         "models_file": {
           "type": "string",
           "description": "JSON file with the model profiles (\"default\" and \"profiles\")."

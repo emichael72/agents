@@ -3,8 +3,8 @@ Module: context.py
 
 Description:
     `AgentContext`: what the three agents share besides tools, read from agents/context: the
-    model's instructions and identity lines (instructions.json), the agent loop settings
-    (agent.json), the terminal layout (output.json), and the memory index those settings point at.
+    model's instructions and identity lines (instructions.json), this agent's name, settings and
+    own instructions (pydantic/instructions.json), the agent loop settings (agent.json), the terminal layout (output.json), and the memory index those settings point at.
 """
 import json
 from pathlib import Path
@@ -13,7 +13,7 @@ from typing import Any
 from pydantic_ai import UsageLimits
 from pydantic_ai.messages import ModelMessage, ToolCallPart, UserPromptPart
 
-from pydantic_agent import AGENT_FILE, INSTRUCTIONS_FILE, OUTPUT_FILE, REPO_ROOT
+from pydantic_agent import AGENT_FILE, INSTRUCTIONS_FILE, OUTPUT_FILE, OWN_FILE, REPO_ROOT
 
 
 class AgentContext:
@@ -21,19 +21,20 @@ class AgentContext:
     The shared context files.
     """
 
-    NAME_KEY = "pydantic"  # This agent's key in context/agent.json's "names"
-
     def __init__(self, instructions_file: Path = INSTRUCTIONS_FILE, agent_file: Path = AGENT_FILE,
-                 output_file: Path = OUTPUT_FILE) -> None:
+                 output_file: Path = OUTPUT_FILE, own_file: Path = OWN_FILE) -> None:
         """
         Args:
             instructions_file: The instructions (default: agents/context/instructions.json).
+            own_file: This agent's name, settings and own instructions (default:
+                agents/pydantic/instructions.json).
             agent_file: The agent loop settings (default: agents/context/agent.json).
             output_file: The terminal layout (default: agents/context/output.json).
         """
         self.instructions_file = instructions_file
         self.agent_file = agent_file
         self.output_file = output_file
+        self.own_file = own_file
 
     def instructions(self, key: str = "instructions") -> str:
         """
@@ -46,11 +47,20 @@ class AgentContext:
         """
         return "\n".join(json.loads(self.instructions_file.read_text(encoding="utf-8")).get(key, []))
 
+    def own(self) -> dict[str, Any]:
+        """
+        Read this agent's own file: its "name", "parallel_tool_calls", and its own "instructions"
+        lines, added to the shared ones.
+        Returns:
+            dict[str, Any]: The file's contents.
+        """
+        return json.loads(self.own_file.read_text(encoding="utf-8"))
+
     def identity(self, name: str | None) -> str:
         """
         The identity lines that open the instructions, naming the agent.
         Args:
-            name: The agent's name (context/agent.json's names); None when not configured.
+            name: The agent's name (its own file's name); None when not configured.
         Returns:
             str: The lines with {name} filled in, and a blank line after them; "" without a name.
         """
@@ -61,7 +71,7 @@ class AgentContext:
         """
         Read the shared agent loop settings.
         Returns:
-            dict[str, Any]: "max_tool_calls", "memory_index", "save_on_exit" and "names".
+            dict[str, Any]: "max_tool_calls", "memory_index", "save_on_exit" and "skills_dir".
         """
         return json.loads(self.agent_file.read_text(encoding="utf-8"))
 
@@ -75,16 +85,45 @@ class AgentContext:
 
     def system_prompt(self, settings: dict[str, Any]) -> str:
         """
-        The model's full instructions: this agent's identity, the shared instructions, and the
-        topics in its memory.
+        The model's full instructions: this agent's identity, the shared instructions, its own
+        instructions, its skills, and the topics in its memory.
         Args:
             settings: The agent loop settings, from `agent_settings`.
         Returns:
             str: The instructions.
         """
         index = settings.get("memory_index")  # Relative to the repository
-        return (self.identity(settings.get("names", {}).get(self.NAME_KEY)) + self.instructions()
+        skills = settings.get("skills_dir")
+        own = self.own()
+        own_lines = "\n".join(own.get("instructions", []))
+        return (self.identity(own.get("name")) + self.instructions() + ("\n\n" + own_lines if own_lines else "")
+                + self.skills_text(REPO_ROOT / skills if skills else None)
                 + self.memory_text(REPO_ROOT / index if index else None))
+
+    # Keep the skills listing consistent across the independent agent implementations.
+    # noinspection DuplicatedCode
+    @staticmethod
+    def skills_text(folder: Path | None) -> str:
+        """
+        The agents' skills, to append to their instructions: each skill's name and description, from
+        the header of its <name>/SKILL.md, so the model knows when to read one with the skill tool.
+        Args:
+            folder: The skills folder (context/agent.json's skills_dir); None when not configured.
+        Returns:
+            str: A paragraph listing the skills; "" without a folder or skills.
+        """
+        if folder is None or not folder.is_dir():
+            return ""
+        lines = []
+        for file in sorted(folder.glob("*/SKILL.md")):
+            header = file.read_text(encoding="utf-8").split("\n---", 1)[0]  # The header ends at its second ---
+            description = next((line.partition(":")[2].strip() for line in header.splitlines()
+                                if line.startswith("description:")), "")
+            lines.append(f"- {file.parent.name}: {description}")
+        if not lines:
+            return ""
+        return ("\n\nYour skills (before a task that matches one, read it with the skill tool and follow it):\n"
+                + "\n".join(lines))
 
     @staticmethod
     def usage_limits(settings: dict[str, Any]) -> UsageLimits:

@@ -336,10 +336,25 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('allowed folder', instructions)
         self.assertEqual(AgentContext({}).instructions(), '')  # no instructions_file configured
         self.assertIn('Nothing to save', context.instructions('on_exit'))
-        name = context.agent_settings()['names'][AgentContext.NAME_KEY]
+        name = context.own()['name']  # From mcp/instructions.json
         self.assertEqual(name, 'mcp')
         self.assertTrue(context.identity(name).startswith('Your name is mcp.'))
-        self.assertTrue(context.system_prompt(context.agent_settings()).startswith('Your name is mcp.'))
+        prompt = context.system_prompt(context.agent_settings())
+        self.assertTrue(prompt.startswith('Your name is mcp.'))
+        self.assertIn('\n\nYour tools run one at a time', prompt)  # Its own lines follow the shared ones
+        self.assertEqual(AgentContext({}).own(), {})  # no agent_instructions_file configured
+
+    def test_the_skills_join_the_instructions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertEqual(AgentContext.skills_text(Path(folder)), '')  # No skills yet
+            (Path(folder) / 'build').mkdir()
+            (Path(folder) / 'build' / 'SKILL.md').write_text('---\nname: build\ndescription: Build and test a project.\n---\n\n# Build\n\n---\n\ndescription: not a header line\n')
+            (Path(folder) / 'notes').mkdir()  # A folder without SKILL.md is not a skill
+            text = AgentContext.skills_text(Path(folder))
+            self.assertTrue(text.endswith('read it with the skill tool and follow it):\n- build: Build and test a project.'))
+        self.assertEqual(AgentContext.skills_text(None), '')
+        context = AgentContext(self.shipped_config())
+        self.assertIn('\n- pull-request: ', context.system_prompt(context.agent_settings()))
 
     def test_exit_saves_only_after_a_tool_call_or_several_exchanges(self):
         ask, answer = {'role': 'user', 'content': 'hi'}, message('hello')

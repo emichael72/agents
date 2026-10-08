@@ -4,7 +4,7 @@
 // and tools (agents/tools) as the other two agents. The agent loop
 // (call the model, run requested tools, send results back, repeat until it answers) is done by
 // the AI SDK's ToolLoopAgent; this file only builds the agent and renders its stream in the terminal.
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseArgs, styleText } from 'node:util';
@@ -20,15 +20,21 @@ const INSTRUCTIONS_FILE = path.join(CONTEXT_DIR, 'instructions.json');
 const MODELS_FILE = path.join(CONTEXT_DIR, 'models.json');
 const OUTPUT_FILE = path.join(CONTEXT_DIR, 'output.json'); // Terminal layout
 const AGENT_FILE = path.join(CONTEXT_DIR, 'agent.json'); // Agent loop settings
+// This agent's name, settings and own instructions, added to the shared ones
+const OWN_FILE = path.join(REPO_ROOT, 'vercel', 'instructions.json');
 
 // Tool calls per prompt, shared with the other agents (context/agent.json). Each step is one model
 // call plus the tools it requested, so this allows at least max_tool_calls calls and a final answer.
 // 0 means no limit: the loop then ends only when the model answers without calling a tool.
 const AGENT_SETTINGS = JSON.parse(readFileSync(AGENT_FILE, 'utf8')) as
-  { max_tool_calls?: number; memory_index?: string; save_on_exit?: boolean; names?: Record<string, string> };
+  { max_tool_calls?: number; memory_index?: string; save_on_exit?: boolean; skills_dir?: string };
+const OWN = JSON.parse(readFileSync(OWN_FILE, 'utf8')) as
+  { name?: string; parallel_tool_calls?: boolean; instructions?: string[] };
 const MAX_TOOL_CALLS = AGENT_SETTINGS.max_tool_calls ?? 8;
 // The memory index (relative to the repository), loaded into the instructions
 const MEMORY_INDEX = AGENT_SETTINGS.memory_index && path.join(REPO_ROOT, AGENT_SETTINGS.memory_index);
+// The skills folder (relative to the repository), whose skills are listed in the instructions
+const SKILLS_DIR = AGENT_SETTINGS.skills_dir && path.join(REPO_ROOT, AGENT_SETTINGS.skills_dir);
 const MAX_STEPS = MAX_TOOL_CALLS ? MAX_TOOL_CALLS + 1 : 0;
 
 const gray = (text: string) => styleText('gray', text); // Everything except the model's answer
@@ -123,7 +129,7 @@ export function loadInstructions(file = INSTRUCTIONS_FILE, key = 'instructions')
 
 /**
  * The identity lines that open the instructions, naming the agent.
- * @param name The agent's name (context/agent.json's names); undefined when not configured.
+ * @param name The agent's name (its own file's name); undefined when not configured.
  * @param file The instructions file.
  * @returns The lines with {name} filled in, and a blank line after them; '' without a name.
  */
@@ -162,11 +168,45 @@ export function memoryText(index?: string): string {
     'and save new facts with it):\n' + lines.join('\n');
 }
 
-export function buildAgent(model: LanguageModel, tools: ToolSet, parallel = false, timeoutSeconds = 60) {
+/**
+ * The agents' skills, to append to their instructions: each skill's name and description, from the
+ * header of its <name>/SKILL.md, so the model knows when to read one with the skill tool.
+ * @param folder The skills folder (context/agent.json's skills_dir); undefined when not configured.
+ * @returns A paragraph listing the skills; '' without a folder or skills.
+ */
+export function skillsText(folder?: string): string {
+  if (!folder || !existsSync(folder)) return '';
+  const lines = readdirSync(folder, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && existsSync(path.join(folder, entry.name, 'SKILL.md')))
+    .map((entry) => entry.name)
+    .sort()
+    .map((name) => {
+      const header = readFileSync(path.join(folder, name, 'SKILL.md'), 'utf8').split('\n---')[0]; // Ends at its second ---
+      const line = header.split('\n').find((l) => l.startsWith('description:'));
+      return `- ${name}: ${line ? line.slice(line.indexOf(':') + 1).trim() : ''}`;
+    });
+  if (!lines.length) return '';
+  return '\n\nYour skills (before a task that matches one, read it with the skill tool and follow it):\n' +
+    lines.join('\n');
+}
+
+/**
+ * Build the agent: the instructions (identity, shared, this agent's own, skills, memory) and the tools.
+ * @param model The model to drive it.
+ * @param tools The tools.
+ * @param parallel Run the tool calls of one model response concurrently (default:
+ *   parallel_tool_calls in vercel/instructions.json, true when unset), else one at a time.
+ * @param timeoutSeconds The limit for one model call plus the tools it requested.
+ * @returns The agent.
+ */
+export function buildAgent(model: LanguageModel, tools: ToolSet, parallel = OWN.parallel_tool_calls ?? true,
+                           timeoutSeconds = 60) {
+  const own = (OWN.instructions ?? []).join('\n');
   return new ToolLoopAgent({
     model,
     timeout: { stepMs: timeoutSeconds * 1000 }, // one model call plus the tools it requested
-    instructions: identityText(AGENT_SETTINGS.names?.vercel) + loadInstructions() + memoryText(MEMORY_INDEX),
+    instructions: identityText(OWN.name) + loadInstructions() + (own ? '\n\n' + own : '') + skillsText(SKILLS_DIR) +
+      memoryText(MEMORY_INDEX),
     tools: parallel ? tools : oneAtATime(tools),
     stopWhen: MAX_STEPS ? isStepCount(MAX_STEPS) : () => false,
   });
@@ -565,25 +605,32 @@ async function chat(agent: Agent, prompt: string | undefined, trace: boolean, sh
   }
 }
 
+// The command-line options (main)
+const CLI_OPTIONS = {
+  profile: { type: 'string' },
+  local: { type: 'boolean', default: false },
+  openai: { type: 'boolean', default: false },
+  model: { type: 'string' },
+  'base-url': { type: 'string' },
+  prompt: { type: 'string' },
+  history: { type: 'boolean', default: false },
+  debug: { type: 'boolean', short: 'd', default: false },
+  help: { type: 'boolean', short: 'h', default: false },
+} as const;
+
 /**
  * The command line: parse the options, build the model and the agent, then chat or run one prompt.
- * @returns The exit status: 0 on success, 1 on an error.
+ * @returns The exit status: 0 on success, 1 on an error, 2 for a usage error.
  */
 export async function main(): Promise<number> {
-  const { values } = parseArgs({
-    options: {
-      profile: { type: 'string' },
-      local: { type: 'boolean', default: false },
-      openai: { type: 'boolean', default: false },
-      model: { type: 'string' },
-      'base-url': { type: 'string' },
-      prompt: { type: 'string' },
-      history: { type: 'boolean', default: false },
-      debug: { type: 'boolean', short: 'd', default: false },
-      parallel: { type: 'boolean', default: false },
-      help: { type: 'boolean', short: 'h', default: false },
-    },
-  });
+  let parsed;
+  try {
+    parsed = parseArgs({ options: CLI_OPTIONS });
+  } catch (error) { // An unknown option or a missing value: a usage error, not a crash
+    console.error(styleText('red', `Error: ${errorMessage(error)}`) + ' (see --help)');
+    return 2;
+  }
+  const { values } = parsed;
   if (values.help) {
     console.log(`Usage: node vercel/agent.ts [options]
   --profile NAME     Model profile from context/models.json (default: its "default")
@@ -592,8 +639,7 @@ export async function main(): Promise<number> {
   --base-url URL     Override the profile's OpenAI-compatible base URL for this run
   --prompt TEXT      Run one prompt and exit
   --history          With --prompt, print the message history
-  -d, --debug        Print the banner, tool calls and results as gray lines, instead of a spinner
-  --parallel         Run the tool calls from one model response concurrently`);
+  -d, --debug        Print the banner, tool calls and results as gray lines, instead of a spinner`);
     return 0;
   }
 
@@ -607,10 +653,11 @@ export async function main(): Promise<number> {
     const profile = values.profile ?? (values.local ? 'local' : values.openai ? 'openai' : undefined);
     const settings = resolveModel(loadModels(), profile, { model: values.model, baseURL: values['base-url'] });
     if (settings.auto) settings.model = (await loadedModel(settings.baseURL, settings.apiKey)) ?? settings.model;
-    const agent = buildAgent(buildModel(settings), localTools, values.parallel, settings.timeout);
+    const parallel = OWN.parallel_tool_calls ?? true;
+    const agent = buildAgent(buildModel(settings), localTools, parallel, settings.timeout);
     const toolCount = `${Object.keys(localTools).length} tools`;
     new Output((text) => void process.stdout.write(text), undefined, values.debug).line(
-      `${settings.name} model: ${settings.model} @ ${settings.baseURL}, ${toolCount} (${values.parallel ? 'parallel' : 'sequential'})`);
+      `${settings.name} model: ${settings.model} @ ${settings.baseURL}, ${toolCount} (${parallel ? 'parallel' : 'sequential'})`);
     await chat(agent, values.prompt, values.debug, values.history);
     return 0;
   } catch (error) {

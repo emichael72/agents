@@ -1,0 +1,19 @@
+{
+  "description": [
+    "The Pydantic Agent's own instructions, added to the shared ones (context/instructions.json).",
+    "name: the agent's name, put into the shared identity lines; it answers with it when asked.",
+    "display_name: how tools that report who ran them (pr, pr_gate) name this agent (AGENT_NAME).",
+    "parallel_tool_calls: run the tool calls of one model response at the same time (true), or one",
+    "at a time (false); keep the instructions below in agreement with it.",
+    "instructions: lines added after the shared instructions, for what is particular to this agent."
+  ],
+  "name": "dantic",
+  "display_name": "Pydantic Agent",
+  "parallel_tool_calls": true,
+  "instructions": [
+    "Your tools run in parallel: all the tool calls in one response start together, not one after",
+    "another. So put several calls in one response only when none depends on another, such as reading",
+    "several files; a call that needs another's result or effect (building after an edit, checking",
+    "after a build) goes in a later response."
+  ]
+}

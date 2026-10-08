@@ -38,20 +38,21 @@ class AgentSession:
     EXIT_WORDS = {"exit", "quit", "q"}
     PROMPT = ANSI("\x1b[90mYou > \x1b[0m")
 
-    def __init__(self, trace: bool = True, parallel: bool = False, context: Optional[AgentContext] = None,
+    def __init__(self, trace: bool = True, parallel: Optional[bool] = None, context: Optional[AgentContext] = None,
                  console: Optional[Console] = None) -> None:
         """
         Args:
             trace: Debug mode: print the banner, tool calls and results as gray lines; otherwise a
                 spinner shows them.
-            parallel: Run the tool calls of one model response concurrently instead of one at a time.
+            parallel: Run the tool calls of one model response concurrently instead of one at a time;
+                None uses parallel_tool_calls in pydantic/instructions.json (true when unset).
             context: The shared context files; None uses agents/context.
             console: Where to print; None prints to the terminal.
         """
         pydantic_ai.BANNER_ENABLED = False  # This program owns its output: no first-run banner
         self.trace = trace
-        self.parallel = parallel
         self.context = context or AgentContext()
+        self.parallel = self.context.own().get("parallel_tool_calls", True) if parallel is None else parallel
         self.console = console or Console(highlight=False, soft_wrap=True)  # Never re-wrap lines
         self.settings = self.context.agent_settings()
         self.limits = self.context.usage_limits(self.settings)
@@ -112,9 +113,9 @@ class AgentSession:
         # pydantic-ai reports every call of a model response before their results; hold each call
         # line until its result arrives, so the two print together (as in the other agents).
         pending_calls: dict[str, str] = {}
-        # pydantic-ai can run the tool calls from one model response concurrently. The default here
-        # is one at a time: build scripts sharing a workspace shouldn't overlap. The prompt can't
-        # change this; only the code can.
+        # pydantic-ai can run the tool calls from one model response concurrently; parallel_tool_calls
+        # in pydantic/instructions.json turns it on, and the instructions there tell the model to put
+        # only independent calls in one response.
         try:
             with agent.parallel_tool_call_execution_mode("parallel" if self.parallel else "sequential"):
                 async with agent.run_stream_events(prompt, message_history=history, usage_limits=self.limits) as events:

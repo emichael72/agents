@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import {
-  ask, buildAgent, identityText, linkSegments, loadInstructions, loadModels, loadOutputSettings, memoryText, Output, resolveModel, worthSaving, wrap,
+  ask, buildAgent, identityText, linkSegments, loadInstructions, loadModels, loadOutputSettings, memoryText, Output, resolveModel, skillsText, worthSaving, wrap,
   loadTools, localTools, REPO_ROOT, runScript, TOOLS_DIR,
 } from '../vercelagent/index.ts';
 
@@ -77,8 +77,11 @@ test('each tool call prints next to its result', async () => {
   const lines = stripVTControlCharacters(printed).split('\n')
     .filter((line) => /^[→←✗] /.test(line))
     .map((line) => line.slice(0, 2) + line.slice(2).split(/[(:]/)[0]);
-  assert.deepEqual(lines, SCENARIO.calls.flatMap((step) =>
-    [`→ ${step.tool}`, `${step.outcome === 'ok' ? '←' : '✗'} ${step.tool}`]));
+  // The calls run at the same time, so they print in the order they finish: compare the pairs
+  const pairs = [];
+  for (let i = 0; i < lines.length; i += 2) pairs.push(`${lines[i]} ${lines[i + 1]}`);
+  assert.deepEqual(pairs.sort(), SCENARIO.calls.map((step) =>
+    `→ ${step.tool} ${step.outcome === 'ok' ? '←' : '✗'} ${step.tool}`).sort());
 });
 
 test('tools are told which agent runs them', async () => {
@@ -124,16 +127,19 @@ function trackedTools() {
   return { overlaps, tools: { a: slow, b: slow, c: slow } satisfies ToolSet };
 }
 
-test('tools run one at a time by default', async () => {
+test('tools run concurrently by default', async () => {
+  const own = JSON.parse(readFileSync(path.join(import.meta.dirname, '..', 'instructions.json'), 'utf8'));
+  assert.equal(own.parallel_tool_calls, true); // vercel/instructions.json
+  assert.equal(own.name, 'vercel');
   const { overlaps, tools } = trackedTools();
   await ask(buildAgent(scriptedModel([['a', {}], ['b', {}], ['c', {}]]), tools), 'go', [], quiet);
-  assert.deepEqual(overlaps, [1, 1, 1]);
+  assert.ok(Math.max(...overlaps) > 1, `expected overlap, got ${overlaps}`);
 });
 
-test('parallel runs tools concurrently', async () => {
+test('tools run one at a time when parallel is off', async () => {
   const { overlaps, tools } = trackedTools();
-  await ask(buildAgent(scriptedModel([['a', {}], ['b', {}], ['c', {}]]), tools, true), 'go', [], quiet);
-  assert.ok(Math.max(...overlaps) > 1, `expected overlap, got ${overlaps}`);
+  await ask(buildAgent(scriptedModel([['a', {}], ['b', {}], ['c', {}]]), tools, false), 'go', [], quiet);
+  assert.deepEqual(overlaps, [1, 1, 1]);
 });
 
 test('model profiles come from the shared models file', () => {
@@ -266,4 +272,14 @@ test('the memory index joins the instructions', () => {
   writeFileSync(index, '# Memory index\n\n- **preferences**: Prefers short answers (updated 2026-10-07)\n');
   assert.match(memoryText(index), /- preferences: Prefers short answers/);
   assert.equal(memoryText(undefined), '');
+});
+
+test('the skills join the instructions', () => {
+  const folder = mkdtempSync(path.join(os.tmpdir(), 'skills-'));
+  assert.equal(skillsText(folder), ''); // No skills yet
+  mkdirSync(path.join(folder, 'build'));
+  writeFileSync(path.join(folder, 'build', 'SKILL.md'), '---\nname: build\ndescription: Build and test a project.\n---\n\n# Build\n\n---\n\ndescription: not a header line\n');
+  mkdirSync(path.join(folder, 'notes')); // A folder without SKILL.md is not a skill
+  assert.ok(skillsText(folder).endsWith('read it with the skill tool and follow it):\n- build: Build and test a project.'));
+  assert.equal(skillsText(undefined), '');
 });

@@ -1,0 +1,16 @@
+{
+  "description": [
+    "MCPAgent's own instructions, added to the shared ones (context/instructions.json).",
+    "name: the agent's name, put into the shared identity lines; it answers with it when asked.",
+    "instructions: lines added after the shared instructions, for what is particular to this agent.",
+    "Its display name for the tools (AGENT_NAME) is tools_env in mcpagent/jsons/mcpagent.json, since",
+    "its MCP server is what runs them.",
+    "MCPAgent runs tool calls one at a time: its MCP server is single-flight (a second call while one",
+    "runs is refused), so the agent asks the model for one call per response, and says so here."
+  ],
+  "name": "mcp",
+  "instructions": [
+    "Your tools run one at a time: call one tool per response and wait for its result before",
+    "the next call."
+  ]
+}

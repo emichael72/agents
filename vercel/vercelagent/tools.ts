@@ -27,7 +27,9 @@ function findRepoRoot(start: string): string {
 export const REPO_ROOT = findRepoRoot(import.meta.dirname);
 export const TOOLS_DIR = path.join(REPO_ROOT, 'tools');
 const SCRIPT_TIMEOUT_MS = 30_000;
-const AGENT_NAME = 'Vercel Agent'; // Lets tools such as pr and pr_gate say which agent ran them
+// Lets tools such as pr and pr_gate say which agent ran them ("display_name" in vercel/instructions.json)
+const AGENT_NAME = (JSON.parse(readFileSync(path.join(REPO_ROOT, 'vercel', 'instructions.json'), 'utf8')) as
+  { display_name: string }).display_name;
 
 const execFileAsync = promisify(execFile);
 
@@ -102,8 +104,8 @@ export function loadTools(toolsDir = TOOLS_DIR): ToolSet {
 export const localTools = loadTools();
 
 /**
- * Make tool calls run one at a time. The AI SDK starts each tool as soon as its call arrives,
- * with no sequential mode; build scripts sharing a workspace should not overlap.
+ * Make tool calls run one at a time, for parallel_tool_calls false in vercel/instructions.json. The
+ * AI SDK starts each tool as soon as its call arrives, with no sequential mode of its own.
  */
 export function oneAtATime<TOOLS extends ToolSet>(tools: TOOLS): TOOLS {
   let queue: Promise<unknown> = Promise.resolve();

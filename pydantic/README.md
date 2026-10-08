@@ -49,14 +49,13 @@ shown as `→ tool(args)` and results as `← tool: output` instead.
 | --- | --- |
 | `--profile NAME`, `--local`, `--openai` | Model profile from `../context/models.json`; default: its `"default"` (`local`) |
 | `--model`, `--base-url` | Override the profile's model or server for this run |
-| `--parallel` | Run the tool calls from one model response concurrently |
 
 ## How it maps to the other two
 
 | Concern | mcpagent | pydantic | vercel |
 | --- | --- | --- | --- |
 | Agent loop | `MCPAgent.ask()`, hand-written | `Agent.run_stream_events()` | `ToolLoopAgent.stream()` |
-| Instructions | `../context/instructions.json`, named by `instructions_file` in `mcpagent.json` | `../context/instructions.json` → `AgentContext.instructions()` | `../context/instructions.json` → `loadInstructions()` |
+| Instructions | `../context/instructions.json` (`instructions_file` in `mcpagent.json`), then `../mcp/instructions.json` (`agent_instructions_file`) | `../context/instructions.json`, then `instructions.json` → `AgentContext.system_prompt()` | `../context/instructions.json`, then `instructions.json` → `buildAgent()` |
 | Model provider | raw `httpx`, `/v1/responses` | `OpenAIChatModel` | `@ai-sdk/openai-compatible` |
 | Tools | `../tools/*/tool.json`, loaded by the server (`tools_dir`) | `../tools/*/tool.json` → `Tool.from_schema` | `../tools/*/tool.json` → `z.fromJSONSchema` |
 | Argument validation | `jsonschema.validate` | `jsonschema.validate` | zod, from the same JSON schema |
@@ -64,13 +63,14 @@ shown as `→ tool(args)` and results as `← tool: output` instead.
 | Running a script | the server, `asyncio.create_subprocess_exec` | `subprocess.run` in a worker thread | async `execFile`, no threads |
 | Conversation history | list of Responses items | `result.all_messages()` | `response.messages` |
 | Loop cap | `max_tool_calls=8` | `UsageLimits(tool_calls_limit=8)` | `stopWhen: isStepCount(9)` |
-| One tool at a time | always | `parallel_tool_call_execution_mode` | `oneAtATime()` wrapper in `vercelagent/tools.ts` |
+| Tool calls of one response | one at a time: the server is single-flight | at the same time: `parallel_tool_calls` in `instructions.json` | at the same time: `parallel_tool_calls` in `instructions.json` (`oneAtATime()` when false) |
 
 ## Parallel tool calls
 
 The model only *asks* for tools; the agent code decides how to run them. When one model response
-contains several tool calls, they run one at a time by default
-(`parallel_tool_call_execution_mode("sequential")`). Asking for parallelism in the prompt does not
-change this; `--parallel` does.
-
-`--parallel` is safe because the tools' scripts share no state.
+contains several tool calls, they run at the same time
+(`parallel_tool_call_execution_mode("parallel")`), as `parallel_tool_calls` in
+[`instructions.json`](instructions.json) sets; `false` runs them one at a time. The same file adds
+lines to the shared instructions telling the model so: several calls go in one response only when
+none depends on another, so a build never starts before the edit it needs. It also gives the agent
+its name (`dantic`), which the shared identity line uses.

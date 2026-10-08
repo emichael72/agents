@@ -28,8 +28,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--history", action="store_true", help="With --prompt, print the message history.")
     parser.add_argument("-d", "--debug", action="store_true",
                         help="Print the banner, tool calls and results as gray lines, instead of a spinner.")
-    parser.add_argument("--parallel", action="store_true",
-                        help="Run the tool calls from one model response concurrently.")
     return parser
 
 
@@ -44,7 +42,7 @@ def main() -> int:
     if sum(map(bool, (args.profile, args.local, args.openai))) > 1:
         parser.error("use only one of --profile, --local and --openai")
     profile = args.profile or ("local" if args.local else "openai" if args.openai else None)
-    session = AgentSession(trace=args.debug, parallel=args.parallel)
+    session = AgentSession(trace=args.debug)
     try:
         return asyncio.run(session.run(profile, model=args.model, base_url=args.base_url, prompt=args.prompt,
                                        show_history=args.history))

@@ -113,13 +113,17 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             history = await session.ask(bot, SCENARIO["prompt"], [])
         return history, overlaps
 
-    async def test_parallel_flag_runs_tools_concurrently(self):
+    def test_tool_calls_run_concurrently_by_default(self):
+        self.assertTrue(AgentContext().own()["parallel_tool_calls"])  # pydantic/instructions.json
+        self.assertTrue(AgentSession(console=Console(file=self.output)).parallel)
+
+    async def test_parallel_runs_tools_concurrently(self):
         _, overlaps = await self.run_tracked(parallel=True)
         self.assertGreater(max(overlaps), 1)
 
     async def test_tools_run_one_at_a_time_and_failures_reach_the_model(self):
         history, overlaps = await self.run_tracked(parallel=False)
-        self.assertEqual(overlaps, [1, 1, 1])  # never two scripts at once (MCPAgent's server requires this)
+        self.assertEqual(overlaps, [1, 1, 1])  # never two scripts at once in sequential mode
         answer = history[-1].parts[0].content
         for step in SCENARIO["calls"]:
             self.assertIn(step["output"], answer)
@@ -174,6 +178,18 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("- preferences: Prefers short answers", text)
             self.assertEqual(AgentContext.memory_text(None), "")
 
+    def test_the_skills_join_the_instructions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertEqual(AgentContext.skills_text(Path(folder)), "")  # No skills yet
+            (Path(folder) / "build").mkdir()
+            (Path(folder) / "build" / "SKILL.md").write_text("---\nname: build\ndescription: Build and test a project.\n---\n\n# Build\n\n---\n\ndescription: not a header line\n")
+            (Path(folder) / "notes").mkdir()  # A folder without SKILL.md is not a skill
+            text = AgentContext.skills_text(Path(folder))
+            self.assertTrue(text.endswith("read it with the skill tool and follow it):\n- build: Build and test a project."))
+        self.assertEqual(AgentContext.skills_text(None), "")
+        context = AgentContext()
+        self.assertIn("\n- pull-request: ", context.system_prompt(context.agent_settings()))
+
     def test_exit_saves_only_after_a_tool_call_or_several_exchanges(self):
         self.assertIn("Nothing to save", AgentContext().instructions("on_exit"))
         self.assertTrue(json.loads(AGENT_FILE.read_text())["save_on_exit"])
@@ -186,11 +202,13 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(AgentContext.worth_saving([ask, call, answer]))
 
     def test_the_agent_is_named_dantic(self):
-        self.assertEqual(json.loads(AGENT_FILE.read_text())["names"][AgentContext.NAME_KEY], "dantic")
         context = AgentContext()
+        self.assertEqual(context.own()["name"], "dantic")  # From pydantic/instructions.json
         self.assertTrue(context.identity("dantic").startswith("Your name is dantic."))
         self.assertEqual(context.identity(None), "")
-        self.assertTrue(context.system_prompt(context.agent_settings()).startswith("Your name is dantic."))
+        prompt = context.system_prompt(context.agent_settings())
+        self.assertTrue(prompt.startswith("Your name is dantic."))
+        self.assertIn("\n\nYour tools run in parallel: all the tool calls in one response", prompt)
 
     def test_instructions_come_from_the_shared_context_file(self):
         instructions = AgentContext().instructions()
