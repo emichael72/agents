@@ -524,6 +524,24 @@ class ChangesTests(unittest.TestCase):
         self.assertEqual(ChangeInspector.check_docs(Path("."), []), (True, "No C/C++ files changed."))
 
 
+class StatusTests(unittest.TestCase):
+    """The agents' status report."""
+
+    def test_a_waiting_quiz_tells_the_model_to_stop_checking(self):
+        gate = QuizGate(SETTINGS)
+        pr = {"number": 7, "title": "Add a module", "state": "open", "user": {"login": "dev"},
+              "head": {"sha": "a" * 40}, "base": {"sha": "b" * 40}}
+        waiting = {"id": "q1", "build_ok": 1, "docs_ok": 1, "cosmetic": 0, "passed": 0, "skipped": 0}
+        with patch.object(gate.store, "init"), patch.object(gate.github, "open_prs", return_value=[pr]), \
+                patch.object(gate, "find_quiz", return_value=waiting), \
+                patch.object(PrGateCli, "running", return_value=True):
+            text = PrGateCli(gate).status()
+            self.assertIn("quiz waiting, merge blocked: http://gate.test/q/q1", text)
+            self.assertTrue(text.endswith("checking again will not change it. Give the user the quiz link and stop."))
+            with patch.object(gate, "find_quiz", return_value={**waiting, "passed": 1}):
+                self.assertNotIn("checking again", PrGateCli(gate).status())  # Nothing to wait for
+
+
 class ServiceControlTests(unittest.TestCase):
     """The agents may start the gate's own service, and nothing else: never stop or restart it."""
 

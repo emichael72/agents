@@ -76,6 +76,15 @@ class PrToolTests(unittest.TestCase):
         self.assertIn("Build and tests: passed\n$ make && make check: succeeded\n\nDocumentation: passed", report)
         self.assertNotIn("lots of output", report)  # A passing build shows only its summary line
 
+    def test_a_binary_file_fails_the_check_before_any_build(self):
+        self.change()
+        (self.repo / "prog2").write_bytes(b"\x7fELF\0\0binary")  # Compiled by hand in the repository
+        with patch.object(ChangeInspector, "check_build") as build:
+            ok, report = PullRequests.check_tree(self.repo)
+        self.assertFalse(ok)
+        self.assertTrue(report.startswith("Binary files: prog2. A pull request holds source only"))
+        build.assert_not_called()
+
     def test_check_reports_a_failure_as_an_error(self):
         failed = (False, "Build and tests: FAILED\nsrc/a.c:3:9: warning: unused variable")
         with patch.object(PullRequests, "check_tree", return_value=failed):

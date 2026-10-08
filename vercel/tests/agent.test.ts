@@ -10,7 +10,7 @@ import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import {
   ask, buildAgent, identityText, linkSegments, loadInstructions, loadModels, loadOutputSettings, memoryText, Output, resolveModel, skillsText, worthSaving, wrap,
-  loadTools, localTools, REPO_ROOT, runScript, TOOLS_DIR,
+  loadTools, localTools, repeatGuard, REPO_ROOT, runScript, TOOLS_DIR,
 } from '../vercelagent/index.ts';
 
 const usage = {
@@ -82,6 +82,22 @@ test('each tool call prints next to its result', async () => {
   for (let i = 0; i < lines.length; i += 2) pairs.push(`${lines[i]} ${lines[i + 1]}`);
   assert.deepEqual(pairs.sort(), SCENARIO.calls.map((step) =>
     `→ ${step.tool} ${step.outcome === 'ok' ? '←' : '✗'} ${step.tool}`).sort());
+});
+
+test('a call repeated too often is not run', async () => {
+  const saved = repeatGuard.limit;
+  repeatGuard.limit = 2;
+  try {
+    const same: [string, object][] = [['time', { timezone: 'UTC' }], ['time', { timezone: 'UTC' }], ['time', { timezone: 'UTC' }]];
+    const messages = await ask(buildAgent(scriptedModel(same), localTools, false), 'Keep checking the time', [], quiet);
+    const answer = JSON.stringify(messages.at(-1));
+    assert.equal(answer.match(/\(UTC\+00:00\)/g)?.length, 2); // Two calls ran
+    assert.match(answer, /Not run: you made this same time call, with the same arguments, 2 times in a row/);
+    const again = await ask(buildAgent(scriptedModel(same.slice(0, 1)), localTools, false), 'And now?', [], quiet);
+    assert.doesNotMatch(JSON.stringify(again.at(-1)), /Not run/); // A new turn: the count starts again
+  } finally {
+    repeatGuard.limit = saved;
+  }
 });
 
 test('tools are told which agent runs them', async () => {

@@ -11,7 +11,7 @@ import { parseArgs, styleText } from 'node:util';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { isStepCount, ToolLoopAgent, type LanguageModel, type ModelMessage, type ToolSet } from 'ai';
 import ora, { type Ora } from 'ora';
-import { localTools, oneAtATime, REPO_ROOT } from './tools.ts';
+import { localTools, oneAtATime, REPO_ROOT, repeatGuard } from './tools.ts';
 
 
 // Instructions (system prompt) and model profiles, shared by all three agents
@@ -27,10 +27,12 @@ const OWN_FILE = path.join(REPO_ROOT, 'vercel', 'instructions.json');
 // call plus the tools it requested, so this allows at least max_tool_calls calls and a final answer.
 // 0 means no limit: the loop then ends only when the model answers without calling a tool.
 const AGENT_SETTINGS = JSON.parse(readFileSync(AGENT_FILE, 'utf8')) as
-  { max_tool_calls?: number; memory_index?: string; save_on_exit?: boolean; skills_dir?: string };
+  { max_tool_calls?: number; max_repeated_calls?: number; memory_index?: string; save_on_exit?: boolean;
+    skills_dir?: string };
 const OWN = JSON.parse(readFileSync(OWN_FILE, 'utf8')) as
   { name?: string; parallel_tool_calls?: boolean; instructions?: string[] };
 const MAX_TOOL_CALLS = AGENT_SETTINGS.max_tool_calls ?? 8;
+repeatGuard.limit = AGENT_SETTINGS.max_repeated_calls ?? 0; // The same call at most this many times in a row
 // The memory index (relative to the repository), loaded into the instructions
 const MEMORY_INDEX = AGENT_SETTINGS.memory_index && path.join(REPO_ROOT, AGENT_SETTINGS.memory_index);
 // The skills folder (relative to the repository), whose skills are listed in the instructions
@@ -493,6 +495,7 @@ export async function ask(agent: Agent, prompt: string, history: ModelMessage[],
   const messages: ModelMessage[] = [...history, { role: 'user', content: prompt }];
   const output = new Output(write, undefined, trace);
   output.start();
+  repeatGuard.reset(); // Only this turn's calls count as repeats
   // The AI SDK reports every call of a model response before their results; hold each call line
   // until its result arrives, so the two print together (as in the other agents).
   const pendingCalls = new Map<string, string>();

@@ -245,6 +245,21 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(sum(c.args[0] == 'tools/call' for c in request.call_args_list), 2)
         self.assertEqual(self.agent.history, [])
 
+    async def test_a_call_repeated_too_often_is_not_run(self):
+        self.agent.max_tool_calls = 0  # The guard, not the call limit, must stop it
+        self.agent.guard.limit = 2
+        repeat = call(self.aliases['time'], {'timezone': 'UTC'})
+        self.outputs = [[repeat], [repeat], [repeat], [message('It is noon.')], [repeat], [message('Still noon.')]]
+        with patch.object(self.agent.mcp, 'request', wraps=self.agent.mcp.request) as request:
+            self.assertEqual(await self.agent.ask('Keep checking the time'), 'It is noon.')
+            self.assertEqual(sum(c.args[0] == 'tools/call' for c in request.call_args_list), 2)  # The third did not run
+            refused = json.loads(self.requests[3]['input'][-1]['output'])
+            self.assertTrue(refused['isError'])
+            self.assertIn('Not run: you made this same time call, with the same arguments, 2 times in a row',
+                          refused['content'][0]['text'])
+            await self.agent.ask('And now?')  # A new turn: the count starts again
+            self.assertEqual(sum(c.args[0] == 'tools/call' for c in request.call_args_list), 3)
+
     async def test_api_error_redacts_body_and_does_not_retry(self):
         self.status = 401
         with self.assertRaisesRegex(RuntimeError, 'OPENAI_API_KEY') as caught:

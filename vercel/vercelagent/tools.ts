@@ -85,6 +85,47 @@ export function buildArgv(manifest: Manifest, input: Record<string, unknown>): s
   return positional.length ? [...argv, '--', ...positional] : argv;
 }
 
+/**
+ * Stops a model that repeats itself. A model can get stuck calling the same tool with the same
+ * arguments, for example checking a status that only a person can change. The guard counts identical
+ * calls in a row within one user turn and refuses the call after `limit` (max_repeated_calls in
+ * context/agent.json), telling the model to answer instead. The same rule is in all three agents.
+ */
+export class RepeatGuard {
+  /** The most times in a row the same call may run; 0 means no limit. */
+  limit = 0;
+  private last?: string;
+  private count = 0;
+
+  /** Start a new user turn: earlier calls no longer count. */
+  reset(): void {
+    this.last = undefined;
+    this.count = 0;
+  }
+
+  /**
+   * Record a call, and say whether it must not run.
+   * @param name The tool.
+   * @param input The model's arguments.
+   * @returns The message for the model when the call repeats the previous ones more than the limit
+   *   allows; undefined when it may run.
+   */
+  refuse(name: string, input: Record<string, unknown>): string | undefined {
+    const sorted = Object.fromEntries(Object.entries(input).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+    const key = `${name} ${JSON.stringify(sorted)}`;
+    this.count = key === this.last ? this.count + 1 : 1;
+    this.last = key;
+    if (this.limit && this.count > this.limit) {
+      return `Not run: you made this same ${name} call, with the same arguments, ${this.limit} times in a row, ` +
+        'and its result will not change. Do not call it again: answer the user now.';
+    }
+    return undefined;
+  }
+}
+
+// The agent sets its limit and resets it at each turn (agent.ts); no limit by default
+export const repeatGuard = new RepeatGuard();
+
 /** One tool per <tool>/tool.json under toolsDir; the folder name is the tool name. */
 export function loadTools(toolsDir = TOOLS_DIR): ToolSet {
   const tools: ToolSet = {};
@@ -95,7 +136,11 @@ export function loadTools(toolsDir = TOOLS_DIR): ToolSet {
     tools[name] = tool({
       description: Array.isArray(manifest.description) ? manifest.description.join(' ') : manifest.description,
       inputSchema: z.fromJSONSchema(inputSchema(manifest) as JSONSchemaInput) as z.ZodType<Record<string, unknown>>,
-      execute: (input) => runScript(buildArgv(manifest, input), manifest.env, (manifest.timeout ?? SCRIPT_TIMEOUT_MS / 1000) * 1000),
+      execute: (input) => {
+        const refusal = repeatGuard.refuse(name, input);
+        if (refusal) throw new Error(refusal); // A tool-error: the model sees why
+        return runScript(buildArgv(manifest, input), manifest.env, (manifest.timeout ?? SCRIPT_TIMEOUT_MS / 1000) * 1000);
+      },
     });
   }
   return tools;

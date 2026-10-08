@@ -20,6 +20,7 @@ import aiohttp
 from jsonschema import ValidationError, validate
 
 from mcpagent.client.client import MCPClient
+from mcpagent.client.guard import RepeatGuard
 from mcpagent.client.output import Output
 
 
@@ -66,7 +67,7 @@ class MCPAgent:
                  provider: str = "OpenAI", timeout: float = 60.0, error_hints: Optional[str] = None,
                  instructions: str = "",
                  trace: Optional[Callable[[str], None]] = None,
-                 max_tool_calls: int = 8, context: str = ""):
+                 max_tool_calls: int = 8, max_repeated_calls: int = 0, context: str = ""):
         """
         Set up the agent; call `connect()` before `ask()`.
         Args:
@@ -82,6 +83,8 @@ class MCPAgent:
             trace: Called with a line for each tool call ("→ tool(args)"), result ("← tool: output")
                 and failure ("✗ tool: message").
             max_tool_calls: Maximum tool calls in one user turn; 0 means no limit.
+            max_repeated_calls: The most times in a row one turn may make the same call (same tool,
+                same arguments); the next is not run and the model is told to answer. 0 means no limit.
             context: Extra instructions appended to `instructions`.
         """
         base_url = base_url.rstrip("/")
@@ -92,6 +95,7 @@ class MCPAgent:
         self.model = model
         self.trace = trace or (lambda _: None)
         self.max_tool_calls = max_tool_calls
+        self.guard = RepeatGuard(max_repeated_calls)
         self.instructions = "\n".join(part for part in (instructions, context) if part)
         self.history = []
         self.tools = []
@@ -167,6 +171,9 @@ class MCPAgent:
             server, name, schema = self.routes[call["name"]]
             arguments = json.loads(call["arguments"])
             validate(arguments, schema)
+            refusal = self.guard.refuse(name, arguments)
+            if refusal:
+                raise ValueError(refusal)
         except (ValueError, KeyError, ValidationError) as error:
             message = error.message if isinstance(error, ValidationError) else str(error)
             self.trace(f"✗ {display_name}: {message}")
@@ -254,6 +261,7 @@ class MCPAgent:
         """
         conversation = self.history + [{"role": "user", "content": prompt}]
         calls_used = 0
+        self.guard.reset()
         self.usage = []  # (input tokens, output tokens) per model call of this turn, when reported
         try:
             for _ in (itertools.count() if not self.max_tool_calls else range(self.max_tool_calls + 1)):

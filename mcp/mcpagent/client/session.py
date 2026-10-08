@@ -100,7 +100,8 @@ class AgentSession:
                          error_hints=model["error_hints"],
                          instructions=shared.system_prompt(self.settings),
                          context=self.context, trace=self.output.line,  # Debug lines, else the spinner
-                         max_tool_calls=int(self.settings.get("max_tool_calls", 8)))
+                         max_tool_calls=int(self.settings.get("max_tool_calls", 8)),
+                         max_repeated_calls=int(self.settings.get("max_repeated_calls", 0)))
         self.agent = agent
         await agent.connect()
         servers = len({server for server, _, _ in agent.routes.values()})

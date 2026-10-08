@@ -145,7 +145,9 @@ class PullRequests:
         """
         Run the merge gate's checks on a repository as a commit would hold it now: a copy of its
         tracked and new files (not ignored ones, so no old build output), built and tested in the
-        shell tool's sandbox, and the changed C/C++ files checked with doxy. The settings are the
+        shell tool's sandbox, and the changed C/C++ files checked with doxy. A changed binary file,
+        such as a program compiled by hand, fails the check before anything is built: a pull request
+        holds source, and make builds the rest. The settings are the
         gate's (QUIZ_BUILD_COMMAND, QUIZ_TEST_TARGET, QUIZ_FAIL_ON_WARNINGS), so a change that passes
         here passes the gate's build and documentation checks.
         Args:
@@ -160,7 +162,14 @@ class PullRequests:
                                     build_command=setting("QUIZ_BUILD_COMMAND"),
                                     test_target=setting("QUIZ_TEST_TARGET"),
                                     fail_on_warnings=setting("QUIZ_FAIL_ON_WARNINGS").lower() in ("true", "1", "yes"))
-        changed_c = [path for path in cls.changed_files(repo) if Path(path).suffix.lower() in C_EXTENSIONS]
+        changed = cls.changed_files(repo)
+        binaries = [path for path in changed if cls.is_binary(repo / path)]
+        if binaries:
+            return False, (f"Binary files: {', '.join(binaries)}. A pull request holds source only; these are "
+                           f"build output or files made by hand. Delete them with the shell's rm (if the build "
+                           f"makes them, the Makefile's clean target or .gitignore should cover them), then "
+                           f"check again.")
+        changed_c = [path for path in changed if Path(path).suffix.lower() in C_EXTENSIONS]
         with tempfile.TemporaryDirectory() as work:
             tree = Path(work) / "tree"
             listed = cls.git(repo, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
@@ -176,6 +185,18 @@ class PullRequests:
         mark = {True: "passed", False: "FAILED"}
         return build_ok and docs_ok, (f"Build and tests: {mark[build_ok]}\n{build_report}\n\n"
                                       f"Documentation: {mark[docs_ok]}\n{docs_report}")
+
+    @staticmethod
+    def is_binary(file: Path) -> bool:
+        """
+        Whether a file is binary: a NUL byte in its first 8 KiB, as git decides it.
+        Args:
+            file: The file.
+        Returns:
+            bool: True for a binary file.
+        """
+        with open(file, "rb") as stream:
+            return b"\0" in stream.read(8192)
 
     def check(self, path: str) -> str:
         """

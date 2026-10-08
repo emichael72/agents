@@ -151,6 +151,9 @@ class PrGateCli:
                 else:
                     state = f"quiz waiting, merge blocked: {gate.quiz_url(row['id'])}"
             lines.append(f"{title}: {state}")
+        if any("quiz waiting" in line for line in lines):
+            lines.append("A waiting quiz is for the pull request's author, a person, to take: checking again will not "
+                         "change it. Give the user the quiz link and stop.")
         return "\n".join(lines)
 
     def create(self, pr: int, profile: Optional[str], fixed: Optional[str]) -> str:

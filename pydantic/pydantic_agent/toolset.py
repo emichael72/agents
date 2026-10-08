@@ -21,6 +21,7 @@ from pydantic_ai import ModelRetry, Tool, ToolFailed
 from pydantic_ai.toolsets import FunctionToolset
 
 from pydantic_agent import AGENT_NAME, TOOLS_DIR
+from pydantic_agent.guard import RepeatGuard
 
 SCRIPT_TIMEOUT = 30
 
@@ -29,6 +30,10 @@ class LocalTools:
     """
     The tools in the shared tools folder, as pydantic-ai tools: one per <tool>/tool.json.
     """
+
+    # Refuses a call repeated too often in one turn; the session sets its limit
+    # (max_repeated_calls in context/agent.json) and resets it at each turn. No limit by default.
+    guard = RepeatGuard()
 
     @staticmethod
     def run_script(*command: str, env: dict[str, str] | None = None, timeout: float = SCRIPT_TIMEOUT) -> str:
@@ -120,12 +125,16 @@ class LocalTools:
                 str: The command's output.
             Raises:
                 ModelRetry: If the arguments do not match the schema.
+            ToolFailed: If the guard refuses a call repeated too often; the model sees why.
             """
             arguments = {key: value for key, value in arguments.items() if value is not None}  # null = omitted
             try:
                 validate(arguments, schema)  # Tool.from_schema leaves validation to us
             except ValidationError as error:
                 raise ModelRetry(f"Invalid arguments: {error.message}") from None
+            refusal = LocalTools.guard.refuse(name, arguments)
+            if refusal:
+                raise ToolFailed(refusal)
             return LocalTools.run_script(*LocalTools.build_argv(manifest, arguments), env=manifest.get("env"),
                               timeout=float(manifest.get("timeout", SCRIPT_TIMEOUT)))
 

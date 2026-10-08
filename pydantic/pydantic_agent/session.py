@@ -27,6 +27,7 @@ from rich.console import Console
 from pydantic_agent.context import AgentContext
 from pydantic_agent.output import Output
 from pydantic_agent.profiles import ModelProfiles
+from pydantic_agent.guard import RepeatGuard
 from pydantic_agent.toolset import LocalTools
 
 
@@ -69,6 +70,7 @@ class AgentSession:
         """
         tools = LocalTools.load()
         self.tools = tools
+        LocalTools.guard = RepeatGuard(int(self.settings.get("max_repeated_calls", 0)))
         return Agent(model, instructions=self.context.system_prompt(self.settings), toolsets=[tools])
 
     async def run(self, profile: Optional[str] = None, model: Optional[str] = None, base_url: Optional[str] = None,
@@ -110,6 +112,7 @@ class AgentSession:
         """
         output = self._output()
         output.start()
+        LocalTools.guard.reset()  # Only this turn's calls count as repeats
         # pydantic-ai reports every call of a model response before their results; hold each call
         # line until its result arrives, so the two print together (as in the other agents).
         pending_calls: dict[str, str] = {}

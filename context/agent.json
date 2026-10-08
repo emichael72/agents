@@ -4,7 +4,10 @@
     "in its folder's instructions.json (mcp/, pydantic/, vercel/).",
     "max_tool_calls: the most tool calls the model may make while answering one prompt;",
     "0 means no limit (a model stuck in a loop then runs until stopped with Ctrl+C).",
-    "A multi-step task (read a project, change it, build, open a pull request) needs 20 or more.",
+    "A multi-step task (read a project, change it, build, open a pull request) needs 20 to 90.",
+    "max_repeated_calls: the most times in a row one prompt may make the same tool call (same tool,",
+    "same arguments); the next is not run, and the model is told its result will not change and to",
+    "answer. It stops a model stuck checking something only a person can change. 0 means no limit.",
     "memory_index: the agents' memory index (relative to the repository), loaded into their",
     "instructions at start-up; the memory tool maintains it.",
     "save_on_exit: when the user types exit in the interactive chat, first give the model one",
@@ -13,7 +16,8 @@
     "skills_dir: the skills folder (relative to the repository): one <name>/SKILL.md per skill, whose",
     "name and description are listed in the agents' instructions at start-up; the skill tool reads them."
   ],
-  "max_tool_calls": 0,
+  "max_tool_calls": 150,
+  "max_repeated_calls": 3,
   "memory_index": ".memory/index.md",
   "save_on_exit": true,
   "skills_dir": "skills"

@@ -19,7 +19,9 @@ it. Follow these steps in order.
    code: each function once, in its header (@brief, @param, @return), and the .c file only a @file
    block. Documenting a function in both places makes doxy report every parameter twice.
 4. Test what you added: add commands for every new option or behavior, including one that must
-   fail (written as ! command), to the check target of the Makefile.
+   fail (written as ! command), to the check target of the Makefile. Build and test only with make
+   and make check: never compile by hand or leave other new files in the repository, since everything
+   new there goes into the pull request (the pr tool refuses binary files).
 5. Check with the pr tool, action check: it runs the reviewer's gate's own checks in one call (make
    with no errors and no compiler warnings, make check, and doxy on the changed files). Fix
    whatever it reports and run it again until it passes.
@@ -27,4 +29,4 @@ it. Follow these steps in order.
    change that fails them): a title saying what the change does, and a body saying what changed,
    why, and which checks passed. Describe only what you did and verified. The pr tool formats,
    commits, creates the branch, pushes, and returns the pull request and quiz links: give the user
-   those links, and stop.
+   those links, and stop. The quiz is for a person to take; do not wait for it or check on it.

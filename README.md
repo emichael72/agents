@@ -179,7 +179,10 @@ change on its next start. None of this is hard-coded in the agents.
 - `context/instructions.json`: the instructions (system prompt) given to the model, as a list of
   lines.
 - `context/agent.json`: the agent loop: `max_tool_calls`, the most tool calls the model may make while
-  answering one prompt; `0` (the setting now) means no limit, so stop a runaway answer with Ctrl+C.
+  answering one prompt (150; `0` means no limit), and `max_repeated_calls`, the most times in a row it
+  may make the same call, with the same arguments (3): the next is not run, and the model is told
+  that its result will not change and to answer. That stops a model stuck polling something only a
+  person can change, such as a quiz waiting for its developer.
   `memory_index` names the memory index every agent loads (see "Memory" below), `skills_dir` the
   folder of [skills](#skills) every agent lists, and `save_on_exit` turns on the save turn before
   exit.

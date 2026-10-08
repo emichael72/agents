@@ -19,7 +19,7 @@ from unittest.mock import Mock, patch
 
 from rich.console import Console
 import pydantic as pydantic_dependency
-from pydantic_ai import ModelRetry
+from pydantic_ai import ModelRetry, ToolFailed
 from pydantic_ai.messages import (ModelRequest, ModelResponse, TextPart, ToolCallPart, ToolReturnPart,
                                   UserPromptPart)
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
@@ -29,6 +29,7 @@ from pydantic_agent.context import AgentContext
 from pydantic_agent.output import Output
 from pydantic_agent.profiles import ModelProfiles
 from pydantic_agent.session import AgentSession
+from pydantic_agent.guard import RepeatGuard
 from pydantic_agent.toolset import LocalTools
 
 # The scripted turn every agent's tests replay (tests/scenario.json)
@@ -177,6 +178,22 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             text = AgentContext.memory_text(index)
             self.assertIn("- preferences: Prefers short answers", text)
             self.assertEqual(AgentContext.memory_text(None), "")
+
+    def test_a_call_repeated_too_often_is_not_run(self):
+        manifest = json.loads((TOOLS_DIR / "time" / "tool.json").read_text())
+        time_tool = LocalTools.tool("time", manifest).function
+        with patch.object(LocalTools, "guard", RepeatGuard(2)):
+            with patch.object(LocalTools, "run_script", return_value="12:00") as run:
+                self.assertEqual(time_tool(timezone="UTC"), "12:00")
+                self.assertEqual(time_tool(timezone="UTC"), "12:00")
+                with self.assertRaisesRegex(ToolFailed, "Not run: you made this same time call, with the same "
+                                                        "arguments, 2 times in a row"):
+                    time_tool(timezone="UTC")
+                self.assertEqual(run.call_count, 2)  # The third did not run
+                self.assertEqual(time_tool(timezone="Asia/Tokyo"), "12:00")  # Another call runs
+                LocalTools.guard.reset()  # A new turn
+                time_tool(timezone="UTC"), time_tool(timezone="UTC")
+                self.assertEqual(run.call_count, 5)
 
     def test_the_skills_join_the_instructions(self):
         with tempfile.TemporaryDirectory() as folder:
