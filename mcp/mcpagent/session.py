@@ -34,8 +34,8 @@ class AgentSession:
                  base_url: Optional[str] = None, context: str = "", trace: bool = True) -> None:
         """
         Args:
-            config_file: The MCPAgent config; its client section names the MCP servers and the
-                shared context.
+            config_file: The MCPAgent config: the MCP servers, the tools its own server serves, and
+                the shared context.
             profile: Model profile name; None uses the models file's default.
             model: Overrides the profile's model.
             base_url: Overrides the profile's base URL.

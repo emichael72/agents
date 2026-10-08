@@ -2,39 +2,31 @@
   "description": [
     "MCPAgent configuration (python mcp/agent.py): the agent, and the MCP server it starts for itself.",
     "Validated against schemas/mcpagent.schema.json; paths are relative to the repository root.",
-    "server: the MCP server, which serves the shared agents/tools folder. The agent starts it as a",
-    "  child process when it starts, talks to it over stdin and stdout, and stops it when it exits.",
-    "  tools_dir: the tool manifests (<tool>/tool.json); each tool is named after its folder.",
-    "  tools_env: environment variables every tool gets, e.g. which agent runs it.",
-    "client: the agent: its log level, the shared context files and the MCP servers it uses.",
-    "  instructions_file, models_file, output_file, agent_file: shared by all three agents;",
-    "  agent_instructions_file: MCPAgent's own name and instructions, added to the shared ones;",
-    "  --profile, --local or --openai picks a model profile, else models_file's \"default\".",
-    "  server_output: show the server's log lines (started, each tool it ran, errors) with the other",
-    "  gray lines, with -d; off by default.",
-    "  servers: a STDIO entry without \"config\" starts the server section's server; an entry with",
-    "  \"config\" names another MCP server: a command (STDIO) or a URL (HTTP)."
+    "log_level: the agent's MCP client log level.",
+    "instructions_file, models_file, output_file, agent_file: shared by all three agents;",
+    "agent_instructions_file: MCPAgent's own name and instructions, added to the shared ones.",
+    "--profile, --local or --openai picks a model profile, else models_file's \"default\".",
+    "tools_dir: the tools its MCP server serves (<tool>/tool.json; each tool is named after its",
+    "folder); tools_env: environment variables every tool gets, e.g. which agent runs it.",
+    "server_output: show the server's log lines (started, each tool it ran, errors) with the other",
+    "gray lines, with -d; off by default.",
+    "servers: the MCP servers the agent uses. A STDIO entry without \"config\" is its own server,",
+    "started as a child process when the agent starts and stopped when it exits; an entry with",
+    "\"config\" names another MCP server: a command (STDIO) or a URL (HTTP)."
   ],
-  "server": {
-    "project_name": "MCP Agent",
-    "description": "Serves the shared agents/tools folder over MCP.",
-    "version": "1.1.0",
-    "tools_dir": "tools",
-    "tools_env": {"AGENT_NAME": "MCP Agent"}
-  },
-  "client": {
-    "log_level": "ERROR",
-    "instructions_file": "context/instructions.json",
-    "agent_instructions_file": "mcp/instructions.json",
-    "models_file": "context/models.json",
-    "output_file": "context/output.json",
-    "agent_file": "context/agent.json",
-    "server_output": false,
-    "servers": [{
-      "server_id": "tools",
-      "description": "The shared agents/tools folder, served by the server section above.",
-      "enabled": true,
-      "transport": "STDIO"
-    }]
-  }
+  "log_level": "ERROR",
+  "instructions_file": "context/instructions.json",
+  "agent_instructions_file": "mcp/instructions.json",
+  "models_file": "context/models.json",
+  "output_file": "context/output.json",
+  "agent_file": "context/agent.json",
+  "tools_dir": "tools",
+  "tools_env": {"AGENT_NAME": "MCP Agent"},
+  "server_output": false,
+  "servers": [{
+    "server_id": "tools",
+    "description": "The shared agents/tools folder, served by the agent's own MCP server.",
+    "enabled": true,
+    "transport": "STDIO"
+  }]
 }

@@ -29,7 +29,7 @@ mcpagent/service.py                   MCPService: the MCP server the agent start
 mcpagent/config.py                    MCPAgentConfig: loads and validates the config; its sections
 mcpagent/types.py                     the package's types
 mcpagent/logger.py, errors.py         the logger, and what the entry point prints on an error
-mcpagent/jsons/mcpagent.json          the config: "client" (the agent) and "server" (the MCP server it starts)
+mcpagent/jsons/mcpagent.json          the config: the agent's settings, and the tools its MCP server serves
 mcpagent/jsons/schemas/mcpagent.schema.json  JSON schema for mcpagent.json
 tests/                                agent-loop and server tests (model responses are mocked)
 requirements.txt                      pinned dependencies (installed by the repository's install.sh)
@@ -88,7 +88,7 @@ stops it. Started from a terminal, the server refuses: it serves only the agent 
 
 The server writes a short log to stderr: one line when it starts and one per tool it runs (the
 command, its exit status and how long it took), and its errors. The agent shows these lines only
-when `"server_output"` in the config's client section is `true` and `-d` is on, as dark gray lines
+when `"server_output"` in the config is `true` and `-d` is on, as dark gray lines
 among its own:
 
 ```text
@@ -130,14 +130,14 @@ all three agents, [`../context/models.json`](../context/models.json); the fields
 under "Context" in [../README.md](../README.md). For this agent the profile's server must support
 the `/v1/responses` endpoint.
 
-The agent and the server it starts share one config, `mcpagent/jsons/mcpagent.json` (plain JSON;
-its `"description"` lines explain the fields): the agent reads its `"client"` section and the
-server its `"server"` section, and each stops with an error if its section is missing. Every
-config, including one given with `--config`, is validated against
-`mcpagent/jsons/schemas/mcpagent.schema.json`; an invalid config or schema stops loading. Paths in
-the config are relative to the repository root.
+The agent and the server it starts share one config, `mcpagent/jsons/mcpagent.json` (plain JSON,
+one set of settings; its `"description"` lines explain the fields): the agent reads the context
+files, `"servers"` and `"server_output"`, and the server the tools to serve (`"tools_dir"`,
+`"tools_env"`, inline `"tools"`). Every config, including one given with `--config`, is validated
+against `mcpagent/jsons/schemas/mcpagent.schema.json`; an invalid config or schema stops loading.
+Paths in the config are relative to the repository root.
 
-The model's instructions are not in the code either: `"instructions_file"` in the client section names
+The model's instructions are not in the code either: `"instructions_file"` in the config names
 the JSON file whose `"instructions"` lines are sent with every request, by default the shared
 [`../context/instructions.json`](../context/instructions.json). `--context FILE` appends extra
 instructions for one run.
@@ -156,7 +156,7 @@ loaded automatically.
 
 ## Configuring the MCP servers
 
-`"servers"` in the client section lists the MCP servers whose tools the model gets; tools from all
+`"servers"` in the config lists the MCP servers whose tools the model gets; tools from all
 enabled servers are combined. Each entry has:
 
 | Field         | Meaning                                                                                                   |
@@ -164,7 +164,7 @@ enabled servers are combined. Each entry has:
 | `server_id`   | Unique id, shown in tool descriptions as `<server_id>/<tool>`                                             |
 | `description` | What the server provides                                                                                  |
 | `transport`   | `STDIO` (a child process; used here) or `HTTP`                                                            |
-| `config`      | For STDIO: `command` (and optionally `env`); omit it to start the server section's server. For HTTP: `url` |
+| `config`      | For STDIO: `command` (and optionally `env`); omit it for the agent's own server. For HTTP: `url`          |
 | `enabled`     | Optional; `false` skips the entry                                                                         |
 
 So another MCP server can be added beside the agent's own: a command to start it (STDIO), or the
@@ -201,8 +201,8 @@ For VS Code, merge this entry into the workspace's `.vscode/mcp.json`:
 To add a tool for all three agents, add a folder to `../tools` (see
 [../tools/README.md](../tools/README.md)); the agent's server finds it on the agent's next start.
 
-To serve a different set of scripts, copy `mcpagent/jsons/mcpagent.json`, point the server
-section's `tools_dir` at another folder of `<tool>/tool.json` manifests (relative to the
+To serve a different set of scripts, copy `mcpagent/jsons/mcpagent.json`, point its `tools_dir`
+at another folder of `<tool>/tool.json` manifests (relative to the
 repository root, or absolute) and run the agent with it:
 
 ```bash

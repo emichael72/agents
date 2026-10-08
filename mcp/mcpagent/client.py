@@ -15,10 +15,11 @@ Description:
       - Case-insensitive server identifiers for consistent lookups.
 
     Internally, each server connection is represented by an
-    `MCPClientConnection` instance. Connections encapsulate transport-specific
-    state:
-      - HTTP: managed through aiohttp sessions.
-      - STDIO: managed through an asyncio subprocess with stdin/stdout pipes.
+    `MCPClientConnection` instance (connection.py), which holds the
+    transport-specific state, so this module needs neither:
+      - HTTP: an aiohttp session.
+      - STDIO: an asyncio subprocess with stdin/stdout pipes (the agent's own
+        server is one).
 
     The design goal is to present a consistent high-level interface to callers
     while cleanly separating transport-specific concerns.
@@ -86,15 +87,15 @@ class MCPClient:
     @staticmethod
     def _load_config(config_file: Union[Path, str]) -> dict[str, Any]:
         """
-        Load the client section of an MCPAgent configuration file (JSON).
+        Load an MCPAgent configuration file (JSON).
         Args:
             config_file: Path to the configuration file (Path or str).
         Returns:
-            dict[str, Any]: The "client" section, with local HTTP servers' URLs filled in.
+            dict[str, Any]: Its settings, with the command that starts the agent's own server filled in.
         Raises:
-            RuntimeError: If the file is missing, fails schema validation, or has no client section.
+            RuntimeError: If the file is missing or fails schema validation.
         """
-        return MCPAgentConfig.load(config_file).client
+        return MCPAgentConfig.load(config_file).settings
 
     def _load_servers_from_config(self) -> None:
         """

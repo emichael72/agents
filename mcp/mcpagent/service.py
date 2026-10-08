@@ -58,10 +58,10 @@ class MCPService:
 
     def __init__(self, project_data: Optional[dict] = None, log: Optional[Callable[[str], None]] = None) -> None:
         """
-        Load the tools and server settings from the parsed server config.
+        Load the tools from the parsed config.
         Args:
-            project_data: The server settings (mcpagent.json's "server" section): server name and
-                version, tools_dir / tools_env and inline tools.
+            project_data: The settings (mcpagent.json): tools_dir, tools_env and inline tools; the
+                rest is the agent's.
             log: Called with each log line; None writes them to stderr.
         Raises:
             TypeError: If project_data is not a dict.
@@ -87,8 +87,8 @@ class MCPService:
             raise TypeError("project_data must be a dict")
         self._project_data: dict[str, Any] = project_data
 
-        self._mcp_server_name: str = self._project_data.get("project_name", "MCP service")
-        self._mcp_server_version: str = self._project_data.get("version", "1.0.0")
+        self._mcp_server_name = "mcpagent"  # The package, in the initialize handshake
+        self._mcp_server_version = __version__
         self._tools_data: dict[str, Any] = self._project_data.get("tools", {})
 
         # Optional shared tools folder: one sub-folder per tool, each with a tool.json manifest
@@ -469,7 +469,7 @@ class MCPService:
         """
 
         if not isinstance(self._tools_data, dict) or not self._tools_data:
-            raise TypeError("tools must be a non-empty dict")
+            raise RuntimeError("The config names no tools to serve: set tools_dir, or define tools inline")
 
         for key, entry in self._tools_data.items():
             tool_name = key
@@ -602,15 +602,15 @@ class MCPService:
     @classmethod
     def serve(cls, config_path: Optional[Union[str, Path]] = None) -> int:
         """
-        Run the server for the client that started it: the "server" section of an MCPAgent config,
-        with its paths (tools_dir) relative to the repository root, over stdin and stdout.
+        Run the server for the agent that started it, with an MCPAgent config's tools (its paths,
+        such as tools_dir, relative to the repository root), over stdin and stdout.
         Args:
             config_path: The config file; None uses DEFAULT_CONFIG. Environment variables and ~ are
                 expanded.
         Returns:
             int: 0 once the client closes stdin.
         Raises:
-            RuntimeError: If the config is missing or invalid, or has no "server" section.
+            RuntimeError: If the config is missing or invalid.
         """
         path = Path(os.path.expanduser(os.path.expandvars(str(config_path or DEFAULT_CONFIG)))).resolve()
         if not path.is_file():
@@ -618,7 +618,7 @@ class MCPService:
         old_cwd = Path.cwd()
         try:
             os.chdir(REPO_ROOT)  # The service reads tools_dir relative to its working directory
-            service = cls(project_data=MCPAgentConfig.load(path).server)
+            service = cls(project_data=MCPAgentConfig.load(path).data)
             return asyncio.run(service.run_stdio())
         finally:
             os.chdir(old_cwd)

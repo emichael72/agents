@@ -3,8 +3,8 @@ Module: config.py
 
 Description:
     `MCPAgentConfig`: the MCPAgent configuration (JSON), one file, jsons/mcpagent.json by default,
-    validated against jsons/schemas/mcpagent.schema.json. Its "server" section configures the MCP
-    server and its "client" section the agent.
+    validated against jsons/schemas/mcpagent.schema.json. One set of settings, read by the agent and
+    by the MCP server it starts: the context files, the MCP servers to use, and the tools to serve.
     Paths named in the configuration are relative to the repository root (REPO_ROOT).
 """
 
@@ -21,14 +21,14 @@ from mcpagent import DEFAULT_CONFIG, REPO_ROOT, SCHEMA_FILE
 
 class MCPAgentConfig:
     """
-    An MCPAgent configuration: its "server" and "client" sections.
+    An MCPAgent configuration: the settings of the agent and of the MCP server it starts.
     """
 
     def __init__(self, data: dict[str, Any], path: str | Path = "<config>") -> None:
         """
         Wrap configuration data that is already parsed; `load` reads and validates a file.
         Args:
-            data: The configuration: its "server" and "client" sections.
+            data: The configuration's settings.
             path: Where it came from, for error messages.
         """
         self.data = data
@@ -79,42 +79,15 @@ class MCPAgentConfig:
         return REPO_ROOT / Path(value).expanduser()
 
     @property
-    def server(self) -> dict[str, Any]:
+    def settings(self) -> dict[str, Any]:
         """
-        The MCP server's settings: the "server" section, as MCPService takes it.
-        Raises:
-            RuntimeError: If the configuration has no "server" section.
-        """
-        return self._section("server")
-
-    @property
-    def client(self) -> dict[str, Any]:
-        """
-        The agent's settings: a copy of the "client" section, with each STDIO server entry that has
-        no "config" set to start this package's own server, with this config, as a child process.
-        Raises:
-            RuntimeError: If the configuration has no "client" section, or a STDIO entry without
-                "config" has no "server" section to start.
-        """
-        client = copy.deepcopy(self._section("client"))
-        for entry in client.get("servers", []):
-            if entry.get("transport", "").upper() != "STDIO" or "config" in entry:
-                continue
-            self._section("server")  # The server it starts reads this section
-            entry["config"] = {"command": [sys.executable, "-m", "mcpagent.service", str(self.path.resolve())]}
-        return client
-
-    def _section(self, name: str) -> dict[str, Any]:
-        """
-        One section of the configuration.
-        Args:
-            name: "server" or "client".
+        The settings: a copy, with each STDIO server entry that has no "config" set to start this
+        package's own server, with this config, as a child process.
         Returns:
-            dict[str, Any]: The section.
-        Raises:
-            RuntimeError: If the configuration has no such section.
+            dict[str, Any]: The settings.
         """
-        section = self.data.get(name)
-        if not isinstance(section, dict):
-            raise RuntimeError(f'Configuration {self.path} has no "{name}" section')
-        return section
+        settings = copy.deepcopy(self.data)
+        for entry in settings.get("servers", []):
+            if entry.get("transport", "").upper() == "STDIO" and "config" not in entry:
+                entry["config"] = {"command": [sys.executable, "-m", "mcpagent.service", str(self.path.resolve())]}
+        return settings

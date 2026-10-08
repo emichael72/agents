@@ -75,8 +75,9 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.config = Path(self.temp.name) / 'mcpagent.json'
-        self.config.write_text(json.dumps({"server": MCPAgentConfig.load().server, "client": {
-            "log_level": "ERROR", "servers": [{"server_id": "tools", "description": "Test shell tools", "transport": "STDIO"}]}}))
+        shipped = MCPAgentConfig.load().data
+        self.config.write_text(json.dumps({"log_level": "ERROR", "tools_dir": shipped["tools_dir"], "tools_env": shipped["tools_env"],
+            "servers": [{"server_id": "tools", "description": "Test shell tools", "transport": "STDIO"}]}))
         self.requests = []
         self.outputs = []
         self.traces = []
@@ -300,8 +301,8 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_server_that_cannot_start_says_why(self):
         broken = Path(self.temp.name) / 'broken.json'
-        broken.write_text(json.dumps({"server": {"tools_dir": "no-such-folder"}, "client": {
-            "log_level": "ERROR", "servers": [{"server_id": "tools", "description": "Broken", "transport": "STDIO"}]}}))
+        broken.write_text(json.dumps({"log_level": "ERROR", "tools_dir": "no-such-folder",
+            "servers": [{"server_id": "tools", "description": "Broken", "transport": "STDIO"}]}))
         client = MCPClient(broken)
         self.addAsyncCleanup(client.close, close_all=True)
         with self.assertRaisesRegex(EOFError, r"The MCP server 'tools' stopped \(exit 1\): error: .*no-such-folder"):
@@ -331,9 +332,9 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         await server.start_server()
         self.addAsyncCleanup(server.close)
         remote = Path(self.temp.name) / 'remote.json'  # Another MCP server, reached over HTTP
-        remote.write_text(json.dumps({"client": {"log_level": "ERROR", "servers": [{
+        remote.write_text(json.dumps({"log_level": "ERROR", "servers": [{
             "server_id": "tools", "description": "Remote tools", "transport": "HTTP",
-            "config": {"url": str(server.make_url('/'))}}]}}))
+            "config": {"url": str(server.make_url('/'))}}]}))
         client = MCPClient(remote)
         self.addAsyncCleanup(client.close, close_all=True)
         await client.connect(connect_all=True)
@@ -353,11 +354,11 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     def shipped_config():
         """
-        Load the client section of the config the package ships (jsons/mcpagent.json).
+        Load the settings of the config the package ships (jsons/mcpagent.json).
         Returns:
             dict: The parsed config.
         """
-        return MCPAgentConfig.load().data['client']
+        return MCPAgentConfig.load().data
 
     async def test_model_profiles_come_from_the_shared_models_file(self):
         profiles = self.shipped_models()
@@ -449,7 +450,7 @@ class OutputTests(unittest.TestCase):
     """The terminal layout shared by the three agents (README.md, "Terminal output")."""
 
     def test_layout_settings_come_from_the_shared_context_file(self):
-        settings = AgentContext(MCPAgentConfig.load().data['client']).output_settings()
+        settings = AgentContext(MCPAgentConfig.load().data).output_settings()
         self.assertEqual((settings['width'], settings['show_time']), (120, True))
 
     # The agents keep independent tests for their shared terminal behavior.

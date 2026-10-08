@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "MCPAgent Configuration",
-  "description": "Validates mcpagent.json: its server section (the MCP server the agent starts) and client section (the agent, python mcp/agent.py); neither is required here, as each part reports its own when missing. Paths are relative to the repository root.",
+  "description": "Validates mcpagent.json: the settings of MCPAgent (python mcp/agent.py) and of the MCP server it starts. Paths are relative to the repository root.",
   "type": "object",
   "properties": {
     "description": {
@@ -11,99 +11,65 @@
       },
       "description": "What the file holds, one line per item."
     },
-    "server": {
-      "$ref": "#/definitions/server"
+    "log_level": {
+      "type": "string",
+      "enum": [
+        "DEBUG",
+        "INFO",
+        "WARNING",
+        "ERROR"
+      ],
+      "description": "Logging level of the agent's MCP client."
     },
-    "client": {
-      "$ref": "#/definitions/client"
+    "instructions_file": {
+      "type": "string",
+      "description": "JSON file whose \"instructions\" lines form the model's instructions."
+    },
+    "agent_instructions_file": {
+      "type": "string",
+      "description": "JSON file with this agent's \"name\" and its own \"instructions\" lines, added to the shared ones."
+    },
+    "models_file": {
+      "type": "string",
+      "description": "JSON file with the model profiles (\"default\" and \"profiles\")."
+    },
+    "output_file": {
+      "type": "string",
+      "description": "JSON file with the terminal layout (\"width\", \"show_time\")."
+    },
+    "agent_file": {
+      "type": "string",
+      "description": "JSON file with the agent loop settings (\"max_tool_calls\")."
+    },
+    "tools_dir": {
+      "type": "string",
+      "description": "Folder of <tool>/tool.json manifests, relative to the repository root."
+    },
+    "tools_env": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Environment variables added to every tool."
+    },
+    "tools": {
+      "type": "object",
+      "description": "Extra inline tool definitions, shaped like tool.json manifests."
+    },
+    "server_output": {
+      "type": "boolean",
+      "description": "Show the started server's log lines with the agent's other gray lines (with -d). Default false."
+    },
+    "servers": {
+      "type": "array",
+      "description": "MCP servers whose tools the model gets; a STDIO entry without config is the agent's own server.",
+      "items": {
+        "$ref": "#/definitions/client_server"
+      }
     }
   },
   "additionalProperties": false,
   "definitions": {
-    "server": {
-      "type": "object",
-      "properties": {
-        "project_name": {
-          "type": "string",
-          "description": "Server name sent to clients in the initialize handshake."
-        },
-        "description": {
-          "type": "string",
-          "description": "What the server is for."
-        },
-        "version": {
-          "type": "string",
-          "description": "Server version sent to clients in the initialize handshake."
-        },
-        "tools_dir": {
-          "type": "string",
-          "description": "Folder of <tool>/tool.json manifests, relative to the repository root."
-        },
-        "tools_env": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "Environment variables added to every tool."
-        },
-        "tools": {
-          "type": "object",
-          "description": "Extra inline tool definitions, shaped like tool.json manifests."
-        }
-      },
-      "additionalProperties": false
-    },
-    "client": {
-      "type": "object",
-      "properties": {
-        "log_level": {
-          "type": "string",
-          "enum": [
-            "DEBUG",
-            "INFO",
-            "WARNING",
-            "ERROR"
-          ],
-          "description": "Logging level for the MCP client."
-        },
-        "instructions_file": {
-          "type": "string",
-          "description": "JSON file whose \"instructions\" lines form the model's instructions."
-        },
-        "agent_instructions_file": {
-          "type": "string",
-          "description": "JSON file with this agent's \"name\" and its own \"instructions\" lines, added to the shared ones."
-        },
-        "models_file": {
-          "type": "string",
-          "description": "JSON file with the model profiles (\"default\" and \"profiles\")."
-        },
-        "agent_file": {
-          "type": "string",
-          "description": "JSON file with the agent loop settings (\"max_tool_calls\")."
-        },
-        "output_file": {
-          "type": "string",
-          "description": "JSON file with the terminal layout (\"width\", \"show_time\")."
-        },
-        "server_output": {
-          "type": "boolean",
-          "description": "Show the started server's log lines with the agent's other gray lines (with -d). Default false."
-        },
-        "servers": {
-          "type": "array",
-          "description": "MCP servers whose tools the model gets.",
-          "items": {
-            "$ref": "#/definitions/client_server"
-          }
-        }
-      },
-      "required": [
-        "log_level",
-        "servers"
-      ],
-      "additionalProperties": false
-    },
     "client_server": {
       "type": "object",
       "required": [
@@ -160,7 +126,7 @@
           "additionalProperties": false
         },
         "config": {
-          "description": "How to reach the server. A STDIO entry without it starts the server section's server as a child process.",
+          "description": "How to reach the server. A STDIO entry without it is the agent's own server, started as a child process.",
           "oneOf": [
             {
               "type": "object",

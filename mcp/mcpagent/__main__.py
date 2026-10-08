@@ -5,11 +5,11 @@ Description:
     Command-line entry point of MCPAgent: `python -m mcpagent` from any folder (the package is
     installed in the .venv), or `python mcp/agent.py`.
 
-    Starts the agent (`AgentSession`): a model that uses the tools of the MCP servers in the
-    "client" section of the MCPAgent config (default: jsons/mcpagent.json in this package), with
-    a model profile from the shared agents/context/models.json. The agent starts its own MCP
-    server (the "server" section) as a child process and stops it when it exits. Runs one prompt
-    (--prompt) or an interactive session.
+    Starts the agent (`AgentSession`): a model that uses the tools of the MCP servers the MCPAgent
+    config names (default: jsons/mcpagent.json in this package), with a model profile from the
+    shared agents/context/models.json. The agent starts its own MCP server, which serves the
+    config's tools, as a child process and stops it when it exits. Runs one prompt (--prompt) or
+    an interactive session.
     Also takes --version.
 """
 
@@ -37,7 +37,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         prog="python mcp/agent.py",
         description="Chat with a model that can call the MCP servers' tools.")
     parser.add_argument("--config", type=Path,
-                        help="MCPAgent config file; its client section names the MCP servers, model "
+                        help="MCPAgent config file: the MCP servers, the tools its own server serves, the model "
                              "profiles and instructions (default: mcp/mcpagent/jsons/mcpagent.json).")
     parser.add_argument("--context", type=Path,
                         help="Text file with extra instructions for the assistant.")
