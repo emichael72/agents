@@ -250,6 +250,31 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("# Change code and open a pull request", skill(name="pull-request"))
         self.assertEqual(skill(name=None), skill())  # null means omitted: the list
 
+    async def test_a_model_stuck_on_invalid_calls_ends_the_turn_not_the_chat(self):
+        bad_calls = []
+
+        async def stubborn(messages, _info):
+            prompts = [part.content for part in messages[-1].parts if isinstance(part, UserPromptPart)]
+            if prompts == ["open it"]:
+                yield {0: DeltaToolCall(name="skill", json_args='{"name": "pull-request"}', tool_call_id="good")}
+            elif prompts == ["and now?"]:
+                yield "done"
+            else:  # Garbled arguments, again and again
+                bad_calls.append(len(bad_calls))
+                yield {0: DeltaToolCall(name="skill", json_args='{"bogus": 1}', tool_call_id=f"bad-{len(bad_calls)}")}
+
+        session = self.session()
+        bot = session.build_agent(FunctionModel(stream_function=stubborn))
+        history = await session.ask(bot, "open it", [])
+        self.assertEqual(len(bad_calls), session.tool_retries + 1)  # The first call, then each correction
+        self.assertIn("The turn ended: Tool 'skill' exceeded max retries count of 3. Its tool results above are kept",
+                      " ".join(self.output.getvalue().split()))  # The test console wraps long lines
+        self.assertIsInstance(history[-1], ModelRequest)  # The last response's calls had no results: dropped
+        returns = [part for message in history for part in message.parts if isinstance(part, ToolReturnPart)]
+        self.assertIn("# Change code and open a pull request", returns[0].model_response_str())  # Kept
+        history = await session.ask(bot, "and now?", history)
+        self.assertEqual(history[-1].parts[0].content, "done")
+
     async def test_history_carries_across_turns(self):
         async def remember(messages, _info):
             yield f"{len(messages)} messages so far"

@@ -17,9 +17,9 @@ from typing import Any, Optional
 import pydantic_ai
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import ANSI
-from pydantic_ai import Agent, AgentRunResultEvent
-from pydantic_ai.messages import (FunctionToolCallEvent, FunctionToolResultEvent, ModelMessage, PartDeltaEvent,
-                                  PartStartEvent, TextPart, TextPartDelta, ToolReturnPart)
+from pydantic_ai import Agent, AgentRunResultEvent, UnexpectedModelBehavior, capture_run_messages
+from pydantic_ai.messages import (FunctionToolCallEvent, FunctionToolResultEvent, ModelMessage, ModelResponse,
+                                  PartDeltaEvent, PartStartEvent, TextPart, TextPartDelta, ToolReturnPart)
 from pydantic_ai.models import Model
 from pydantic_ai.toolsets import FunctionToolset
 from rich.console import Console
@@ -54,8 +54,10 @@ class AgentSession:
         self.trace = trace
         self.context = context or AgentContext()
         self.parallel = self.context.own().get("parallel_tool_calls", True) if parallel is None else parallel
+
         self.console = console or Console(highlight=False, soft_wrap=True)  # Never re-wrap lines
         self.settings = self.context.agent_settings()
+        self.tool_retries = int(self.settings.get("tool_retries", 3))  # Corrections of an invalid call
         self.limits = self.context.usage_limits(self.settings)
         self.output_settings = self.context.output_settings()
         self.tools: Optional[FunctionToolset] = None  # The local tools, once build_agent loads them
@@ -71,7 +73,8 @@ class AgentSession:
         tools = LocalTools.load()
         self.tools = tools
         LocalTools.guard = RepeatGuard(int(self.settings.get("max_repeated_calls", 0)))
-        return Agent(model, instructions=self.context.system_prompt(self.settings), toolsets=[tools])
+        return Agent(model, instructions=self.context.system_prompt(self.settings), toolsets=[tools],
+                     retries={"tools": self.tool_retries})
 
     async def run(self, profile: Optional[str] = None, model: Optional[str] = None, base_url: Optional[str] = None,
                   prompt: Optional[str] = None, show_history: bool = False) -> int:
@@ -102,7 +105,9 @@ class AgentSession:
 
     async def ask(self, agent: Agent, prompt: str, history: list[ModelMessage]) -> list[ModelMessage]:
         """
-        Run one user turn, printing streamed text and tool activity.
+        Run one user turn, printing streamed text and tool activity. A model that keeps making invalid
+        tool calls (past tool_retries) ends the turn, not the conversation: its messages so far are
+        kept, without the last response, whose calls never got results.
         Args:
             agent: The agent to run.
             prompt: The user's message.
@@ -119,8 +124,11 @@ class AgentSession:
         # pydantic-ai can run the tool calls from one model response concurrently; parallel_tool_calls
         # in pydantic/instructions.json turns it on, and the instructions there tell the model to put
         # only independent calls in one response.
+        failure: Optional[UnexpectedModelBehavior] = None
+        kept: list[ModelMessage] = history
         try:
-            with agent.parallel_tool_call_execution_mode("parallel" if self.parallel else "sequential"):
+            with capture_run_messages() as run_messages, \
+                    agent.parallel_tool_call_execution_mode("parallel" if self.parallel else "sequential"):
                 async with agent.run_stream_events(prompt, message_history=history, usage_limits=self.limits) as events:
                     async for event in events:
                         if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart):
@@ -146,11 +154,21 @@ class AgentSession:
                             if usage.input_tokens or usage.output_tokens:
                                 output.add_usage(usage.input_tokens, usage.output_tokens, usage.requests)
                             return event.result.all_messages()
+        except UnexpectedModelBehavior as error:
+            failure = error
+            kept = list(run_messages) or history
+            while kept and isinstance(kept[-1], ModelResponse):
+                kept.pop()
         finally:
             for line in pending_calls.values():  # Calls that never got a result (e.g. the run failed)
                 output.line(line)
             output.finish()
-        return history
+        if failure is not None:  # pydantic-ai's message, without its advice on the retry setting
+            reason = failure.message.split(". ")[0].rstrip(".")
+            self.console.print(f"The turn ended: {reason}. Its tool results above are kept; ask again to go on "
+                               f"(tool_retries in context/agent.json sets how many corrections a tool gets).",
+                               style="red", markup=False)
+        return kept
 
     def print_history(self, history: list[ModelMessage]) -> None:
         """

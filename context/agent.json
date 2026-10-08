@@ -8,6 +8,10 @@
     "max_repeated_calls: the most times in a row one prompt may make the same tool call (same tool,",
     "same arguments); the next is not run, and the model is told its result will not change and to",
     "answer. It stops a model stuck checking something only a person can change. 0 means no limit.",
+    "tool_retries: how many times the model may correct a call to one tool that was refused for",
+    "invalid arguments; past that the turn ends, keeping its results so far. Only the Pydantic Agent",
+    "uses it: MCPAgent and the Vercel Agent return the refusal to the model and rely on",
+    "max_repeated_calls.",
     "memory_index: the agents' memory index (relative to the repository), loaded into their",
     "instructions at start-up; the memory tool maintains it.",
     "save_on_exit: when the user types exit in the interactive chat, first give the model one",
@@ -18,6 +22,7 @@
   ],
   "max_tool_calls": 150,
   "max_repeated_calls": 3,
+  "tool_retries": 3,
   "memory_index": ".memory/index.md",
   "save_on_exit": true,
   "skills_dir": "skills"
