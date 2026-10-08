@@ -12,7 +12,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from tools.skill.skill import Skills, main  # noqa: E402
+from tools.skill.skill import Skills, main
 
 
 class SkillToolTests(unittest.TestCase):

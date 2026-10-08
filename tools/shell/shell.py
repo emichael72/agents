@@ -69,7 +69,7 @@ class Shell:
     }
     RESERVED_PREFIXES = ("GIT_", "LD_", "BASH_")  # Also kept from commands.json's variables
     VARIABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-    REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")  # ${NAME} in a variable's value
+    REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)}")  # ${NAME} in a variable's value
     BUILTINS = {"cd", "echo", "false", "printf", "pwd", "test", "true"}  # bash's own: always there
     CLANG_FORMAT = CONTEXT_DIR / "clang-format.yaml"  # The default C/C++ style, at /work/.clang-format
     CLANG_TIDY = CONTEXT_DIR / "clang-tidy.yaml"  # The default C/C++ checks, at /work/.clang-tidy
@@ -115,7 +115,7 @@ class Shell:
             listed = {name: entry for name, entry in self.load_commands().items() if not self.own_tool(name)}
             commands = {name: entry for name, entry in listed.items() if self.installed(name)}
             self.missing = set(listed) - set(commands)
-        self.commands = commands
+        self.commands: dict[str, dict] = commands
 
     @classmethod
     def load_commands(cls) -> dict[str, dict]:
@@ -461,8 +461,11 @@ class Shell:
             raise ValueError("The working folder is outside the allowed folders.")
         _, shown = located
         args += ["--chdir", str(self.WORK / shown)]
-        environment = {**self.ENVIRONMENT, **self.variables}
-        environment["PATH"] = ":".join([inner for inner, _ in self.search_path] + [self.ENVIRONMENT["PATH"]])
+        environment = {
+            **self.ENVIRONMENT,
+            **self.variables,
+            "PATH": ":".join([inner for inner, _ in self.search_path] + [self.ENVIRONMENT["PATH"]]),
+        }
         for key, setting in (("GIT_AUTHOR_NAME", "user.name"), ("GIT_AUTHOR_EMAIL", "user.email")):
             value = subprocess.run(["git", "config", "--global", setting], capture_output=True, text=True).stdout.strip()
             if value:

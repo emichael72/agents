@@ -44,9 +44,11 @@ The shared clang-format and clang-tidy settings supply defaults when the project
 The sandbox starts from a fixed environment. The `environment` entry in [commands.json](commands.json) adds to it:
 
 ~~~json
-"environment": {
-  "path": ["/usr/local/bin"],
-  "variables": {"RUN_BY_AGENT": "1", "AGENT_NAME": "${AGENT_NAME}"}
+{
+  "environment": {
+    "path": ["/usr/local/bin"],
+    "variables": {"RUN_BY_AGENT": "1", "AGENT_NAME": "${AGENT_NAME}"}
+  }
 }
 ~~~
 

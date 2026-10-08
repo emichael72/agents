@@ -16,8 +16,8 @@ from typing import Any, Optional
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from gatekeepers.fs.fs_gate import FsGate  # noqa: E402
-from tools.shell.shell import Shell  # noqa: E402
+from gatekeepers.fs.fs_gate import FsGate
+from tools.shell.shell import Shell
 
 
 class ShellConfigTests(unittest.TestCase):
@@ -75,7 +75,7 @@ class ShellConfigTests(unittest.TestCase):
         shell = self.shell({"path": ["/work/proj/bin", "/work/docs/bin", "/usr/no-such-folder", "/usr/bin"]})
         self.assertEqual(shell.search_path, [("/work/proj/bin", self.folder / "proj" / "bin"), ("/usr/bin", Path("/usr/bin"))])
         self.assertIn("proj-tool", shell.commands)
-        self.assertIn("docs-tool", shell.missing)  # docs is read-only: its folder is not searched
+        self.assertIn("docs-tool", shell.missing)  # The docs folder has no execute access, so it is not searched
         for folder in ("relative/bin", "/etc", "/usr/../etc", "/tmp"):
             with self.subTest(folder=folder), self.assertRaisesRegex(ValueError, "under /usr or /work"):
                 self.shell({"path": [folder]})
