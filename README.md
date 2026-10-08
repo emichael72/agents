@@ -40,7 +40,7 @@ Add `-d` to see the tool calls and results. Type `exit` to finish; `/history` sh
 
 ## Models and settings
 
-[context/models.json](https://github.com/emichael72/agents/blob/a2fe18a204843563134bb1ed0d7aaf63d558691e/context/models.json) holds the profiles shared by all three agents. The local profile points to LM Studio at `http://boba:1234/v1` and can discover the loaded model. The checked-in fallback is `qwen/qwen3-coder-next:2`.
+[context/models.json](context/models.json) holds the profiles shared by all three agents. The local profile points to LM Studio at `http://boba:1234/v1` and can discover the loaded model. The checked-in fallback is `qwen/qwen3-coder-next:2`.
 
 Use `--profile NAME`, `--model`, or `--base-url` to change a run. The `--openai` shortcut uses the OpenAI profile and needs `OPENAI_API_KEY` in the environment. MCPAgent needs a provider with a Responses endpoint; Pydantic and Vercel use chat completions.
 

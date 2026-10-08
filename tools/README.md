@@ -22,7 +22,7 @@ All command examples in these pages run from the **repository root**.
 
 ## Paths and permissions
 
-Use the folder names in [context/paths.json](https://github.com/emichael72/agents/blob/a2fe18a204843563134bb1ed0d7aaf63d558691e/context/paths.json). For example, `core_dump/src/main.c` refers to a file inside the configured core_dump checkout.
+Use the folder names in [context/paths.json](../context/paths.json). For example, `core_dump/src/main.c` refers to a file inside the configured core_dump checkout.
 
 `r` allows reading, `w` allows writing, and `x` allows running programs and Makefiles. Subfolders can have different permissions. Tools resolve paths before checking them, including parent references and symbolic links.
 

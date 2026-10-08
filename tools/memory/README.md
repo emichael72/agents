@@ -18,4 +18,4 @@ Read without a topic to see the index. Saving appends a line; `--replace=true` r
 
 A topic is stored as `<topic>.md` and holds at most 4,000 characters. Names are normalized to lowercase letters, digits, dashes, and underscores. Notes are for lasting information, not secrets.
 
-The folder named memory in [context/paths.json](https://github.com/emichael72/agents/blob/a2fe18a204843563134bb1ed0d7aaf63d558691e/context/paths.json) must allow reading and writing. Typing `exit` in a chat may give the agent a final turn to save notes; Ctrl+C and one-prompt runs skip that turn.
+The folder named memory in [context/paths.json](../../context/paths.json) must allow reading and writing. Typing `exit` in a chat may give the agent a final turn to save notes; Ctrl+C and one-prompt runs skip that turn.

@@ -60,7 +60,7 @@ Installation checks for GitHub access and required programs. It also tries to ke
 
 Open the [quiz homepage](http://minion:8000) or [History](http://minion:8000/history). The demo sign-in is shown on the login page.
 
-Settings are in [settings.json](https://github.com/emichael72/agents/blob/a2fe18a204843563134bb1ed0d7aaf63d558691e/gatekeepers/pr/settings.json). Environment values can override them; restart after changing service settings. The checked-in `QUIZ_ALLOW_SKIP=true` enables a Skip quiz button. Set it to false to require a perfect score for code changes.
+Settings are in [settings.json](settings.json). Environment values can override them; restart after changing service settings. The checked-in `QUIZ_ALLOW_SKIP=true` enables a Skip quiz button. Set it to false to require a perfect score for code changes.
 
 This is a single-user demo. Questions can be wrong, and the shared sign-in does not establish which individual answered. Preview an assessment before using it in a presentation.
 

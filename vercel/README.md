@@ -19,7 +19,7 @@ The model options match the Python agents: `--profile NAME`, `--local`, `--opena
 
 ## Parallel calls
 
-[instructions.json](https://github.com/emichael72/agents/blob/a2fe18a204843563134bb1ed0d7aaf63d558691e/vercel/instructions.json) currently enables `parallel_tool_calls`. Tool scripts run as concurrent child processes, so independent calls can overlap even though Node's JavaScript runs on an event loop.
+[instructions.json](instructions.json) currently enables `parallel_tool_calls`. Tool scripts run as concurrent child processes, so independent calls can overlap even though Node's JavaScript runs on an event loop.
 
 Set the option to `false` to queue calls one at a time, and keep the accompanying instructions consistent. The launcher loads local tools. Its own instructions.json augments the shared context/instructions.json, including guidance to the model about independent and dependent calls.
 

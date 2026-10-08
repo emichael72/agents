@@ -26,4 +26,4 @@ Empty replacement text deletes the selected text or lines.
 
 Text edits require UTF-8 files no larger than 2,000,000 bytes. Replacements use a temporary file and preserve permissions and line endings; `write` adds a final newline. Hex inspection can read binary files and shows at most 4,096 bytes per call.
 
-The tool refuses edits to tools, gatekeepers, shared context, and .git directories, even if a broad path permission would otherwise allow them. Other access comes from [context/paths.json](https://github.com/emichael72/agents/blob/a2fe18a204843563134bb1ed0d7aaf63d558691e/context/paths.json).
+The tool refuses edits to tools, gatekeepers, shared context, and .git directories, even if a broad path permission would otherwise allow them. Other access comes from [context/paths.json](../../context/paths.json).

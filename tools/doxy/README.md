@@ -17,4 +17,4 @@ A missing `@file` block is reported explicitly because Doxygen can otherwise ign
 
 **Exit status matters:** documentation problems are reported with exit status 0. A nonzero status means the check could not run. The PR gate reads the report to decide whether documentation passed.
 
-Requires Doxygen. [Doxyfile.check](https://github.com/emichael72/agents/blob/a2fe18a204843563134bb1ed0d7aaf63d558691e/tools/doxy/Doxyfile.check) holds the check settings. Both the coding agents and the PR gate use this same script.
+Requires Doxygen. [Doxyfile.check](Doxyfile.check) holds the check settings. Both the coding agents and the PR gate use this same script.

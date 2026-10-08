@@ -13,7 +13,7 @@ python3 tools/shell/shell.py --cwd=core_dump --command="git diff"
 python3 tools/shell/shell.py --command=help
 ~~~
 
-Help lists the available commands and folders. [commands.json](https://github.com/emichael72/agents/blob/a2fe18a204843563134bb1ed0d7aaf63d558691e/tools/shell/commands.json) defines the command list.
+Help lists the available commands and folders. [commands.json](commands.json) defines the command list.
 
 ## What is different from a normal shell?
 

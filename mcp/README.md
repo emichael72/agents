@@ -19,11 +19,11 @@ The installed package is `mcpagent`, so `.venv/bin/python -m mcpagent` is anothe
 
 ## Change the model or instructions
 
-Model profiles are shared in [context/models.json](https://github.com/emichael72/agents/blob/a2fe18a204843563134bb1ed0d7aaf63d558691e/context/models.json). Use `--profile NAME`, `--openai`, `--model`, or `--base-url` to override them. The model server must support `/v1/responses`.
+Model profiles are shared in [context/models.json](../context/models.json). Use `--profile NAME`, `--openai`, `--model`, or `--base-url` to override them. The model server must support `/v1/responses`.
 
-The shared prompt is followed by this agent's [instructions.json](https://github.com/emichael72/agents/blob/a2fe18a204843563134bb1ed0d7aaf63d558691e/mcp/instructions.json). `--context FILE` adds instructions for one run.
+The shared prompt is followed by this agent's [instructions.json](instructions.json). `--context FILE` adds instructions for one run.
 
-[mcpagent/jsons/mcpagent.json](https://github.com/emichael72/agents/blob/a2fe18a204843563134bb1ed0d7aaf63d558691e/mcp/mcpagent/jsons/mcpagent.json) controls the MCP connections, tool discovery, and server output. Use `--config FILE` for another configuration. Paths in it are relative to the repository root.
+[mcpagent/jsons/mcpagent.json](mcpagent/jsons/mcpagent.json) controls the MCP connections, tool discovery, and server output. Use `--config FILE` for another configuration. Paths in it are relative to the repository root.
 
 ## What to expect
 

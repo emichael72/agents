@@ -13,11 +13,11 @@ From the repository root, after installing:
 
 `-d` shows tool calls and results. Add `--history` to a one-prompt run to print the exchanged messages. In a chat, `/history` shows them, `/reset` clears them, and `exit` ends the session.
 
-Model options are `--profile NAME`, `--local`, `--openai`, `--model`, and `--base-url`. They use the profiles in [context/models.json](https://github.com/emichael72/agents/blob/a2fe18a204843563134bb1ed0d7aaf63d558691e/context/models.json).
+Model options are `--profile NAME`, `--local`, `--openai`, `--model`, and `--base-url`. They use the profiles in [context/models.json](../context/models.json).
 
 ## Parallel calls
 
-[instructions.json](https://github.com/emichael72/agents/blob/a2fe18a204843563134bb1ed0d7aaf63d558691e/pydantic/instructions.json) currently sets `parallel_tool_calls` to `true`. Independent calls from one model response can run together. A build that depends on an edit must wait for a later response.
+[instructions.json](instructions.json) currently sets `parallel_tool_calls` to `true`. Independent calls from one model response can run together. A build that depends on an edit must wait for a later response.
 
 Set it to `false` for sequential execution, update the accompanying instructions to agree, and restart the agent. There is no `--parallel` flag in the current launcher.
 
