@@ -233,6 +233,32 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, 'stream failed: model_unloaded Model qwen-coder was unloaded'):
             await self.agent.ask('Hello', on_text=lambda text: None)
 
+    async def test_thinking_streams_to_the_spinner_and_max_tokens_is_named(self):
+        self.agent.max_tokens, self.agent.profile = 150, 'local'
+        events = [{"type": "response.reasoning_text.delta", "delta": "hmm"}] * 3
+        completed = {"status": "completed", "output": [{"type": "reasoning", "content": []}],
+                     "usage": {"input_tokens": 10, "output_tokens": 150}}  # LM Studio: only thinking, cut off
+
+        async def stream(request):
+            self.requests.append(await request.json())
+            response = web.StreamResponse(headers={'Content-Type': 'text/event-stream'})
+            await response.prepare(request)
+            for event in events + [{"type": "response.completed", "response": completed}]:
+                await response.write(f"data: {json.dumps(event)}\n\n".encode())
+            return response
+
+        self.model_handler = stream
+        thoughts = []
+        with self.assertRaisesRegex(RuntimeError, r"^The model ran out of tokens: it may use 150 tokens per reply, "
+                                                  r"thinking included \(max_tokens in the 'local' profile"):
+            await self.agent.ask('Think hard', on_text=lambda text: None, on_thinking=lambda: thoughts.append(1))
+        self.assertEqual(len(thoughts), 3)
+        self.assertEqual(self.requests[0]['max_output_tokens'], 150)
+        self.agent.max_tokens = None  # No limit: none is sent, and the reply is only "no text"
+        with self.assertRaisesRegex(RuntimeError, 'returned no text or tool calls'):
+            await self.agent.ask('Think hard', on_text=lambda text: None)
+        self.assertNotIn('max_output_tokens', self.requests[-1])
+
     async def test_tool_failure_returned_to_model(self):
         self.outputs = [[call(self.aliases['shell'], {'cwd': 'missing-file', 'command': 'ls'})],
                         [message('File not found')]]
@@ -456,6 +482,36 @@ class OutputTests(unittest.TestCase):
 
     # The agents keep independent tests for their shared terminal behavior.
     # noinspection DuplicatedCode
+    def test_with_debug_the_spinner_runs_between_the_lines_and_times_the_thinking(self):
+        printed = io.StringIO()
+        output = Output(Console(file=printed, force_terminal=True, width=120), {'width': 120}, debug=True)
+        spinners = []
+        output.out.status = Mock(side_effect=lambda *args, **kwargs: spinners.append(Mock()) or spinners[-1])
+        now = [100.0]
+        started = lambda: str(output.out.status.call_args.args[0])  # noqa: E731  A new spinner's label
+        shown = lambda: str(spinners[-1].update.call_args.args[0])  # noqa: E731  Its label since
+        with patch('mcpagent.output.time.monotonic', side_effect=lambda: now[0]):
+            output.start()
+            self.assertEqual(started(), 'Thinking…')  # A spinner with -d too
+            output.thinking()
+            now[0] = 103.4
+            output.thinking()
+            self.assertEqual(shown(), 'Thinking… 3s')  # A reasoning model's thinking, timed
+            output.line('→ shell({"command":"ls"})')
+            self.assertIn('→ shell({"command":"ls"})', printed.getvalue())  # The gray line still prints
+            self.assertEqual(started(), 'Running shell…')
+            output.line('← shell: a.c')
+            self.assertEqual(started(), 'Thinking…')  # The model works on the result
+            now[0] = 110.0
+            output.thinking()
+            now[0] = 112.5
+            output.thinking()
+            self.assertEqual(shown(), 'Thinking… 2s')  # A new stretch of thinking starts at 0
+            output.text('Two files.')
+            spinners[-1].stop.assert_called_once()  # The answer replaces the spinner
+            output.thinking()
+            self.assertEqual(len(spinners), 3)  # No spinner while the answer streams
+
     def test_by_default_only_the_answer_and_timing_print_and_tools_show_on_the_spinner(self):
         printed = io.StringIO()
         output = Output(Console(file=printed, force_terminal=True, width=120), {"width": 120, "show_time": True},

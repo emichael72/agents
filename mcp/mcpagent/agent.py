@@ -22,6 +22,7 @@ from jsonschema import ValidationError, validate
 from mcpagent.client import MCPClient
 from mcpagent.guard import RepeatGuard
 from mcpagent.output import Output
+from mcpagent.profiles import ModelProfiles
 
 
 class Reply:
@@ -67,7 +68,8 @@ class MCPAgent:
                  provider: str = "OpenAI", timeout: float = 60.0, error_hints: Optional[str] = None,
                  instructions: str = "",
                  trace: Optional[Callable[[str], None]] = None,
-                 max_tool_calls: int = 8, max_repeated_calls: int = 0, context: str = ""):
+                 max_tool_calls: int = 8, max_repeated_calls: int = 0, context: str = "",
+                 max_tokens: Optional[int] = None, profile: str = ""):
         """
         Set up the agent; call `connect()` before `ask()`.
         Args:
@@ -83,6 +85,9 @@ class MCPAgent:
             trace: Called with a line for each tool call ("→ tool(args)"), result ("← tool: output")
                 and failure ("✗ tool: message").
             max_tool_calls: Maximum tool calls in one user turn; 0 means no limit.
+            max_tokens: The most tokens one model reply may use, thinking included (the profile's
+                max_tokens); None leaves it to the server.
+            profile: The model profile's name, for the message when a reply hits max_tokens.
             max_repeated_calls: The most times in a row one turn may make the same call (same tool,
                 same arguments); the next is not run and the model is told to answer. 0 means no limit.
             context: Extra instructions appended to `instructions`.
@@ -95,6 +100,8 @@ class MCPAgent:
         self.model = model
         self.trace = trace or (lambda _: None)
         self.max_tool_calls = max_tool_calls
+        self.max_tokens = max_tokens
+        self.profile = profile
         self.guard = RepeatGuard(max_repeated_calls)
         self.instructions = "\n".join(part for part in (instructions, context) if part)
         self.history = []
@@ -229,12 +236,14 @@ class MCPAgent:
         return f": {text}" if text else ""
 
     async def _request_response(self, payload: dict[str, Any],
-                                on_text: Optional[Callable[[str], None]] = None) -> Reply:
+                                on_text: Optional[Callable[[str], None]] = None,
+                                on_thinking: Optional[Callable[[], None]] = None) -> Reply:
         """
         Send one Responses request, streaming text deltas when a callback is given.
         Args:
             payload: The Responses API request body.
             on_text: Called with each text delta; None makes a single non-streaming request.
+            on_thinking: Called for each chunk of a reasoning model's thinking, while streaming.
         Returns:
             Reply: The final reply; when streaming, the response in the completed event.
         """
@@ -256,6 +265,9 @@ class MCPAgent:
                     kind = event.get("type")
                     if kind in {"response.output_text.delta", "response.refusal.delta"}:
                         on_text(event.get("delta", ""))
+                    elif kind in {"response.reasoning_text.delta", "response.reasoning_summary_text.delta"}:
+                        if on_thinking is not None:
+                            on_thinking()
                     elif kind in {"response.completed", "response.incomplete", "response.failed"}:
                         return Reply(200, event["response"])
                     elif kind == "error":
@@ -263,7 +275,8 @@ class MCPAgent:
                                            f"calls may have completed; no retry was made.")
             raise RuntimeError(f"{self.provider} stream ended before completion. Earlier tool calls may have completed; no retry was made.")
 
-    async def ask(self, prompt: str, on_text: Optional[Callable[[str], None]] = None) -> str:
+    async def ask(self, prompt: str, on_text: Optional[Callable[[str], None]] = None,
+                  on_thinking: Optional[Callable[[], None]] = None) -> str:
         """
         Run one user turn: call the model, run the tools it requests, repeat until it answers.
         On success the turn is added to the history; on any failure the history is cleared, so a
@@ -271,6 +284,7 @@ class MCPAgent:
         Args:
             prompt: The user's message.
             on_text: Called with each streamed text delta, if given.
+            on_thinking: Called for each streamed chunk of the model's thinking, if given.
         Returns:
             str: The model's final text answer.
         Raises:
@@ -286,8 +300,9 @@ class MCPAgent:
                     "model": self.model, "instructions": self.instructions,
                     "input": conversation, "tools": self.tools,
                     "parallel_tool_calls": False, "store": False,
+                    **({"max_output_tokens": self.max_tokens} if self.max_tokens else {}),
                     "include": ["reasoning.encrypted_content"],
-                }, on_text=on_text)
+                }, on_text=on_text, on_thinking=on_thinking)
                 if response.is_error:
                     if self.local:
                         raise RuntimeError(f"{self.provider} HTTP {response.status_code} from {self.base_url}. "
@@ -312,6 +327,9 @@ class MCPAgent:
                 usage = data.get("usage") or {}
                 if usage:
                     self.usage.append((int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0))))
+                if data.get("status") == "incomplete" and \
+                        (data.get("incomplete_details") or {}).get("reason") == "max_output_tokens":
+                    raise RuntimeError(ModelProfiles.out_of_tokens({"max_tokens": self.max_tokens, "profile": self.profile}))
                 if data.get("status") != "completed":
                     raise RuntimeError(f"{self.provider} response did not complete ({data.get('status', 'unknown')}).")
                 output = data.get("output", [])
@@ -325,6 +343,10 @@ class MCPAgent:
                         if part.get("type") in ("output_text", "refusal")
                     )
                     if not text:
+                        # LM Studio reports a reply cut off at max_output_tokens as completed, with only thinking
+                        if self.max_tokens and int(usage.get("output_tokens", 0)) >= self.max_tokens - 1:
+                            raise RuntimeError(ModelProfiles.out_of_tokens({"max_tokens": self.max_tokens,
+                                                                            "profile": self.profile}))
                         raise RuntimeError(f"{self.provider} returned no text or tool calls.")
                     self.history = conversation
                     return text

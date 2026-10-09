@@ -101,7 +101,8 @@ class AgentSession:
                          instructions=shared.system_prompt(self.settings),
                          context=self.context, trace=self.output.line,  # Debug lines, else the spinner
                          max_tool_calls=int(self.settings.get("max_tool_calls", 8)),
-                         max_repeated_calls=int(self.settings.get("max_repeated_calls", 0)))
+                         max_repeated_calls=int(self.settings.get("max_repeated_calls", 0)),
+                         max_tokens=model["max_tokens"], profile=model["profile"])
         self.agent = agent
         # The server's log lines (server_output), among the other gray lines; only with -d
         if self.trace and mcp_client.config_data.get("server_output"):
@@ -120,7 +121,7 @@ class AgentSession:
         assert self.agent is not None
         self.output.start()
         try:
-            answer = await self.agent.ask(prompt, on_text=self.output.text)
+            answer = await self.agent.ask(prompt, on_text=self.output.text, on_thinking=self.output.thinking)
             if not self.output.in_text:
                 self.output.text(answer)  # Nothing was streamed (e.g. a non-streaming reply)
         finally:

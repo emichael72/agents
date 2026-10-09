@@ -195,6 +195,16 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 skill_tool(name="pull-request"), skill_tool(name="pull-request")
                 self.assertEqual(run.call_count, 5)
 
+    def test_the_profile_max_tokens_limits_every_reply(self):
+        with patch.dict(os.environ, {"LOCAL_LLM_MODEL": "m"}):
+            settings = ModelProfiles.load().resolve("local")
+        self.assertEqual((settings["profile"], settings["max_tokens"]), ("local", 16000))  # context/models.json
+        self.assertEqual(ModelProfiles.build_model(settings).settings, {"max_tokens": 16000})
+        self.assertIsNone(ModelProfiles.build_model({**settings, "max_tokens": None}).settings)
+        self.assertEqual(ModelProfiles.out_of_tokens(settings),
+                         "The model ran out of tokens: it may use 16,000 tokens per reply, thinking included "
+                         "(max_tokens in the 'local' profile, context/models.json). Raise it, or ask for a smaller step.")
+
     def test_the_skills_join_the_instructions(self):
         with tempfile.TemporaryDirectory() as folder:
             self.assertEqual(AgentContext.skills_text(Path(folder)), "")  # No skills yet
@@ -295,6 +305,36 @@ class OutputTests(unittest.TestCase):
 
     # Each agent keeps independent tests for the shared terminal behavior.
     # noinspection DuplicatedCode
+    def test_with_debug_the_spinner_runs_between_the_lines_and_times_the_thinking(self):
+        printed = io.StringIO()
+        output = Output(Console(file=printed, force_terminal=True, width=120), {"width": 120}, debug=True)
+        spinners = []
+        output.out.status = Mock(side_effect=lambda *args, **kwargs: spinners.append(Mock()) or spinners[-1])
+        now = [100.0]
+        started = lambda: str(output.out.status.call_args.args[0])  # noqa: E731  A new spinner's label
+        shown = lambda: str(spinners[-1].update.call_args.args[0])  # noqa: E731  Its label since
+        with patch("pydantic_agent.output.time.monotonic", side_effect=lambda: now[0]):
+            output.start()
+            self.assertEqual(started(), "Thinking…")  # A spinner with -d too
+            output.thinking()
+            now[0] = 103.4
+            output.thinking()
+            self.assertEqual(shown(), "Thinking… 3s")  # A reasoning model's thinking, timed
+            output.line('→ shell({"command":"ls"})')
+            self.assertIn('→ shell({"command":"ls"})', printed.getvalue())  # The gray line still prints
+            self.assertEqual(started(), "Running shell…")
+            output.line("← shell: a.c")
+            self.assertEqual(started(), "Thinking…")  # The model works on the result
+            now[0] = 110.0
+            output.thinking()
+            now[0] = 112.5
+            output.thinking()
+            self.assertEqual(shown(), "Thinking… 2s")  # A new stretch of thinking starts at 0
+            output.text("Two files.")
+            spinners[-1].stop.assert_called_once()  # The answer replaces the spinner
+            output.thinking()
+            self.assertEqual(len(spinners), 3)  # No spinner while the answer streams
+
     def test_by_default_only_the_answer_and_timing_print_and_tools_show_on_the_spinner(self):
         printed = io.StringIO()
         output = Output(Console(file=printed, force_terminal=True, width=120), {"width": 120, "show_time": True},

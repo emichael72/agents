@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import {
-  ask, buildAgent, identityText, linkSegments, loadInstructions, loadModels, loadOutputSettings, memoryText, Output, resolveModel, skillsText, worthSaving, wrap,
+  ask, buildAgent, identityText, outOfTokens, linkSegments, loadInstructions, loadModels, loadOutputSettings, memoryText, Output, resolveModel, skillsText, worthSaving, wrap,
   loadTools, localTools, repeatGuard, REPO_ROOT, runScript, TOOLS_DIR,
 } from '../vercelagent/index.ts';
 
@@ -17,7 +17,7 @@ const usage = {
   inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
   outputTokens: { total: 1, text: 1, reasoning: undefined },
 };
-const finish = (reason: 'stop' | 'tool-calls') => ({ type: 'finish' as const, finishReason: { unified: reason, raw: reason }, usage });
+const finish = (reason: 'stop' | 'tool-calls' | 'length') => ({ type: 'finish' as const, finishReason: { unified: reason, raw: reason }, usage });
 
 /** First call: request every tool in one response. Later calls: answer with the tool outputs it was sent. */
 function scriptedModel(calls: [string, object][]) {
@@ -99,6 +99,36 @@ test('a call repeated too often is not run', async () => {
   } finally {
     repeatGuard.limit = saved;
   }
+});
+
+test('a reply cut off at max_tokens says so, and the limit reaches the model', async () => {
+  let maxOutputTokens: number | undefined;
+  const thinker = new MockLanguageModelV4({
+    doStream: async (options) => {
+      maxOutputTokens = options.maxOutputTokens;
+      return {
+        stream: convertArrayToReadableStream([
+          { type: 'reasoning-start' as const, id: 'r' },
+          { type: 'reasoning-delta' as const, id: 'r', delta: 'hmm' },
+          { type: 'reasoning-end' as const, id: 'r' },
+          finish('length'),
+        ]),
+      };
+    },
+  });
+  const errors: string[] = [];
+  const saved = console.error;
+  console.error = (text: string) => void errors.push(stripVTControlCharacters(text));
+  try {
+    await ask(buildAgent(thinker, {}, true, 60, 150), 'Think hard', [], { ...quiet, limit: { profile: 'local', maxTokens: 150 } });
+  } finally {
+    console.error = saved;
+  }
+  assert.equal(maxOutputTokens, 150);
+  assert.deepEqual(errors, [outOfTokens({ profile: 'local', maxTokens: 150 })]);
+  assert.equal(outOfTokens({ profile: 'local', maxTokens: 16000 }),
+    "The model ran out of tokens: it may use 16,000 tokens per reply, thinking included " +
+    "(max_tokens in the 'local' profile, context/models.json). Raise it, or ask for a smaller step.");
 });
 
 test('tools are told which agent runs them', async () => {

@@ -19,7 +19,8 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import ANSI
 from pydantic_ai import Agent, AgentRetries, AgentRunResultEvent, UnexpectedModelBehavior, capture_run_messages
 from pydantic_ai.messages import (FunctionToolCallEvent, FunctionToolResultEvent, ModelMessage, ModelResponse,
-                                  PartDeltaEvent, PartStartEvent, TextPart, TextPartDelta, ToolReturnPart)
+                                  PartDeltaEvent, PartStartEvent, TextPart, TextPartDelta, ThinkingPart,
+                                  ThinkingPartDelta, ToolReturnPart)
 from pydantic_ai.models import Model
 from pydantic_ai.toolsets import FunctionToolset
 from rich.console import Console
@@ -61,6 +62,7 @@ class AgentSession:
         self.limits = self.context.usage_limits(self.settings)
         self.output_settings = self.context.output_settings()
         self.tools: Optional[FunctionToolset] = None  # The local tools, once build_agent loads them
+        self.model_settings: dict[str, Any] = {}  # The resolved model profile, once run picks it
 
     def build_agent(self, model: Model) -> Agent:
         """
@@ -93,6 +95,7 @@ class AgentSession:
             self.console.print()  # Blank line before the banner (hidden without debug)
         try:
             settings = ModelProfiles.load().resolve(profile, model=model, base_url=base_url)
+            self.model_settings = settings
             agent = self.build_agent(ModelProfiles.build_model(settings))
             tools = f"{len(self.tools.tools) if self.tools else 0} tools"
             execution = "parallel" if self.parallel else "sequential"
@@ -126,6 +129,7 @@ class AgentSession:
         # only independent calls in one response.
         failure: Optional[UnexpectedModelBehavior] = None
         kept: list[ModelMessage] = history
+        cut_off = False
         try:
             with capture_run_messages() as run_messages, \
                     agent.parallel_tool_call_execution_mode("parallel" if self.parallel else "sequential"):
@@ -135,11 +139,17 @@ class AgentSession:
                             output.text(event.part.content)
                         elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
                             output.text(event.delta.content_delta)
+                        elif isinstance(event, (PartStartEvent, PartDeltaEvent)) and \
+                                isinstance(getattr(event, "part", None) or getattr(event, "delta", None),
+                                           (ThinkingPart, ThinkingPartDelta)):
+                            output.thinking()  # A reasoning model thinks: the spinner shows for how long
                         elif isinstance(event, FunctionToolCallEvent):
                             arguments = json.dumps(event.part.args_as_dict(), separators=(",", ":"))
                             pending_calls[event.tool_call_id] = f"→ {event.part.tool_name}({arguments})"
                             if not self.trace:  # Name the tool on the spinner now, while it runs
                                 output.line(pending_calls[event.tool_call_id])
+                            else:  # The call prints with its result; meanwhile the spinner names it
+                                output.spin(f"Running {event.part.tool_name}…")
                         elif isinstance(event, FunctionToolResultEvent):
                             part = event.part
                             if event.tool_call_id in pending_calls:
@@ -153,7 +163,10 @@ class AgentSession:
                             usage = event.result.usage
                             if usage.input_tokens or usage.output_tokens:
                                 output.add_usage(usage.input_tokens, usage.output_tokens, usage.requests)
-                            return event.result.all_messages()
+                            messages = event.result.all_messages()
+                            last = next((m for m in reversed(messages) if isinstance(m, ModelResponse)), None)
+                            cut_off = last is not None and last.finish_reason == "length"  # The answer stops short
+                            kept = messages
         except UnexpectedModelBehavior as error:
             failure = error
             kept = list(run_messages) or history
@@ -163,7 +176,11 @@ class AgentSession:
             for line in pending_calls.values():  # Calls that never got a result (e.g. the run failed)
                 output.line(line)
             output.finish()
-        if failure is not None:  # pydantic-ai's message, without its advice on the retry setting
+        if cut_off:
+            self.console.print(ModelProfiles.out_of_tokens(self.model_settings), style="red", markup=False)
+        if failure is not None and "token limit" in failure.message:  # The reply hit max_tokens
+            self.console.print(ModelProfiles.out_of_tokens(self.model_settings), style="red", markup=False)
+        elif failure is not None:  # pydantic-ai's message, without its advice on the retry setting
             reason = failure.message.split(". ")[0].rstrip(".")
             self.console.print(f"The turn ended: {reason}. Its tool results above are kept; ask again to go on "
                                f"(tool_retries in context/agent.json sets how many corrections a tool gets).",

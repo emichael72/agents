@@ -28,10 +28,11 @@ OPEN_LINK = re.compile(r"\[[^]\n]*$|]\([^)\s]*$")  # A Markdown link that is not
 class Output:
     """
     The terminal layout shared by the three agents (README.md, "Terminal output"):
-      - By default, a spinner runs while the model thinks or a tool runs ("Running shell…"), and
-        only the answer and the timing line are printed.
+      - A spinner runs while the model thinks or a tool runs ("Running shell…"); while a reasoning
+        model's thinking streams, it says for how long ("Thinking… 42s"). By default, only the
+        answer and the timing line are printed.
       - With debug, everything except the model's answer (banner, hints, tool calls and results,
-        timing) is a dark gray line, and there is no spinner.
+        timing) is also a dark gray line; the spinner runs between them.
       - The model's streamed answer is word-wrapped as it arrives, with exactly one blank line
         before and after it.
       - All output fits in the configured width (context/output.json), or the terminal's if narrower.
@@ -62,20 +63,47 @@ class Output:
         self.debug = debug  # Print the gray lines; without it, a spinner shows the activity instead
         self.spinner: Optional[Status] = None
         self.blank_owed = False  # The last text ended without its blank line after it
+        self.thinking_since: Optional[float] = None  # When the current stretch of thinking began
+        self.thinking_shown = -1  # The seconds the spinner shows for it
 
     def start(self) -> None:
-        """Start timing a response, and the spinner when not in debug mode (on a terminal only)."""
+        """Start timing a response, and the spinner (on a terminal only)."""
         self.started = time.monotonic()
         self.usage = None
         self.spin("Thinking…")
 
     def spin(self, label: str) -> None:
         """
-        Show a label on the spinner, starting it if needed; only when not in debug mode, on a terminal.
+        Show a label on the spinner, starting it if needed; on a terminal only (piped output has none).
+        A new label also ends a stretch of thinking (see `thinking`).
         Args:
             label: What the agent is doing, e.g. "Thinking…".
         """
-        if self.debug or not self.out.is_terminal:
+        self.thinking_since, self.thinking_shown = None, -1
+        self._label(label)
+
+    def thinking(self) -> None:
+        """
+        A chunk of the model's thinking arrived: show on the spinner how long it has been thinking,
+        so a reasoning model's long silence is visibly work, not a hang. Ignored once the answer streams.
+        """
+        if self.in_text:
+            return
+        now = time.monotonic()
+        if self.thinking_since is None:
+            self.thinking_since = now
+        seconds = int(now - self.thinking_since)
+        if seconds != self.thinking_shown:
+            self.thinking_shown = seconds
+            self._label(f"Thinking… {seconds}s" if seconds else "Thinking…")
+
+    def _label(self, label: str) -> None:
+        """
+        Show a label on the spinner, starting it if needed.
+        Args:
+            label: The label.
+        """
+        if not self.out.is_terminal:
             return
         if self.spinner is None:
             spinner = self.out.status(Text(label, style="bright_black"), spinner="dots",
@@ -128,8 +156,9 @@ class Output:
 
     def line(self, text: str) -> None:
         """
-        Print a whole dark gray line (a tool call or result, the banner) in debug mode; otherwise
-        only show the activity on the spinner: "Running <tool>…" for a call, "Thinking…" after it.
+        Print a whole dark gray line (a tool call or result, the banner) in debug mode, then spin on
+        while the tool or the model works; otherwise only show the activity on the spinner:
+        "Running <tool>…" for a call, "Thinking…" after it.
         Args:
             text: The line; may contain newlines.
         """
@@ -141,6 +170,10 @@ class Output:
                 self.spin("Thinking…")
             return
         self.note(text)
+        if text.startswith("→ "):  # The tool runs now (MCPAgent prints the call before running it)
+            self.spin(f"Running {text[2:].split('(')[0]}…")
+        elif text.startswith(("← ", "✗ ")):  # A result goes back to the model, which works on it
+            self.spin("Thinking…")
 
     def note(self, text: str) -> None:
         """

@@ -10,8 +10,9 @@
     "error_hints: \"openai\" gives OpenAI-specific advice (key, quota, billing) when a request",
     "fails; without it, errors point at the server and the model instead.",
     "max_tokens: the most tokens one reply may use, thinking included: a reasoning model spends",
-    "thousands thinking before it answers. Used by the pull request gate's quiz writer; the agents",
-    "do not limit their replies. Without it, the server's own limit applies."
+    "thousands thinking before it answers. It applies to every model call, the three agents' and the",
+    "pull request gate's quiz writer, so a model stuck thinking stops there with a clear message.",
+    "Without it, the server's own limit applies."
   ],
   "default": "local",
   "profiles": {

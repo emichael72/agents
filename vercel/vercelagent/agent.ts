@@ -43,12 +43,13 @@ const gray = (text: string) => styleText('gray', text); // Everything except the
 
 type Profile = {
   name?: string; base_url: string; base_url_env?: string; model: string; model_env?: string; model_auto?: boolean;
-  api_key_env?: string; api_key?: string; timeout?: number;
+  api_key_env?: string; api_key?: string; timeout?: number; max_tokens?: number;
 };
 type Models = { default?: string; profiles?: Record<string, Profile> };
 export type ModelSettings = {
   profile: string; name: string; baseURL: string; model: string; apiKey: string; timeout: number;
   auto: boolean; // Ask the server which model is loaded (see loadedModel)
+  maxTokens?: number; // The most tokens one reply may use, thinking included; undefined leaves it to the server
 };
 
 /** Read the shared model profiles file: "default" (a profile name) and "profiles" (by name). */
@@ -88,6 +89,7 @@ export function resolveModel(models: Models, profile?: string,
     model: overrides.model || env(settings.model_env) || settings.model,
     apiKey,
     timeout: settings.timeout ?? 60,
+    maxTokens: settings.max_tokens || undefined,
     auto: Boolean(settings.model_auto) && !overrides.model && !env(settings.model_env),
   };
 }
@@ -193,20 +195,34 @@ export function skillsText(folder?: string): string {
 }
 
 /**
+ * What to tell the user when a reply hit the profile's max_tokens (the same in all three agents).
+ * @param settings The resolved profile (its name and maxTokens).
+ * @returns The message.
+ */
+export function outOfTokens(settings: { profile?: string; maxTokens?: number } = {}): string {
+  const limit = settings.maxTokens ? settings.maxTokens.toLocaleString('en-US') : "the server's limit of";
+  return `The model ran out of tokens: it may use ${limit} tokens per reply, thinking included ` +
+    `(max_tokens in the '${settings.profile}' profile, context/models.json). Raise it, or ask for a smaller step.`;
+}
+
+/**
  * Build the agent: the instructions (identity, shared, this agent's own, skills, memory) and the tools.
  * @param model The model to drive it.
  * @param tools The tools.
  * @param parallel Run the tool calls of one model response concurrently (default:
  *   parallel_tool_calls in vercel/instructions.json, true when unset), else one at a time.
  * @param timeoutSeconds The limit for one model call plus the tools it requested.
+ * @param maxTokens The most tokens one reply may use, thinking included (the profile's max_tokens);
+ *   undefined leaves it to the server.
  * @returns The agent.
  */
 export function buildAgent(model: LanguageModel, tools: ToolSet, parallel = OWN.parallel_tool_calls ?? true,
-                           timeoutSeconds = 60) {
+                           timeoutSeconds = 60, maxTokens?: number) {
   const own = (OWN.instructions ?? []).join('\n');
   return new ToolLoopAgent({
     model,
     timeout: { stepMs: timeoutSeconds * 1000 }, // one model call plus the tools it requested
+    maxOutputTokens: maxTokens,
     instructions: identityText(OWN.name) + loadInstructions() + (own ? '\n\n' + own : '') + skillsText(SKILLS_DIR) +
       memoryText(MEMORY_INDEX),
     tools: parallel ? tools : oneAtATime(tools),
@@ -305,6 +321,8 @@ export class Output {
   private readonly debug: boolean; // Print the gray lines; without it, a spinner shows the activity instead
   private spinner?: Ora;
   private blankOwed = false; // The last text ended without its blank line after it
+  private thinkingSince?: number; // When the current stretch of thinking began
+  private thinkingShown = -1; // The seconds the spinner shows for it
 
   /**
    * @param write Prints raw text (stdout by default).
@@ -321,16 +339,41 @@ export class Output {
     this.links = (settings.links ?? false) && Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
   }
 
-  /** Start timing a response, and the spinner when not in debug mode (on a terminal only). */
+  /** Start timing a response, and the spinner (on a terminal only). */
   start(): void {
     this.started = performance.now();
     this.usage = undefined;
     this.spin('Thinking…');
   }
 
-  /** Show a label on the spinner, starting it if needed; only when not in debug mode, on a terminal. */
+  /**
+   * Show a label on the spinner, starting it if needed; on a terminal only (piped output has none).
+   * A new label also ends a stretch of thinking (see thinking).
+   */
   spin(label: string): void {
-    if (this.debug || !process.stdout.isTTY || !(process.stdout.columns > 0)) return; // ora needs the terminal's width
+    this.thinkingSince = undefined;
+    this.thinkingShown = -1;
+    this.label(label);
+  }
+
+  /**
+   * A chunk of the model's thinking arrived: show on the spinner how long it has been thinking, so a
+   * reasoning model's long silence is visibly work, not a hang. Ignored once the answer streams.
+   */
+  thinking(): void {
+    if (this.inText) return;
+    const now = performance.now();
+    this.thinkingSince ??= now;
+    const seconds = Math.floor((now - this.thinkingSince) / 1000);
+    if (seconds !== this.thinkingShown) {
+      this.thinkingShown = seconds;
+      this.label(seconds ? `Thinking… ${seconds}s` : 'Thinking…');
+    }
+  }
+
+  /** Show a label on the spinner, starting it if needed. */
+  private label(label: string): void {
+    if (!process.stdout.isTTY || !(process.stdout.columns > 0)) return; // ora needs the terminal's width
     if (this.spinner) this.spinner.text = gray(label);
     // discardStdin off: the chat's readline owns the input
     else this.spinner = ora({ text: gray(label), color: 'gray', stream: process.stdout, discardStdin: false }).start();
@@ -370,8 +413,9 @@ export class Output {
   }
 
   /**
-   * Print a whole dark gray line (a tool call or result, the banner) in debug mode; otherwise only
-   * show the activity on the spinner: "Running <tool>…" for a call, "Thinking…" after it.
+   * Print a whole dark gray line (a tool call or result, the banner) in debug mode, then spin on while
+   * the tool or the model works; otherwise only show the activity on the spinner: "Running <tool>…"
+   * for a call, "Thinking…" after it.
    */
   line(text: string): void {
     if (!this.debug) {
@@ -384,6 +428,7 @@ export class Output {
       return;
     }
     this.note(text);
+    if (/^[←✗] /.test(text)) this.spin('Thinking…'); // A result goes back to the model, which works on it
   }
 
   /** Print a whole dark gray line, also when not in debug mode (the timing line, replies to commands). */
@@ -490,8 +535,9 @@ export class Output {
  * @returns The updated message history, including this turn.
  */
 export async function ask(agent: Agent, prompt: string, history: ModelMessage[],
-                          { trace = true, write = (text: string) => void process.stdout.write(text) }:
-                            { trace?: boolean; write?: Write } = {}): Promise<ModelMessage[]> {
+                          { trace = true, write = (text: string) => void process.stdout.write(text), limit = {} }:
+                            { trace?: boolean; write?: Write; limit?: { profile?: string; maxTokens?: number } } = {}):
+  Promise<ModelMessage[]> {
   const messages: ModelMessage[] = [...history, { role: 'user', content: prompt }];
   const output = new Output(write, undefined, trace);
   output.start();
@@ -504,6 +550,7 @@ export async function ask(agent: Agent, prompt: string, history: ModelMessage[],
     if (line) output.line(line);
     pendingCalls.delete(toolCallId);
   };
+  let cutOff = false;
   try {
     const result = await agent.stream({ messages });
     for await (const part of result.fullStream) {
@@ -511,9 +558,16 @@ export async function ask(agent: Agent, prompt: string, history: ModelMessage[],
         case 'text-delta':
           output.text(part.text);
           break;
+        case 'reasoning-delta':
+          output.thinking(); // A reasoning model thinks: the spinner shows for how long
+          break;
         case 'tool-call':
           pendingCalls.set(part.toolCallId, `→ ${part.toolName}(${JSON.stringify(part.input)})`);
           if (!trace) output.line(pendingCalls.get(part.toolCallId)!); // Name the tool on the spinner now, while it runs
+          else output.spin(`Running ${part.toolName}…`); // The call prints with its result; meanwhile the spinner names it
+          break;
+        case 'finish-step':
+          if (part.finishReason === 'length') cutOff = true; // The reply hit max_tokens
           break;
         case 'tool-result':
           showCall(part.toolCallId);
@@ -536,6 +590,7 @@ export async function ask(agent: Agent, prompt: string, history: ModelMessage[],
   } finally {
     for (const line of pendingCalls.values()) output.line(line); // Calls that never got a result
     output.finish();
+    if (cutOff) console.error(styleText('red', outOfTokens(limit)));
   }
 }
 
@@ -562,10 +617,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function chat(agent: Agent, prompt: string | undefined, trace: boolean, showHistory: boolean) {
+async function chat(agent: Agent, prompt: string | undefined, trace: boolean, showHistory: boolean,
+                    limit: { profile?: string; maxTokens?: number } = {}) {
   let history: ModelMessage[] = [];
   if (prompt !== undefined) {
-    history = await ask(agent, prompt, history, { trace });
+    history = await ask(agent, prompt, history, { trace, limit });
     if (showHistory) console.dir(history, { depth: null });
     return;
   }
@@ -582,7 +638,7 @@ async function chat(agent: Agent, prompt: string | undefined, trace: boolean, sh
         if (AGENT_SETTINGS.save_on_exit && onExit && worthSaving(history)) {
           if (trace) console.log(gray('Before exiting: saving anything worth remembering (Ctrl+C skips).'));
           try {
-            await ask(agent, onExit, history, { trace });
+            await ask(agent, onExit, history, { trace, limit });
           } catch (error) {
             console.error(styleText('red', `\nError: ${errorMessage(error)}`));
           }
@@ -596,7 +652,7 @@ async function chat(agent: Agent, prompt: string | undefined, trace: boolean, sh
         console.dir(history, { depth: null });
       } else if (line) {
         try {
-          history = await ask(agent, line, history, { trace });
+          history = await ask(agent, line, history, { trace, limit });
         } catch (error) {
           console.error(styleText('red', `\nError: ${errorMessage(error)}`));
         }
@@ -657,11 +713,11 @@ export async function main(): Promise<number> {
     const settings = resolveModel(loadModels(), profile, { model: values.model, baseURL: values['base-url'] });
     if (settings.auto) settings.model = (await loadedModel(settings.baseURL, settings.apiKey)) ?? settings.model;
     const parallel = OWN.parallel_tool_calls ?? true;
-    const agent = buildAgent(buildModel(settings), localTools, parallel, settings.timeout);
+    const agent = buildAgent(buildModel(settings), localTools, parallel, settings.timeout, settings.maxTokens);
     const toolCount = `${Object.keys(localTools).length} tools`;
     new Output((text) => void process.stdout.write(text), undefined, values.debug).line(
       `${settings.name} model: ${settings.model} @ ${settings.baseURL}, ${toolCount} (${parallel ? 'parallel' : 'sequential'})`);
-    await chat(agent, values.prompt, values.debug, values.history);
+    await chat(agent, values.prompt, values.debug, values.history, settings);
     return 0;
   } catch (error) {
     console.error(styleText('red', `Error: ${errorMessage(error)}`));

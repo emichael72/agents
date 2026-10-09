@@ -16,6 +16,7 @@ import httpx2
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.settings import ModelSettings
 
 from pydantic_agent import MODELS_FILE
 
@@ -80,7 +81,8 @@ class ModelProfiles:
             model: Overrides the profile's model.
             base_url: Overrides the profile's base URL.
         Returns:
-            dict[str, Any]: name, base_url, model, api_key and timeout.
+            dict[str, Any]: profile (its name), name, base_url, model, api_key, timeout and max_tokens
+                (None when the profile sets none).
         Raises:
             ValueError: If the profile does not exist, lacks base_url or model, or its API key is not set.
         """
@@ -100,17 +102,20 @@ class ModelProfiles:
         model = model or os.environ.get(settings.get("model_env", "")) \
             or (settings.get("model_auto") and ModelProfiles.loaded_model(base_url, api_key)) or settings["model"]
         return {
+            "profile": name,
             "name": settings.get("name", name),
             "base_url": base_url,
             "model": model,
             "api_key": api_key,
             "timeout": float(settings.get("timeout", 60)),
+            "max_tokens": int(settings["max_tokens"]) if settings.get("max_tokens") else None,
         }
 
     @staticmethod
     def build_model(settings: dict[str, Any]) -> Model:
         """
-        Create a model on an OpenAI-compatible server (LM Studio, OpenAI, ...).
+        Create a model on an OpenAI-compatible server (LM Studio, OpenAI, ...), limited to the
+        profile's max_tokens per reply when it sets one.
         Args:
             settings: A resolved profile, as returned by `resolve`.
         Returns:
@@ -118,4 +123,19 @@ class ModelProfiles:
         """
         http_client = httpx2.AsyncClient(timeout=settings["timeout"])
         provider = OpenAIProvider(base_url=settings["base_url"], api_key=settings["api_key"], http_client=http_client)
-        return OpenAIChatModel(settings["model"], provider=provider)
+        limit = ModelSettings(max_tokens=settings["max_tokens"]) if settings.get("max_tokens") else None
+        return OpenAIChatModel(settings["model"], provider=provider, settings=limit)
+
+    @staticmethod
+    def out_of_tokens(settings: dict[str, Any]) -> str:
+        """
+        What to tell the user when a reply hit the profile's max_tokens (the same in all three agents).
+        Args:
+            settings: The resolved profile.
+        Returns:
+            str: The message.
+        """
+        limit = f"{settings['max_tokens']:,}" if settings.get("max_tokens") else "the server's limit of"
+        return (f"The model ran out of tokens: it may use {limit} tokens per reply, thinking included "
+                f"(max_tokens in the '{settings.get('profile')}' profile, context/models.json). Raise it, or ask "
+                f"for a smaller step.")

@@ -82,8 +82,8 @@ class ModelProfiles:
             model: Overrides the profile's model.
             base_url: Overrides the profile's base URL.
         Returns:
-            dict[str, Any]: name, base_url, model, api_key, timeout and error_hints, as `MCPAgent`
-                expects.
+            dict[str, Any]: profile (its name), name, base_url, model, api_key, timeout, error_hints
+                and max_tokens (None when the profile sets none), as `MCPAgent` expects.
         Raises:
             ValueError: If the profile does not exist, lacks base_url or model, or its API key is not set.
         """
@@ -103,10 +103,26 @@ class ModelProfiles:
         model = model or os.environ.get(settings.get("model_env", "")) \
             or (settings.get("model_auto") and ModelProfiles.loaded_model(base_url, api_key)) or settings["model"]
         return {
+            "profile": name,
             "name": settings.get("name", name),
             "base_url": base_url,
             "model": model,
             "api_key": api_key,
             "timeout": float(settings.get("timeout", 60)),
             "error_hints": settings.get("error_hints"),
+            "max_tokens": int(settings["max_tokens"]) if settings.get("max_tokens") else None,
         }
+
+    @staticmethod
+    def out_of_tokens(settings: dict[str, Any]) -> str:
+        """
+        What to tell the user when a reply hit the profile's max_tokens (the same in all three agents).
+        Args:
+            settings: The resolved profile.
+        Returns:
+            str: The message.
+        """
+        limit = f"{settings['max_tokens']:,}" if settings.get("max_tokens") else "the server's limit of"
+        return (f"The model ran out of tokens: it may use {limit} tokens per reply, thinking included "
+                f"(max_tokens in the '{settings.get('profile')}' profile, context/models.json). Raise it, or ask "
+                f"for a smaller step.")
