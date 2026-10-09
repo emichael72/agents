@@ -119,3 +119,56 @@ class ShellConfigTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NetworkTests(unittest.TestCase):
+    """Only curl and wget reach the network, and only when the caller allows it (the agents do, the gate does not)."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.folder = Path(self.temp.name)
+        (self.folder / "proj").mkdir()
+        self.paths = self.folder / "paths.json"
+        self.paths.write_text(json.dumps({"paths": {"proj": {"path": str(self.folder / "proj"), "access": "rwx"}}}))
+        self.commands = {"curl": {"about": "fetch a URL", "network": True}, "head": {"about": "first lines"},
+                         "ls": {"about": "list"}}
+
+    def sandbox_of(self, command: str, allow_network: bool) -> list[str]:
+        """
+        Run a command line with the sandbox stubbed out, and return the sandbox's arguments.
+        Args:
+            command: The command line.
+            allow_network: What the caller allows (SHELL_NETWORK).
+        Returns:
+            list[str]: The bwrap command line it would have run.
+        """
+        shell = Shell(FsGate.load(self.paths), dict(self.commands), allow_network=allow_network)
+        with patch("tools.shell.shell.subprocess.run") as run:
+            run.return_value.stdout, run.return_value.returncode = "", 0
+            shell.run("proj", command)
+        return run.call_args.args[0]
+
+    def test_a_network_command_gets_the_network_only_when_allowed(self):
+        allowed = self.sandbox_of("curl -sS https://example.com | head -2", allow_network=True)
+        self.assertEqual(allowed[1:3], ["--unshare-all", "--share-net"])  # Every other namespace stays private
+        self.assertIn("/etc/resolv.conf", allowed)  # Name lookup works
+        for command, allow in (("curl -sS https://example.com", False), ("ls | head -2", True)):
+            with self.subTest(command=command, allow=allow):
+                offline = self.sandbox_of(command, allow_network=allow)
+                self.assertNotIn("--share-net", offline)
+                self.assertNotIn("/etc/resolv.conf", offline)
+
+    def test_the_shipped_settings(self):
+        shipped = Shell.load_commands()
+        self.assertEqual(sorted(name for name, entry in shipped.items() if entry.get("network")), ["curl", "wget"])
+        manifest = json.loads((Path(__file__).resolve().parents[1] / "tool.json").read_text())
+        self.assertEqual(manifest["env"], {"SHELL_NETWORK": "1"})  # The agents' shell tool allows it
+
+    def test_the_pull_request_gate_builds_offline(self):
+        from gatekeepers.pr.changes import ChangeInspector
+        (self.folder / "proj" / "Makefile").write_text("all:\n\ttrue\n")
+        with patch.dict(os.environ, {"SHELL_NETWORK": "1"}), patch("gatekeepers.pr.changes.subprocess.run") as run:
+            run.return_value.stdout, run.return_value.stderr, run.return_value.returncode = "", "", 0
+            ChangeInspector(lambda *_: "", "").check_build(self.folder / "proj")
+        self.assertNotIn("SHELL_NETWORK", run.call_args.kwargs["env"])

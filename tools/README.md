@@ -29,7 +29,7 @@ file inside the configured core_dump checkout.
 `r` allows reading, `w` allows writing, and `x` allows running programs and Makefiles. Subfolders can have different
 permissions. Tools resolve paths before checking them, including parent references and symbolic links.
 
-The [file-system gate](../gatekeepers/README.md) checks access. The shell adds a bubblewrap sandbox with no network.
+The [file-system gate](../gatekeepers/README.md) checks access. The shell adds a bubblewrap sandbox with no network, except for `curl` and `wget` when an agent runs them.
 Other tools run as the current user and apply their own checks; there is no single sandbox around every tool.
 
 ## Add a tool
