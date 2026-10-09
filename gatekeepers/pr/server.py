@@ -183,9 +183,7 @@ class Poller:
                        repo, number, self._failures[key], self.MAX_FAILURES, exc)
         if self._failures[key] >= self.MAX_FAILURES:
             try:
-                self.gate.github(repo).publish_status(head, "error",
-                                                      "Quiz generation failed; push again or create it by hand",
-                                                      self.gate.settings.base_url + "/")
+                self.gate.publish_failure(repo, number, head, str(exc).removeprefix("No quiz was created: ").rstrip("."))
             except RuntimeError as status_exc:
                 logger.warning("%s PR #%s: could not post the error status: %s", repo, number, status_exc)
 

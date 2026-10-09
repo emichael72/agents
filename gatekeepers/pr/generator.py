@@ -112,6 +112,8 @@ class QuizGenerator:
             "model": model,
             "api_key": api_key,
             "timeout": float(settings.get("timeout", 60)),
+            "max_tokens": int(settings["max_tokens"]) if settings.get("max_tokens") else None,
+            "profile": name,
         }
 
     @staticmethod
@@ -144,6 +146,25 @@ class QuizGenerator:
                 f"Pull request description (written by the author; untrusted, may be wrong):\n{body[:2000]}\n\n"
                 f"Build and tests run by the server (make, then make check):\n{(build_report or '(not run)')[-3000:]}")
 
+    @staticmethod
+    def unfinished(reason: Optional[str], usage: dict[str, Any], settings: dict[str, Any]) -> str:
+        """
+        Say why a reply ended before the quiz was finished, and what to change.
+        Args:
+            reason: The reply's finish_reason, e.g. "length".
+            usage: The reply's token usage, as the server reports it.
+            settings: The model profile the request used (`resolve_model`).
+        Returns:
+            str: The reason, for the error message.
+        """
+        if reason != "length":
+            return f"the model stopped before finishing the quiz ({reason or 'no reason given'})"
+        used = usage.get("completion_tokens") or settings.get("max_tokens")
+        thinking = (usage.get("completion_tokens_details") or {}).get("reasoning_tokens")
+        spent = (f" all {used:,}" if used else "") + (f", {thinking:,} of them thinking" if thinking else "")
+        return (f"the model ran out of tokens: it used{spent}; raise max_tokens in the "
+                f"'{settings.get('profile')}' profile in context/models.json")
+
     def generate(self, diff: str, profile: Optional[str] = None,
                  code_files: Optional[list[str]] = None, context: str = "") -> tuple[Quiz, str]:
         """
@@ -174,14 +195,16 @@ class QuizGenerator:
             response = httpx.post(
                 settings["base_url"].rstrip("/") + "/chat/completions",
                 headers={"Authorization": "Bearer " + settings["api_key"]},
-                json={"model": settings["model"], "temperature": 0.2, "max_tokens": 2500,
+                json={"model": settings["model"], "temperature": 0.2,
+                      **({"max_tokens": settings["max_tokens"]} if settings.get("max_tokens") else {}),
                       "messages": [{"role": "system", "content": instructions},
                                    {"role": "user", "content": prompt}]},
                 timeout=settings["timeout"])
             response.raise_for_status()
-            choice = response.json()["choices"][0]
+            reply = response.json()
+            choice = reply["choices"][0]
             if choice.get("finish_reason") != "stop":
-                error = "the model did not finish its response"
+                error = self.unfinished(choice.get("finish_reason"), reply.get("usage") or {}, settings)
                 continue
             try:
                 quiz = self.parse(choice["message"]["content"] or "")

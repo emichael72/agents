@@ -8,7 +8,8 @@
     "projects: per folder name, QUIZ_BUILD_COMMAND, QUIZ_TEST_TARGET or QUIZ_FAIL_ON_WARNINGS",
     "that replace the shared ones for that project, e.g. {\"core_dump\": {\"QUIZ_TEST_TARGET\": \"test\"}}.",
     "QUIZ_MODEL_ATTEMPTS: maximum model replies per quiz, including the initial reply.",
-    "An invalid or unfinished reply is retried within this limit; 2 means one retry."
+    "An invalid or unfinished reply is retried within this limit; 2 means one retry.",
+    "How many tokens one quiz reply may use is the model profile's max_tokens (context/models.json)."
   ],
   "settings": {
     "QUIZ_DEVELOPER": "",

@@ -250,20 +250,51 @@ class QuizGate:
             row: The quiz row.
             failed_attempt: The developer just failed the quiz.
         """
+        self.post_comment(row["repo"], row["pr"], self.comment_body(row, failed_attempt))
+
+    def post_comment(self, repo: str, number: int, body: str) -> None:
+        """
+        Post the gate's one comment on a pull request, or replace it, unless QUIZ_PR_COMMENT is off.
+        A failure is logged, never raised.
+        Args:
+            repo: owner/name.
+            number: The pull request.
+            body: The comment, starting with COMMENT_MARKER.
+        """
         if not self.settings.pr_comment:
             return
-        body = self.comment_body(row, failed_attempt)
-        github = self.github(row["repo"])
+        github = self.github(repo)
         try:
-            mine = [c for c in github.comments(row["pr"]) if (c.get("body") or "").startswith(self.COMMENT_MARKER)]
+            mine = [c for c in github.comments(number) if (c.get("body") or "").startswith(self.COMMENT_MARKER)]
             if mine and mine[-1]["body"] == body:
                 return
             if mine:
                 github.edit_comment(mine[-1]["id"], body)
             else:
-                github.add_comment(row["pr"], body)
+                github.add_comment(number, body)
         except (RuntimeError, ValueError, KeyError, TypeError) as exc:
-            logging.getLogger("pr_gate").warning("PR #%s: could not post the gate's comment: %s", row["pr"], exc)
+            logging.getLogger("pr_gate").warning("PR #%s: could not post the gate's comment: %s", number, exc)
+
+    def publish_failure(self, repo: str, number: int, head: str, reason: str) -> None:
+        """
+        Tell a pull request that its quiz could not be created, and why: the gate's comment, and an
+        error status whose description gives the reason. A new commit, or the create command, tries again.
+        Args:
+            repo: owner/name.
+            number: The pull request.
+            head: The revision the quiz was for.
+            reason: Why generation failed.
+        Raises:
+            RuntimeError: If the status cannot be posted.
+        """
+        command = f"bash gatekeepers/pr/pr_gate.sh create {number} --project {self.project(repo).name}"
+        self.post_comment(repo, number, (
+            f"{self.COMMENT_MARKER}\n**Pull Request Gate** · revision `{head[:7]}`\n\n"
+            f"❌ The developer quiz could not be created: {reason}.\n\n"
+            f"Push a new commit to try again, or have the gate's operator run `{command}`.\n"))
+        description = f"Quiz not created: {reason}"
+        self.github(repo).publish_status(head, "error", description if len(description) <= 140 else description[:139] + "…",
+                                         self.settings.base_url + "/")
 
     def publish(self, row: dict[str, Any], failed_attempt: bool = False) -> None:
         """

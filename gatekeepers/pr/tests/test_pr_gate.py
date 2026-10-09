@@ -429,6 +429,37 @@ class ModelTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 QuizGenerator().generate("a small diff", "local")
 
+    def test_a_reply_cut_off_by_the_token_limit_says_so(self):
+        settings = {"name": "Local", "base_url": "http://x/v1", "model": "m", "api_key": "k", "timeout": 5,
+                    "max_tokens": 2500, "profile": "local"}
+        thinking = dict(reply("", "length"), usage={"completion_tokens": 2500,
+                                                    "completion_tokens_details": {"reasoning_tokens": 2499}})
+        with patch.object(QuizGenerator, "resolve_model", return_value=settings), \
+                patch("gatekeepers.pr.generator.httpx.post") as post:
+            post.return_value.json.side_effect = [thinking, thinking]
+            with self.assertRaisesRegex(ValueError, r"No quiz was created: the model ran out of tokens: it used all "
+                                                    r"2,500, 2,499 of them thinking; raise max_tokens in the 'local' "
+                                                    r"profile in context/models.json\.$"):
+                QuizGenerator().generate("a small diff", "local")
+            self.assertEqual(post.call_args.kwargs["json"]["max_tokens"], 2500)  # The profile's max_tokens
+            post.return_value.json.side_effect = [reply("", "length"), reply("", "content_filter")]
+            with self.assertRaisesRegex(ValueError, r"stopped before finishing the quiz \(content_filter\)"):
+                QuizGenerator().generate("a small diff", "local")
+            post.return_value.json.side_effect = [reply(json.dumps(FIXTURE))]
+            QuizGenerator().generate("a small diff", "local")
+        with patch.object(QuizGenerator, "resolve_model", return_value={**settings, "max_tokens": None}), \
+                patch("gatekeepers.pr.generator.httpx.post") as post:
+            post.return_value.json.return_value = reply(json.dumps(FIXTURE))
+            QuizGenerator().generate("a small diff", "local")
+            self.assertNotIn("max_tokens", post.call_args.kwargs["json"])  # No limit set: the server's applies
+
+    def test_the_shipped_profiles_leave_room_to_think(self):
+        for profile in ("local", "openai"):
+            with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key-not-real", "LOCAL_LLM_MODEL": "m"}):
+                settings = QuizGenerator().resolve_model(profile)
+            self.assertGreaterEqual(settings["max_tokens"], 8000, profile)  # context/models.json
+            self.assertEqual(settings["profile"], profile)
+
     def test_the_pull_request_and_test_output_reach_the_quiz_writer(self):
         settings = {"name": "Local", "base_url": "http://x/v1", "model": "m", "api_key": "k", "timeout": 5}
         context = QuizGenerator.context({"title": "Add -w", "body": "Works with -dpw."}, "$ make && make check: succeeded\n./core_dump -d")
@@ -482,11 +513,26 @@ class PollerTests(unittest.TestCase):
 
     def test_failing_revision_is_retried_then_marked_error(self):
         poller = Poller(self.gate)
-        with patch.object(self.gate.generator, "generate", side_effect=ValueError("bad reply")) as generate:
+        with patch.object(self.gate.generator, "generate", side_effect=ValueError("No quiz was created: bad reply.")) as generate:
             for _ in range(Poller.MAX_FAILURES + 2):
                 self.assertEqual(poller.poll_once(), [])
         self.assertEqual(generate.call_count, Poller.MAX_FAILURES)
-        self.assertEqual(self.mock_gh.call_args.kwargs["payload"]["state"], "error")
+        payload = self.mock_gh.call_args.kwargs["payload"]
+        self.assertEqual((payload["state"], payload["description"]), ("error", "Quiz not created: bad reply"))
+
+    def test_a_failed_generation_tells_the_pull_request_why(self):
+        self.gate.settings = replace(self.gate.settings, pr_comment=True)
+        reason = ("the model ran out of tokens: it used all 2,500, 2,499 of them thinking; raise max_tokens in the "
+                  "'local' profile in context/models.json")
+        with patch.object(GitHub, "comments", return_value=[]), patch.object(GitHub, "add_comment") as add_comment:
+            self.gate.publish_failure(REPO, 1, "a" * 40, reason)
+        body = add_comment.call_args.args[1]
+        self.assertTrue(body.startswith("<!-- pr_gate -->\n**Pull Request Gate** · revision `aaaaaaa`"))
+        self.assertIn(f"❌ The developer quiz could not be created: {reason}.", body)
+        self.assertIn(f"pr_gate.sh create 1 --project {self.gate.project(REPO).name}", body)
+        description = self.mock_gh.call_args.kwargs["payload"]["description"]
+        self.assertEqual(len(description), 140)  # GitHub's limit for a status description
+        self.assertTrue(description.startswith("Quiz not created: the model ran out of tokens") and description.endswith("…"))
 
 
 class ChangesTests(unittest.TestCase):

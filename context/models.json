@@ -8,7 +8,10 @@
     "The key comes from the variable named by api_key_env; api_key is only a fallback for",
     "servers that need no real key.",
     "error_hints: \"openai\" gives OpenAI-specific advice (key, quota, billing) when a request",
-    "fails; without it, errors point at the server and the model instead."
+    "fails; without it, errors point at the server and the model instead.",
+    "max_tokens: the most tokens one reply may use, thinking included: a reasoning model spends",
+    "thousands thinking before it answers. Used by the pull request gate's quiz writer; the agents",
+    "do not limit their replies. Without it, the server's own limit applies."
   ],
   "default": "local",
   "profiles": {
@@ -16,11 +19,12 @@
       "name": "Local model server",
       "base_url": "http://boba:1234/v1",
       "base_url_env": "LOCAL_LLM_BASE_URL",
-      "model": "qwen/qwen3-coder-next:2",
+      "model": "qwen/qwen3.6-35b-a3b",
       "model_env": "LOCAL_LLM_MODEL",
       "model_auto": true,
       "api_key_env": "LOCAL_LLM_API_KEY",
       "api_key": "lm-studio",
+      "max_tokens": 16000,
       "timeout": 300
     },
     "openai": {
@@ -30,6 +34,7 @@
       "model_env": "OPENAI_MODEL",
       "api_key_env": "OPENAI_API_KEY",
       "error_hints": "openai",
+      "max_tokens": 16000,
       "timeout": 60
     }
   }
