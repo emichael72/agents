@@ -42,7 +42,7 @@ const MAX_STEPS = MAX_TOOL_CALLS ? MAX_TOOL_CALLS + 1 : 0;
 const gray = (text: string) => styleText('gray', text); // Everything except the model's answer
 
 type Profile = {
-  name?: string; base_url: string; base_url_env?: string; model: string; model_env?: string; model_auto?: boolean;
+  name?: string; base_url: string; base_url_env?: string; model?: string; model_env?: string; model_auto?: boolean;
   api_key_env?: string; api_key?: string; timeout?: number; max_tokens?: number;
 };
 type Models = { default?: string; profiles?: Record<string, Profile> };
@@ -77,7 +77,8 @@ export function resolveModel(models: Models, profile?: string,
   if (!settings) {
     throw new Error(`Unknown model profile '${name}' (available: ${Object.keys(profiles).join(', ') || 'none'}). Check the models file.`);
   }
-  const missing = (['base_url', 'model'] as const).filter((key) => !settings[key]);
+  // With model_auto the model may be left out: the one loaded on the server is used
+  const missing = (settings.model_auto ? ['base_url'] as const : ['base_url', 'model'] as const).filter((key) => !settings[key]);
   if (missing.length) throw new Error(`Model profile '${name}' is missing ${missing.join(', ')}.`);
   const env = (variable?: string) => (variable ? process.env[variable] : undefined) || undefined;
   const apiKey = (env(settings.api_key_env) ?? settings.api_key ?? '').trim();
@@ -86,7 +87,7 @@ export function resolveModel(models: Models, profile?: string,
     profile: name,
     name: settings.name ?? name,
     baseURL: overrides.baseURL || env(settings.base_url_env) || settings.base_url,
-    model: overrides.model || env(settings.model_env) || settings.model,
+    model: overrides.model || env(settings.model_env) || settings.model || '',
     apiKey,
     timeout: settings.timeout ?? 60,
     maxTokens: settings.max_tokens || undefined,
@@ -712,6 +713,11 @@ export async function main(): Promise<number> {
     const profile = values.profile ?? (values.local ? 'local' : values.openai ? 'openai' : undefined);
     const settings = resolveModel(loadModels(), profile, { model: values.model, baseURL: values['base-url'] });
     if (settings.auto) settings.model = (await loadedModel(settings.baseURL, settings.apiKey)) ?? settings.model;
+    if (!settings.model) { // Never ask the server to load a model it has not loaded
+      const variable = loadModels().profiles?.[settings.profile]?.model_env ?? 'model in the profile';
+      throw new Error(`No model is loaded on ${settings.baseURL}, and the '${settings.profile}' profile names none ` +
+        `(it uses the loaded model): load one in LM Studio, or name one with --model or ${variable}.`);
+    }
     const parallel = OWN.parallel_tool_calls ?? true;
     const agent = buildAgent(buildModel(settings), localTools, parallel, settings.timeout, settings.maxTokens);
     const toolCount = `${Object.keys(localTools).length} tools`;

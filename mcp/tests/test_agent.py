@@ -392,9 +392,12 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
             for name in ('LOCAL_LLM_BASE_URL', 'LOCAL_LLM_MODEL', 'LOCAL_LLM_API_KEY'):
                 os.environ.pop(name, None)
             with patch.object(ModelProfiles, 'loaded_model', return_value=None):  # No loaded model reported
-                local = profiles.resolve()  # "default": "local"
-            fallback = profiles.models['profiles']['local']  # Whatever the file names, so editing it never breaks this test
-            self.assertEqual((local['base_url'], local['model']), (fallback['base_url'], fallback['model']))
+                with self.assertRaisesRegex(ValueError, "No model is loaded on http://boba:1234/v1, and the 'local' "
+                                                        "profile names none .*--model or LOCAL_LLM_MODEL"):
+                    profiles.resolve()  # "default": "local", which never makes the server load a model
+            with patch.object(ModelProfiles, 'loaded_model', return_value='qwen/loaded-now'):
+                local = profiles.resolve()
+            self.assertEqual((local['base_url'], local['model']), ('http://boba:1234/v1', 'qwen/loaded-now'))
             with patch.object(ModelProfiles, 'loaded_model', return_value='qwen/loaded-now'):
                 self.assertEqual(profiles.resolve()['model'], 'qwen/loaded-now')  # model_auto
                 self.assertEqual(profiles.resolve(model='explicit')['model'], 'explicit')
@@ -460,7 +463,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
             return web.json_response({"status": "completed", "output": [message('Hi')]})
 
         self.model_handler = respond
-        settings = self.shipped_models().resolve('local', base_url=self.model_url)
+        settings = self.shipped_models().resolve('local', base_url=self.model_url, model='qwen/test')  # No LM Studio here
         local = MCPAgent(self.agent.mcp, base_url=settings['base_url'], model=settings['model'],
                            api_key=settings['api_key'], provider=settings['name'])
         local.tools = self.agent.tools

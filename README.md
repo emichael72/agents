@@ -52,7 +52,7 @@ it.
 ## Models and settings
 
 [context/models.json](context/models.json) holds the profiles shared by all three agents. The local profile points to LM
-Studio at `http://boba:1234/v1` and can discover the loaded model. The checked-in fallback is `qwen/qwen3-coder-next:2`.
+Studio at `http://boba:1234/v1` and can discover the loaded model. It names no model of its own, so it never makes LM Studio load one: with nothing loaded, the agent says so and stops.
 
 Use `--profile NAME`, `--model`, or `--base-url` to change a run. The `--openai` shortcut uses the OpenAI profile and
 needs `OPENAI_API_KEY` in the environment. MCPAgent needs a provider with a Responses endpoint; Pydantic and Vercel use

@@ -151,12 +151,14 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key-not-real"}):
             for name in ("LOCAL_LLM_BASE_URL", "LOCAL_LLM_MODEL", "LOCAL_LLM_API_KEY"):
                 os.environ.pop(name, None)
-            with patch.object(ModelProfiles, "loaded_model", return_value=None):  # The server reports no loaded model
-                local = profiles.resolve()  # "default": "local"
-            fallback = profiles.models["profiles"]["local"]  # Whatever the file names, so editing it never breaks this test
-            self.assertEqual((local["base_url"], local["model"]), (fallback["base_url"], fallback["model"]))
+            with patch.object(ModelProfiles, "loaded_model", return_value=None), \
+                    self.assertRaisesRegex(ValueError, "No model is loaded on http://boba:1234/v1, and the 'local' profile "
+                                                       "names none .*: load one in LM Studio, or name one with --model or "
+                                                       "LOCAL_LLM_MODEL"):
+                profiles.resolve()  # "default": "local", which never makes the server load a model
             with patch.object(ModelProfiles, "loaded_model", return_value="qwen/loaded-now") as asked:
-                self.assertEqual(profiles.resolve()["model"], "qwen/loaded-now")  # model_auto
+                local = profiles.resolve()
+                self.assertEqual((local["base_url"], local["model"]), ("http://boba:1234/v1", "qwen/loaded-now"))  # model_auto
                 self.assertEqual(profiles.resolve(model="explicit")["model"], "explicit")
             asked.assert_called_once_with("http://boba:1234/v1", "lm-studio")
             self.assertEqual(local["api_key"], "lm-studio")  # the OpenAI key is never used for another server

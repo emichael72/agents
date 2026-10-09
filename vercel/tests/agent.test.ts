@@ -196,8 +196,8 @@ test('model profiles come from the shared models file', () => {
     for (const name of ['LOCAL_LLM_BASE_URL', 'LOCAL_LLM_MODEL', 'LOCAL_LLM_API_KEY']) delete process.env[name];
     const models = loadModels();
     const local = resolveModel(models); // "default": "local"
-    const fallback = models.profiles!.local; // Whatever the file names, so editing it never breaks this test
-    assert.deepEqual([local.baseURL, local.model], [fallback.base_url, fallback.model]);
+    // No model named: main() uses the loaded one, and stops if none is loaded rather than load one
+    assert.deepEqual([local.baseURL, local.model], ['http://boba:1234/v1', '']);
     assert.equal(local.auto, true); // model_auto: main() asks the server for its loaded model
     assert.equal(local.apiKey, 'lm-studio'); // the OpenAI key is never used for another server
     process.env.LOCAL_LLM_MODEL = 'from-env';

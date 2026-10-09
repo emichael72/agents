@@ -97,7 +97,9 @@ class QuizGenerator:
         if not isinstance(settings, dict):
             available = ", ".join(profiles) or "none"
             raise ValueError(f"Unknown model profile '{name}' (available: {available}). Check the models file.")
-        missing = [key for key in ("base_url", "model") if not settings.get(key)]
+        # With model_auto the model may be left out: the one loaded on the server is used
+        required = ("base_url",) if settings.get("model_auto") else ("base_url", "model")
+        missing = [key for key in required if not settings.get(key)]
         if missing:
             raise ValueError(f"Model profile '{name}' is missing {', '.join(missing)}.")
         api_key = (os.environ.get(settings.get("api_key_env", ""), "") or settings.get("api_key", "")).strip()
@@ -105,7 +107,10 @@ class QuizGenerator:
             raise ValueError(f"Set {settings.get('api_key_env', 'an API key')} in the environment for the '{name}' profile.")
         base_url = os.environ.get(settings.get("base_url_env", "")) or settings["base_url"]
         model = os.environ.get(settings.get("model_env", "")) \
-            or (settings.get("model_auto") and self.loaded_model(base_url, api_key)) or settings["model"]
+            or (settings.get("model_auto") and self.loaded_model(base_url, api_key)) or settings.get("model")
+        if not model:  # Never ask the server to load a model it has not loaded
+            raise ValueError(f"No model is loaded on {base_url}, and the '{name}' profile names none (it uses "
+                             f"the loaded model): load one in LM Studio, or name one with {settings.get('model_env') or 'model in the profile'}.")
         return {
             "name": settings.get("name", name),
             "base_url": base_url,
