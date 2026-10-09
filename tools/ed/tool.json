@@ -1,10 +1,12 @@
 {
   "description": [
     "Edits a text file inside the allowed folders with write access.",
-    "action replace (the default) swaps exact text old for new (old must match once, or set all);",
+    "action replace (the default) swaps text old for new (old must match once, or set all;",
+    "differences in spacing, quotes or dashes are evened out, and if old is not found the closest",
+    "lines are shown, numbered, to copy from);",
     "lines replaces lines start..end with new (empty new deletes them;",
     "take the numbers from cat -n in the shell);",
-    "insert puts new after line (0 = top);",
+    "insert puts new after line (0 = top), or after or before the line holding the given text;",
     "write creates or overwrites the whole file with new.",
     "Shows the changed lines afterwards.",
     "action hex only reads: it shows length bytes of any file (binary too) from offset",
@@ -22,6 +24,8 @@
     {"name": "start", "type": "integer", "description": "lines: first line to replace (1-based)", "style": "flag", "required": false},
     {"name": "end", "type": "integer", "description": "lines: last line to replace (default: start)", "style": "flag", "required": false},
     {"name": "line", "type": "integer", "description": "insert: the line to insert after; 0 inserts at the top", "style": "flag", "required": false},
+    {"name": "after", "type": "string", "description": "insert: instead of line, text of the line to insert after, e.g. a heading such as ## Layout (it must be on one line only)", "style": "flag", "required": false},
+    {"name": "before", "type": "string", "description": "insert: instead of line, text of the line to insert before", "style": "flag", "required": false},
     {"name": "offset", "type": "integer", "description": "hex: the first byte to show (default 0); negative counts from the end, e.g. -64 for the last 64 bytes", "style": "flag", "required": false},
     {"name": "length", "type": "integer", "description": "hex: how many bytes to show (default 256, at most 4096)", "style": "flag", "required": false}
   ],

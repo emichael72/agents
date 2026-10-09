@@ -26,6 +26,7 @@ Description:
 """
 
 import argparse
+import difflib
 import os
 import sys
 import tempfile
@@ -46,7 +47,11 @@ class Editor:
     Edits and shows files in the allowed folders, as the file-system gate permits.
     """
 
-    VERSION = "1.0.0"
+    VERSION = "1.1.0"
+    # What a model often types differently from the file: curly quotes, dashes, a non-breaking space
+    LOOKALIKES = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2013": "-",
+                                "\u2014": "-", "\u00a0": " "})
+    HINT_MAX_LINES = 5000  # Longer files get no closest-text hint: it compares the text with every window
     ACTIONS = ("replace", "lines", "insert", "write", "hex")
     MAX_BYTES = 2_000_000
     CONTEXT = 3  # Lines shown around a change
@@ -205,7 +210,8 @@ class Editor:
 
     def edit(self, path: str, action: str = "replace", old: Optional[str] = None, new: Optional[str] = None,
                  replace_all: bool = False, start: Optional[int] = None, end: Optional[int] = None,
-                 line: Optional[int] = None, offset: Optional[int] = None, length: Optional[int] = None) -> str:
+                 line: Optional[int] = None, offset: Optional[int] = None, length: Optional[int] = None,
+                 after: Optional[str] = None, before: Optional[str] = None) -> str:
         """
         Apply one edit and describe it, or with hex, show part of a file.
         Args:
@@ -217,6 +223,9 @@ class Editor:
             start: lines: the first line to replace.
             end: lines: the last line to replace (default: start).
             line: insert: the line to insert after (0 for the top).
+            after: insert: instead of line, the text of the line to insert after (part of it is enough,
+                if only one line has it).
+            before: insert: instead of line, the text of the line to insert before.
             offset: hex: the first byte; negative counts from the end.
             length: hex: how many bytes.
         Returns:
@@ -242,9 +251,13 @@ class Editor:
             if not old:
                 raise ValueError("replace needs old: the exact text to replace.")
             count = text.count(old)
+            tolerant = None
             if count == 0:
-                raise ValueError(f"old was not found in '{shown}'; it must match exactly, including spaces and "
-                                 f"indentation. Show the file with cat -n in the shell and copy the text from it.")
+                tolerant = self.tolerant_match(text, old, shown)
+                if tolerant is None:
+                    raise ValueError(f"old was not found in '{shown}', not even with spacing, quotes and dashes "
+                                     f"evened out.{self.closest(text, old)} Copy old from the file (cat -n in the "
+                                     f"shell), or replace those lines with action lines (start and end).")
             if count > 1 and not replace_all:
                 offsets, at = [], text.find(old)
                 while at != -1:
@@ -252,10 +265,17 @@ class Editor:
                     at = text.find(old, at + 1)
                 raise ValueError(f"old matches {count} places in '{shown}' (lines {', '.join(map(str, offsets))}); "
                                  f"add surrounding text to make it unique, or set all to replace every one.")
-            first = self.line_number(text, text.find(old))
-            result = text.replace(old, new) if replace_all else text.replace(old, new, 1)
-            last = first + new.count("\n")
-            summary = f"replaced {count if replace_all else 1} occurrence(s)"
+            if tolerant is not None:
+                start_at, end_at, evened = tolerant
+                first = self.line_number(text, start_at)
+                result = text[:start_at] + new + text[end_at:]
+                last = first + new.count("\n")
+                summary = f"replaced 1 occurrence, matched with {evened} evened out"
+            else:
+                first = self.line_number(text, text.find(old))
+                result = text.replace(old, new) if replace_all else text.replace(old, new, 1)
+                last = first + new.count("\n")
+                summary = f"replaced {count if replace_all else 1} occurrence(s)"
         else:
             lines = text.splitlines(keepends=True)
             if lines and not lines[-1].endswith(("\n", "\r")):
@@ -270,8 +290,11 @@ class Editor:
                 summary = (f"replaced lines {start}-{end} with {len(added)} line(s)" if added
                            else f"deleted lines {start}-{end}")
             else:
+                if line is None and (after or before):
+                    line = self.anchor_line(lines, after or before, shown) - (0 if after else 1)
                 if line is None or not 0 <= line <= len(lines):
-                    raise ValueError(f"insert needs line from 0 (the top) to {len(lines)} (the end).")
+                    raise ValueError(f"insert needs line from 0 (the top) to {len(lines)} (the end), or after or before: "
+                                     f"the text of a line to insert next to.")
                 added = self.as_lines(new, newline)
                 if not added:
                     raise ValueError("insert needs new: the text to insert.")
@@ -284,6 +307,131 @@ class Editor:
             return f"{shown}: no change (the new text is the same)"
         self.write_text(target, result)
         return f"{shown}: {summary}\n{self.snippet(result, first, last)}"
+
+    @classmethod
+    def normalized(cls, text: str) -> tuple[str, list[int]]:
+        """
+        Text with what a model often types differently evened out: curly quotes and dashes as plain
+        ones, a run of spaces and tabs as one space, no spaces at a line's end, CRLF as LF.
+        Args:
+            text: The text.
+        Returns:
+            tuple[str, list[int]]: The evened-out text, and for each of its characters the offset in text it
+                came from, plus len(text) at the end.
+        """
+        out: list[str] = []
+        where: list[int] = []
+        i, n = 0, len(text)
+        while i < n:
+            char = text[i]
+            if char in " \t":
+                j = i
+                while j < n and text[j] in " \t":
+                    j += 1
+                if j < n and text[j] not in "\r\n":  # Spaces at a line's end are dropped
+                    out.append(" ")
+                    where.append(i)
+                i = j
+            elif char == "\r" and i + 1 < n and text[i + 1] == "\n":
+                i += 1  # CRLF counts as LF
+            else:
+                out.append(char.translate(cls.LOOKALIKES))
+                where.append(i)
+                i += 1
+        where.append(n)
+        return "".join(out), where
+
+    def tolerant_match(self, text: str, old: str, shown: str) -> Optional[tuple[int, int, str]]:
+        """
+        Find old in text when it differs only in spacing, quotes or dashes, as a model's copy often does.
+        Args:
+            text: The file.
+            old: The text to find.
+            shown: The file's path, for messages.
+        Returns:
+            Optional[tuple[int, int, str]]: Where the one match starts and ends in text, and what was evened
+                out; None when there is no such match.
+        Raises:
+            ValueError: If old matches more than one place this way.
+        """
+        evened_text, where = self.normalized(text)
+        evened_old, _ = self.normalized(old)
+        if not evened_old.strip() or evened_text.count(evened_old) == 0:
+            return None
+        if evened_text.count(evened_old) > 1:
+            starts, at = [], evened_text.find(evened_old)
+            while at != -1:
+                starts.append(self.line_number(text, where[at]))
+                at = evened_text.find(evened_old, at + 1)
+            raise ValueError(f"old was not found exactly, and with spacing, quotes and dashes evened out it matches "
+                             f"{len(starts)} places in '{shown}' (lines {', '.join(map(str, starts))}); copy old from "
+                             f"the file, with enough surrounding text to make it unique.")
+        at = evened_text.find(evened_old)
+        start, end = where[at], where[at + len(evened_old) - 1] + 1
+        if evened_old.endswith(" "):  # It ended in a run of spaces: take the whole run
+            while end < len(text) and text[end] in " \t":
+                end += 1
+        span = text[start:end]
+        evened = [what for what, differs in (
+            ("quotes and dashes", span.translate(self.LOOKALIKES) != span or old.translate(self.LOOKALIKES) != old),
+            ("spacing", " ".join(span.translate(self.LOOKALIKES).split()) == " ".join(old.translate(self.LOOKALIKES).split())
+             and span.translate(self.LOOKALIKES) != old.translate(self.LOOKALIKES))) if differs]
+        return start, end, " and ".join(evened) or "spacing"
+
+    def closest(self, text: str, old: str) -> str:
+        """
+        Point at the text that most resembles old, so the next try can copy it.
+        Args:
+            text: The file.
+            old: The text that was not found.
+        Returns:
+            str: " The closest text is lines a-b (N% alike):" and those lines, numbered; "" when nothing is
+                alike enough, or the file is too long to compare.
+        """
+        lines = text.splitlines()
+        wanted = old.strip("\n").splitlines() or [old]
+        if not lines or len(lines) > self.HINT_MAX_LINES:
+            return ""
+        size = min(len(wanted), len(lines))
+        target = "\n".join(line.strip() for line in wanted)
+        best_ratio, best_at = 0.0, 0
+        for at in range(len(lines) - size + 1):
+            matcher = difflib.SequenceMatcher(None, target, "\n".join(line.strip() for line in lines[at:at + size]),
+                                              autojunk=False)
+            if matcher.real_quick_ratio() <= best_ratio or matcher.quick_ratio() <= best_ratio:
+                continue
+            ratio = matcher.ratio()
+            if ratio > best_ratio:
+                best_ratio, best_at = ratio, at
+        if best_ratio < 0.5:
+            return ""
+        shown = lines[best_at:best_at + min(size, 12)]
+        more = f"\n  ... {size - len(shown)} more lines" if size > len(shown) else ""
+        return (f" The closest text is lines {best_at + 1}-{best_at + size} ({best_ratio:.0%} alike):\n"
+                + "\n".join(f"{best_at + 1 + k:6}  {line}" for k, line in enumerate(shown)) + more + "\n")
+
+    def anchor_line(self, lines: list[str], anchor: str, shown: str) -> int:
+        """
+        Find the one line that holds an anchor's text (spacing, quotes and dashes evened out).
+        Args:
+            lines: The file's lines.
+            anchor: The text to look for.
+            shown: The file's path, for messages.
+        Returns:
+            int: The line's number (1-based).
+        Raises:
+            ValueError: If no line, or more than one, holds it.
+        """
+        wanted = self.normalized(anchor.strip())[0]
+        if not wanted:
+            raise ValueError("after and before need the text of a line.")
+        found = [n for n, line in enumerate(lines, 1) if wanted in self.normalized(line.rstrip("\r\n"))[0]]
+        if not found:
+            raise ValueError(f"No line of '{shown}' holds {anchor.strip()!r}.{self.closest(''.join(lines), anchor)}")
+        if len(found) > 1:
+            raise ValueError(f"{len(found)} lines of '{shown}' hold {anchor.strip()!r} (lines "
+                             f"{', '.join(map(str, found))}); give more of the line's text, or use line.")
+        return found[0]
 
     @classmethod
     def build_parser(cls) -> ToolArgumentParser:
@@ -304,6 +452,8 @@ class Editor:
                             ("offset", "hex: the first byte; negative counts from the end"),
                             ("length", f"hex: how many bytes (default {cls.HEX_LENGTH})")):
             parser.add_argument(f"--{name}", type=int, help=about)
+        parser.add_argument("--after", help="insert: the text of the line to insert after (instead of line)")
+        parser.add_argument("--before", help="insert: the text of the line to insert before (instead of line)")
         return parser
 
     def run(self, args: argparse.Namespace) -> str:
@@ -319,7 +469,7 @@ class Editor:
         if not args.path:
             raise ValueError("Give the file to edit, e.g. core_dump/src/main.c.")
         return self.edit(args.path, args.action, args.old, args.new, args.all, args.start, args.end, args.line,
-                         args.offset, args.length)
+                         args.offset, args.length, args.after, args.before)
 
 
 def main(argv: Optional[list[str]] = None) -> int:
