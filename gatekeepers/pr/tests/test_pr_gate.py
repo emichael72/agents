@@ -372,6 +372,10 @@ class ModelTests(unittest.TestCase):
     def setUp(self):
         self.models = Path(tempfile.mkdtemp()) / "models.json"
         self.models.write_text(json.dumps(MODELS))
+        # These tests are about writing the quiz; the answer check (AnswerCheckTests) is off for them
+        no_check = patch.dict(os.environ, {"QUIZ_VERIFY_ANSWERS": "false"})
+        no_check.start()
+        self.addCleanup(no_check.stop)
 
     def test_settings_come_from_the_manifest_and_the_environment_overrides_them(self):
         manifest = json.loads(SETTINGS_FILE.read_text())["settings"]
@@ -483,6 +487,76 @@ class ModelTests(unittest.TestCase):
                           post.call_args.kwargs["json"]["messages"][1]["content"])
             post.return_value.json.side_effect = [reply(cosmetic)]
             self.assertTrue(QuizGenerator().generate("a small diff", "local", [])[0].cosmetic)
+
+
+class AnswerCheckTests(unittest.TestCase):
+    """A second reading of the quiz keeps only the questions whose answer it confirms."""
+
+    SETTINGS = {"name": "Local", "base_url": "http://x/v1", "model": "m", "api_key": "k", "timeout": 5,
+                "max_tokens": 16000, "profile": "local"}
+    FOUR = {"title": "Tree quiz", "questions": [
+        {"question": f"What does the flip do in case {i}?", "options": ["A", "B", "C", "D"], "correct": i % 4,
+         "explanation": f"Private explanation sentinel {i}"} for i in range(4)]}
+
+    def generate(self, *replies):
+        """
+        Generate a quiz with the answer check on, the model's replies scripted.
+        Args:
+            *replies: The chat completion bodies, in order (the writer's, then the checker's, ...).
+        Returns:
+            tuple: The quiz, and the mock of httpx.post.
+        """
+        with patch.dict(os.environ, {"QUIZ_VERIFY_ANSWERS": "true"}), \
+                patch.object(QuizGenerator, "resolve_model", return_value=self.SETTINGS), \
+                patch("gatekeepers.pr.generator.httpx.post") as post:
+            post.return_value.json.side_effect = list(replies)
+            return QuizGenerator().generate("+    flip_tree(node->left);\n+    free(node);", "local", ["src/tree.c"]), post
+
+    @staticmethod
+    def answers(*picks, evidence="flip_tree(node->left);"):
+        """
+        The checker's reply: one answer per question, each with its quoted evidence.
+        Args:
+            *picks: The answers, in the questions' order.
+            evidence: The quote given with every answer.
+        Returns:
+            dict: A chat completion body.
+        """
+        return reply(json.dumps({"answers": [{"answer": pick, "evidence": evidence} for pick in picks]}))
+
+    def test_only_confirmed_questions_are_kept(self):
+        (quiz, _), post = self.generate(reply(json.dumps(self.FOUR)), self.answers(0, 3, 2, 3))
+        self.assertEqual([q.question for q in quiz.questions],  # Question 2's answer did not hold
+                         [self.FOUR["questions"][i]["question"] for i in (0, 2, 3)])
+        check = post.call_args_list[1].kwargs["json"]["messages"]
+        self.assertEqual(check[0]["content"], QuizGenerator().instructions("verify"))
+        self.assertIn("Question 4: What does the flip do in case 3?\n  0) A\n  1) B", check[1]["content"])
+        self.assertNotIn("sentinel", check[1]["content"])  # The checker sees no explanation
+        self.assertNotIn("correct", check[1]["content"])  # ... and no marked answer
+        self.assertEqual(post.call_args_list[1].kwargs["json"]["temperature"], 0)
+
+    def test_an_answer_whose_evidence_is_not_in_the_diff_is_dropped(self):
+        replies = [reply(json.dumps(self.FOUR)), self.answers(0, 1, 2, 3, evidence="return NULL;  /* invented */")]
+        with self.assertRaisesRegex(ValueError, "confirmed the answers of only 0 of 4 questions"):
+            self.generate(*replies, *replies)
+        (quiz, _), _ = self.generate(reply(json.dumps(self.FOUR)),
+                                     self.answers(0, 1, 2, 3, evidence="+    free(node);\n  flip_tree(node->left);"))
+        self.assertEqual(len(quiz.questions), 3)  # Diff markers and spacing aside, both quoted lines are there
+
+    def test_a_quiz_with_too_few_confirmed_answers_is_tried_again_then_refused(self):
+        wrong = self.answers(0, -1, -1, 3)  # Two of four confirmed
+        with self.assertRaisesRegex(ValueError, "No quiz was created: a second reading confirmed the answers of only "
+                                                "2 of 4 questions"):
+            self.generate(reply(json.dumps(self.FOUR)), wrong, reply(json.dumps(self.FOUR)), wrong)
+        with self.assertRaisesRegex(ValueError, "the answer check's reply was not a list of answers"):
+            self.generate(reply(json.dumps(self.FOUR)), reply("not JSON"), reply(json.dumps(self.FOUR)),
+                          reply(json.dumps({"answers": [0, 1, 2, 3]})))  # Answers without evidence
+
+    def test_the_shipped_instructions_ask_for_four_and_have_a_checker(self):
+        generator = QuizGenerator()
+        self.assertIn("exactly 4 multiple-choice questions", generator.instructions())
+        self.assertIn('{"answers": [{"answer": 1, "evidence":', generator.instructions("verify"))
+        self.assertTrue(generator.verify_answers)  # settings.json's QUIZ_VERIFY_ANSWERS
 
 
 class PollerTests(unittest.TestCase):

@@ -9,7 +9,10 @@
     "that replace the shared ones for that project, e.g. {\"core_dump\": {\"QUIZ_TEST_TARGET\": \"test\"}}.",
     "QUIZ_MODEL_ATTEMPTS: maximum model replies per quiz, including the initial reply.",
     "An invalid or unfinished reply is retried within this limit; 2 means one retry.",
-    "How many tokens one quiz reply may use is the model profile's max_tokens (context/models.json)."
+    "How many tokens one quiz reply may use is the model profile's max_tokens (context/models.json).",
+    "QUIZ_VERIFY_ANSWERS: after the quiz is written, the model answers its questions again from the",
+    "diff, without the marked answers, and only questions whose answer it confirms are kept (one more",
+    "model call per quiz); a wrong answer key would fail a developer who read the code correctly."
   ],
   "settings": {
     "QUIZ_DEVELOPER": "",
@@ -18,6 +21,7 @@
     "QUIZ_SYNC_SECONDS": "30",
     "QUIZ_MODEL_PROFILE": "",
     "QUIZ_MODEL_ATTEMPTS": "2",
+    "QUIZ_VERIFY_ANSWERS": "true",
     "QUIZ_WEB_USER": "user",
     "QUIZ_WEB_PASSWORD": "pass",
     "QUIZ_BUILD_COMMAND": "make",

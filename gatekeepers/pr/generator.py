@@ -9,6 +9,7 @@ Description:
 """
 
 import json
+import logging
 import os
 import re
 import urllib.request
@@ -19,7 +20,7 @@ import httpx
 from pydantic import ValidationError
 
 from gatekeepers.pr import INSTRUCTIONS_FILE, MODELS_FILE
-from gatekeepers.pr.quiz import Quiz
+from gatekeepers.pr.quiz import Question, Quiz
 from gatekeepers.pr.settings import GateSettings
 
 
@@ -27,6 +28,8 @@ class QuizGenerator:
     """
     Writes quizzes with the model of one profile.
     """
+
+    QUESTIONS_KEPT = 3  # The developer's quiz; the writer drafts one more, in case the answer check drops one
 
     def __init__(self, profile: Optional[str] = None, models_file: Path = MODELS_FILE,
                  instructions_file: Path = INSTRUCTIONS_FILE) -> None:
@@ -40,17 +43,20 @@ class QuizGenerator:
         self.profile = profile
         self.models_file = models_file
         self.instructions_file = instructions_file
+        self.verify_answers = GateSettings.setting("QUIZ_VERIFY_ANSWERS", required=False).lower() in ("true", "1", "yes")
         self.attempts = int(GateSettings.setting("QUIZ_MODEL_ATTEMPTS"))
         if self.attempts < 1:
             raise ValueError("QUIZ_MODEL_ATTEMPTS must be at least 1.")
 
-    def instructions(self) -> str:
+    def instructions(self, key: str = "instructions") -> str:
         """
-        Read the quiz writer's instructions.
+        Read the quiz writer's instructions, or the answer checker's.
+        Args:
+            key: "instructions" (writing the quiz) or "verify" (answering its questions again).
         Returns:
-            str: Their "instructions" lines, joined with newlines.
+            str: Those lines, joined with newlines.
         """
-        return "\n".join(json.loads(self.instructions_file.read_text(encoding="utf-8"))["instructions"])
+        return "\n".join(json.loads(self.instructions_file.read_text(encoding="utf-8"))[key])
 
     # Keep the gate independent of the agents' dependencies while matching their model discovery.
     # noinspection DuplicatedCode
@@ -197,27 +203,106 @@ class QuizGenerator:
             prompt = f"Server analysis: {analysis}.\n\n" + prompt
         error = None
         for _ in range(self.attempts):
-            response = httpx.post(
-                settings["base_url"].rstrip("/") + "/chat/completions",
-                headers={"Authorization": "Bearer " + settings["api_key"]},
-                json={"model": settings["model"], "temperature": 0.2,
-                      **({"max_tokens": settings["max_tokens"]} if settings.get("max_tokens") else {}),
-                      "messages": [{"role": "system", "content": instructions},
-                                   {"role": "user", "content": prompt}]},
-                timeout=settings["timeout"])
-            response.raise_for_status()
-            reply = response.json()
-            choice = reply["choices"][0]
-            if choice.get("finish_reason") != "stop":
-                error = self.unfinished(choice.get("finish_reason"), reply.get("usage") or {}, settings)
+            content, error = self.complete(settings, instructions, prompt)
+            if content is None:
                 continue
             try:
-                quiz = self.parse(choice["message"]["content"] or "")
+                quiz = self.parse(content)
             except ValidationError as exc:
                 error = f"the reply was not a valid quiz ({exc.error_count()} errors)"
                 continue
             if quiz.cosmetic and code_files:
                 error = "the model called a code change cosmetic"
                 continue
+            if not quiz.cosmetic and self.verify_answers:
+                confirmed, error = self.verify(quiz, prompt, settings)
+                if error:
+                    continue
+                if len(confirmed) < self.QUESTIONS_KEPT:
+                    error = (f"a second reading confirmed the answers of only {len(confirmed)} of "
+                             f"{len(quiz.questions)} questions")
+                    continue
+                quiz.questions = confirmed
+            quiz.questions = quiz.questions[:self.QUESTIONS_KEPT]
             return quiz, f"{settings['name']} / {settings['model']}"
         raise ValueError(f"No quiz was created: {error}.")
+
+    def complete(self, settings: dict[str, Any], system: str, user: str,
+                 temperature: float = 0.2) -> tuple[Optional[str], Optional[str]]:
+        """
+        One chat completion on the profile's server.
+        Args:
+            settings: The model profile (`resolve_model`).
+            system: The instructions.
+            user: The message.
+            temperature: Sampling temperature; the answer check uses 0.
+        Returns:
+            tuple[Optional[str], Optional[str]]: The reply's text and None; or None and why there is no
+                usable reply (it did not finish).
+        Raises:
+            httpx.HTTPError: If the model server cannot be reached or rejects the request.
+        """
+        response = httpx.post(
+            settings["base_url"].rstrip("/") + "/chat/completions",
+            headers={"Authorization": "Bearer " + settings["api_key"]},
+            json={"model": settings["model"], "temperature": temperature,
+                  **({"max_tokens": settings["max_tokens"]} if settings.get("max_tokens") else {}),
+                  "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]},
+            timeout=settings["timeout"])
+        response.raise_for_status()
+        reply = response.json()
+        choice = reply["choices"][0]
+        if choice.get("finish_reason") != "stop":
+            return None, self.unfinished(choice.get("finish_reason"), reply.get("usage") or {}, settings)
+        return choice["message"]["content"] or "", None
+
+    def verify(self, quiz: Quiz, prompt: str, settings: dict[str, Any]) -> tuple[list[Question], Optional[str]]:
+        """
+        Have the model answer the quiz's questions again, from the same diff but without the marked
+        answers, quoting for each answer the line of the diff that proves it, and keep the questions
+        whose answer it confirms with a quote that is really in the diff: a wrong answer key would
+        fail a developer who read the code correctly. (QUIZ_VERIFY_ANSWERS turns this off.)
+        Args:
+            quiz: The quiz as written.
+            prompt: The message the quiz was written from (context and diff).
+            settings: The model profile.
+        Returns:
+            tuple[list[Question], Optional[str]]: The confirmed questions, in order, and None; or [] and
+                why the check could not be made.
+        """
+        listing = "\n\n".join(f"Question {n}: {q.question}\n" + "\n".join(f"  {i}) {option}" for i, option in enumerate(q.options))
+                               for n, q in enumerate(quiz.questions, 1))
+        content, error = self.complete(settings, self.instructions("verify"), f"{prompt}\n\nQuestions:\n{listing}",
+                                       temperature=0)
+        if content is None:
+            return [], f"the answer check failed: {error}"
+        fenced = re.fullmatch(r"\s*```(?:json)?\s*(.*?)\s*```\s*", content, re.DOTALL)
+        try:
+            answers = json.loads(fenced.group(1) if fenced else content)["answers"]
+            if not isinstance(answers, list) or len(answers) != len(quiz.questions) or \
+                    not all(isinstance(a, dict) and isinstance(a.get("answer"), int) for a in answers):
+                raise ValueError
+        except (ValueError, KeyError, TypeError):
+            return [], "the answer check's reply was not a list of answers"
+        source = " ".join(prompt.split())  # The quote must be in what the checker was given, spacing aside
+        confirmed = [q for q, answer in zip(quiz.questions, answers, strict=True)
+                     if answer["answer"] == q.correct and self.quoted(answer.get("evidence"), source)]
+        logging.getLogger("pr_gate").info("Quiz answers checked: %s of %s confirmed", len(confirmed), len(quiz.questions))
+        return confirmed, None
+
+    @staticmethod
+    def quoted(evidence: Any, source: str) -> bool:
+        """
+        Whether the checker's evidence is a real quote: nonempty, and in the message it was given (the
+        diff's + and - markers and spacing aside), so an answer cannot rest on code that is not there.
+        Args:
+            evidence: The checker's quote.
+            source: The message the checker answered from, its spacing evened out.
+        Returns:
+            bool: True for a real quote.
+        """
+        if not isinstance(evidence, str):
+            return False
+        lines = [" ".join(line.strip().lstrip("+-").split()) for line in evidence.splitlines()]
+        lines = [line for line in lines if line]
+        return bool(lines) and all(line in source for line in lines)
