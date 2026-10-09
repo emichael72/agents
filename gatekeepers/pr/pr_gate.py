@@ -108,8 +108,9 @@ class PrGateCli:
         for row in rows[:limit]:
             attempts = (f"{row['attempts']} attempt(s), best {row['best']}/{row['total']}" if row["attempts"]
                         else "no attempts")
+            reported = f", {row['reported']} question(s) reported as wrong" if row.get("reported") else ""
             lines.append(f"{row['created'][:16]}  {row['repo']} PR #{row['pr']} {row['pr_title']}  {row['sha'][:7]}  "
-                         f"{row['outcome']}  ({attempts})")
+                         f"{row['outcome']}  ({attempts}{reported})")
         if len(rows) > limit:
             lines.append(f"... {len(rows) - limit} older assessment(s)")
         query = (f"?repo={repo}" + (f"&pr={pr}" if pr else "")) if repo else ""

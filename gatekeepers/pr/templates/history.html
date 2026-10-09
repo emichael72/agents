@@ -38,7 +38,10 @@
                 {% endif %}
               </td>
               <td><code>{{ row.sha[:7] }}</code></td>
-              <td><span class="outcome {{ row.state }}">{{ row.outcome }}</span></td>
+              <td>
+                <span class="outcome {{ row.state }}">{{ row.outcome }}</span>
+                {% if row.reported %}<br><span class="reported" title="Reported as wrong by the developer">⚑ {{ row.reported }} question{{ 's' if row.reported != 1 }} reported</span>{% endif %}
+              </td>
               <td>
                 {% if row.attempts %}
                   {{ row.attempts }} (best {{ row.best }}/{{ row.total }})<br>

@@ -64,6 +64,10 @@ class QuizStore:
               developer TEXT NOT NULL, score INTEGER NOT NULL, total INTEGER NOT NULL,
               passed INTEGER NOT NULL, created TEXT DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS reports (
+              id INTEGER PRIMARY KEY, quiz_id TEXT NOT NULL, question INTEGER NOT NULL,
+              note TEXT NOT NULL DEFAULT '', developer TEXT NOT NULL, created TEXT DEFAULT CURRENT_TIMESTAMP
+            );
             """)
             # Columns added after the first version; older databases get them with these defaults.
             # repo is "" for a quiz from when the gate served one repository (see adopt).
@@ -172,14 +176,16 @@ class QuizStore:
             pr: Only this pull request; None for all.
         Returns:
             list[dict]: Each quiz's row (without content or answer keys), plus attempts (count),
-                best and total (best score) and last_attempt (time).
+                best and total (best score), last_attempt (time) and reported (how many of its
+                questions a developer reported as wrong).
         """
         with self.connect() as db:
             # noinspection SqlNoDataSourceInspection
             return [dict(r) for r in db.execute(
                 "SELECT q.id, q.repo, q.pr, q.pr_title, q.sha, q.source, q.passed, q.skipped, q.build_ok, q.docs_ok, "
                 "q.cosmetic, q.created, q.rowid AS position, COUNT(a.id) AS attempts, MAX(a.score) AS best, "
-                "MAX(a.total) AS total, MAX(a.created) AS last_attempt FROM quizzes q "
+                "MAX(a.total) AS total, MAX(a.created) AS last_attempt, "
+                "(SELECT COUNT(DISTINCT r.question) FROM reports r WHERE r.quiz_id = q.id) AS reported FROM quizzes q "
                 "LEFT JOIN attempts a ON a.quiz_id = q.id "
                 "WHERE (? IS NULL OR q.repo = ?) AND (? IS NULL OR q.pr = ?) "
                 "GROUP BY q.id ORDER BY q.created DESC, position DESC", (repo, repo, pr, pr))]
@@ -201,6 +207,33 @@ class QuizStore:
         with self.connect() as db:
             # noinspection SqlNoDataSourceInspection
             db.execute("UPDATE quizzes SET skipped=1, passed=1 WHERE id=? AND passed=0", (qid,))
+
+    def add_report(self, qid: str, question: int, note: str, developer: str) -> None:
+        """
+        Record that a developer reports a question as wrong (a wrong answer key, or no right option).
+        Args:
+            qid: The quiz id.
+            question: The question's index in the quiz (0-based).
+            note: Why, in the developer's words; may be empty.
+            developer: Who reported it.
+        """
+        with self.connect() as db:
+            # noinspection SqlNoDataSourceInspection
+            db.execute("INSERT INTO reports(quiz_id,question,note,developer) VALUES(?,?,?,?)",
+                       (qid, question, note, developer))
+
+    def reports(self, qid: str) -> list[dict[str, Any]]:
+        """
+        A quiz's reports, oldest first.
+        Args:
+            qid: The quiz id.
+        Returns:
+            list[dict]: Each report: question (0-based), note, developer and created.
+        """
+        with self.connect() as db:
+            # noinspection SqlNoDataSourceInspection
+            return [dict(r) for r in db.execute(
+                "SELECT question, note, developer, created FROM reports WHERE quiz_id = ? ORDER BY id", (qid,))]
 
     def add_attempt(self, qid: str, developer: str, score: int, total: int, passed: bool) -> None:
         """

@@ -95,8 +95,17 @@ The **model** receives the diff, PR description, build/test output, and the serv
 service validates the returned questions, choices, correct answers, and explanations, then shuffles choices while
 preserving the answer key.
 
+The model drafts four questions, most of them about the code's own logic: tracing it on a concrete input, why it is
+correct, memory ownership and failure paths, edge cases. A wrong answer key would fail a developer who read the code
+correctly, so the service then asks the model to **answer the questions again** from the diff, without the marked
+answers and at temperature 0, quoting the diff line that proves each answer. A question is kept only if that answer
+matches and the quote is really in the diff; the quiz uses the first three kept. `QUIZ_VERIFY_ANSWERS` turns this check
+off, and `QUIZ_VERIFY_PROFILE` can give it to another model profile, which must reason at least as well as the writer.
+The check catches most wrong keys, not all of them; developers can report the rest (see below).
+
 `QUIZ_MODEL_ATTEMPTS` limits the number of model replies per quiz, including the initial reply. The default is 2,
-allowing one retry for an invalid or unfinished reply, or one that incorrectly calls a code change cosmetic.
+allowing one retry for an invalid or unfinished reply, one that incorrectly calls a code change cosmetic, or one with
+fewer than three answers the check confirms.
 
 When you submit answers, **Python** verifies the PR version, compares your choices with the saved key, records the
 score, and publishes the status to GitHub in that submission request. Grading needs no new model call.
@@ -141,6 +150,7 @@ what enforces the requirement.
 |----------------------------------------------------------------------------------|-------------------------------------------------|
 | Questions, choices, key, explanations, model used, PR version, and check reports | SQLite `quizzes` table on minion                |
 | Each attempt's score, total, pass/fail, and timestamp                            | SQLite `attempts` table                         |
+| Questions a developer reported as wrong, with their notes                        | SQLite `reports` table                          |
 | The code tests that `make check` runs                                            | Submitted project files: the project's Makefile |
 | Required merge rule and reported commit statuses                                 | GitHub                                          |
 
@@ -148,8 +158,12 @@ The default database is `gatekeepers/pr/data/quiz.sqlite3` in the repository che
 survives restarts. Attempts store scores rather than the complete selection of answers. The History page shows the saved
 assessments and attempts.
 
-The model is asked for three questions, although validation accepts three to five. All answers must be correct. Failed
-attempts can be retried; a passed version stays passed.
+A quiz has three questions (the model drafts four, and the answer check keeps three), although validation accepts three
+to five. All answers must be correct. Failed attempts can be retried; a passed version stays passed.
+
+If a question has no right option, or seems to mark a wrong one, the developer can report it on the quiz page, with a
+note. Reports are saved with the quiz and shown on it, on the History page and in `pr_gate`'s history, for whoever runs
+the gate to review; they do not change the result.
 
 An assessment records both the PR commit and the base commit. If either changes, the service needs a fresh assessment
 and refuses submissions to the old quiz; the poller prepares the new assessment. GitHub's requirement for an up-to-date

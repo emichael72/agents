@@ -218,6 +218,7 @@ class GateApp:
         self.app.get("/q/{qid}", response_class=HTMLResponse)(self.quiz_page)
         self.app.post("/q/{qid}", response_class=HTMLResponse)(self.grade)
         self.app.post("/q/{qid}/skip", response_class=HTMLResponse)(self.skip)
+        self.app.post("/q/{qid}/report")(self.report)
 
     @asynccontextmanager
     async def lifespan(self, _app: FastAPI) -> AsyncIterator[None]:
@@ -344,8 +345,10 @@ class GateApp:
         # Only public fields enter the rendered form
         questions = [{"question": q.question, "options": q.options} for q in content.questions]
         state, description = self.gate.gate_state(row)
+        reports = self.gate.store.reports(qid)
         return self.templates.TemplateResponse(request=request, name="quiz.html", context={
             "row": row, "title": content.title, "questions": questions, "csrf": self.csrf(qid),
+            "reported": {r["question"] for r in reports}, "reports": reports,
             "repo": row["repo"], "state": state, "description": description,
             "allow_skip": self.gate.settings.allow_skip})
 
@@ -371,6 +374,33 @@ class GateApp:
             raise HTTPException(502, "GitHub could not confirm the result. Retry this submission.") from None
         return self.templates.TemplateResponse(request=request, name="result.html",
                                                context={"result": result, "row": row, "repo": row["repo"]})
+
+    async def report(self, qid: str, request: Request):
+        """
+        POST /q/<id>/report: the developer reports a question as wrong (its answer key, or no right
+        option), with an optional note. It is recorded for the gate's operator and shown on the quiz
+        and History pages; it does not change the quiz's result.
+        """
+        self.authenticate(request)
+        form = await request.form(max_fields=20)
+        if not secrets.compare_digest(str(form.get("csrf", "")), self.csrf(qid)):
+            raise HTTPException(403, "Invalid form token. Reload the quiz.")
+        try:
+            row = self.gate.store.get(qid)
+            count = len(Quiz.model_validate_json(row["content"]).questions)
+        except KeyError:
+            raise HTTPException(404, "Quiz not found") from None
+        try:
+            question = int(str(form.get("report", "")))
+        except ValueError:
+            raise HTTPException(400, "No question named.") from None
+        if not 0 <= question < count:
+            raise HTTPException(400, "No such question.")
+        note = str(form.get(f"note{question}", "")).strip()[:500]
+        self.gate.store.add_report(qid, question, note, self.gate.developer)
+        logging.getLogger("pr_gate").warning("%s PR #%s: question %s of quiz %s reported as wrong%s", row["repo"],
+                                             row["pr"], question + 1, qid, f": {note}" if note else "")
+        return RedirectResponse(f"/q/{qid}#question{question + 1}", status_code=303)
 
     async def skip(self, qid: str, request: Request):
         """POST /q/<id>/skip: skip the quiz (proof-of-concept mode) and post the result."""

@@ -288,6 +288,23 @@ class QuizTests(unittest.TestCase):
         row = self.gate.store.get(self.qid)
         self.assertEqual((row["passed"], row["skipped"]), (1, 1))
 
+    def test_a_question_can_be_reported_as_wrong(self):
+        url = "/q/" + self.qid
+        page = self.client.get(url).text
+        self.assertIn('formaction="/q/%s/report" name="report"' % self.qid, page)
+        token = re.search(r'name="csrf" value="([0-9a-f]+)"', page).group(1)  # type: ignore[union-attr]
+        self.assertEqual(self.client.post(url + "/report", data={"report": "1"}).status_code, 403)  # Needs the token
+        self.assertEqual(self.client.post(url + "/report", data={"csrf": token, "report": "7"}).status_code, 400)
+        response = self.client.post(url + "/report", data={"csrf": token, "report": "1", "note1": " No option is right. "},
+                                    follow_redirects=False)
+        self.assertEqual((response.status_code, response.headers["location"]), (303, url + "#question2"))
+        self.assertEqual([(r["question"], r["note"]) for r in self.gate.store.reports(self.qid)], [(1, "No option is right.")])
+        page = self.client.get(url).text
+        self.assertEqual(page.count("⚑ Reported as wrong"), 1)  # Question 2 shows it; 1 and 3 can still be reported
+        self.assertEqual(page.count("Report this question as wrong"), 2)
+        self.assertIn("⚑ 1 question reported", self.client.get("/history").text)
+        self.assertEqual(self.gate.store.get(self.qid)["passed"], 0)  # A report does not change the result
+
     def test_skip_is_refused_when_turned_off_or_before_the_build_passes(self):
         with self.enabled(allow_skip=False):
             self.assertNotIn("/skip", self.client.get("/q/" + self.qid).text)
