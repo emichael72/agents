@@ -448,7 +448,7 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ, {'OPENAI_API_KEY': ''}):
             with self.assertRaisesRegex(ValueError, 'OPENAI_API_KEY'):
                 profiles.resolve('openai')
-        with self.assertRaisesRegex(ValueError, "Unknown model profile 'nope'.*local, openai"):
+        with self.assertRaisesRegex(ValueError, "Unknown model profile 'nope'.*local.*openai"):
             profiles.resolve('nope')
         with self.assertRaisesRegex(ValueError, "missing model"):
             ModelProfiles({'profiles': {'broken': {'base_url': 'http://x', 'api_key': 'k'}}}).resolve('broken')

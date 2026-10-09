@@ -552,6 +552,17 @@ class AnswerCheckTests(unittest.TestCase):
             self.generate(reply(json.dumps(self.FOUR)), reply("not JSON"), reply(json.dumps(self.FOUR)),
                           reply(json.dumps({"answers": [0, 1, 2, 3]})))  # Answers without evidence
 
+    def test_the_check_uses_the_checker_profile(self):
+        profiles = {None: self.SETTINGS, "local": self.SETTINGS,
+                    "checker": {**self.SETTINGS, "model": "qwen/qwen3-coder-next", "profile": "checker"}}
+        with patch.dict(os.environ, {"QUIZ_VERIFY_ANSWERS": "true", "QUIZ_VERIFY_PROFILE": "checker"}), \
+                patch.object(QuizGenerator, "resolve_model", side_effect=lambda name=None: profiles[name]), \
+                patch("gatekeepers.pr.generator.httpx.post") as post:
+            post.return_value.json.side_effect = [reply(json.dumps(self.FOUR)), self.answers(0, 1, 2, 3)]
+            QuizGenerator().generate("+    flip_tree(node->left);", "local", ["src/tree.c"])
+        self.assertEqual([c.kwargs["json"]["model"] for c in post.call_args_list], ["m", "qwen/qwen3-coder-next"])
+        self.assertIsNone(QuizGenerator().verify_profile)  # settings.json ships with the writer checking itself
+
     def test_the_shipped_instructions_ask_for_four_and_have_a_checker(self):
         generator = QuizGenerator()
         self.assertIn("exactly 4 multiple-choice questions", generator.instructions())

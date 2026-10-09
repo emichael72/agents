@@ -12,7 +12,10 @@
     "How many tokens one quiz reply may use is the model profile's max_tokens (context/models.json).",
     "QUIZ_VERIFY_ANSWERS: after the quiz is written, the model answers its questions again from the",
     "diff, without the marked answers, and only questions whose answer it confirms are kept (one more",
-    "model call per quiz); a wrong answer key would fail a developer who read the code correctly."
+    "model call per quiz); a wrong answer key would fail a developer who read the code correctly.",
+    "QUIZ_VERIFY_PROFILE: the model profile (context/models.json) that checks the answers. Empty: the",
+    "writer's own model checks them, at temperature 0 (it caught a wrong answer key in 3 of 4 runs).",
+    "Another profile, such as checker, must reason at least as well as the writer."
   ],
   "settings": {
     "QUIZ_DEVELOPER": "",
@@ -22,6 +25,7 @@
     "QUIZ_MODEL_PROFILE": "",
     "QUIZ_MODEL_ATTEMPTS": "2",
     "QUIZ_VERIFY_ANSWERS": "true",
+    "QUIZ_VERIFY_PROFILE": "",
     "QUIZ_WEB_USER": "user",
     "QUIZ_WEB_PASSWORD": "pass",
     "QUIZ_BUILD_COMMAND": "make",

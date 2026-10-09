@@ -44,6 +44,7 @@ class QuizGenerator:
         self.models_file = models_file
         self.instructions_file = instructions_file
         self.verify_answers = GateSettings.setting("QUIZ_VERIFY_ANSWERS", required=False).lower() in ("true", "1", "yes")
+        self.verify_profile = GateSettings.setting("QUIZ_VERIFY_PROFILE", required=False) or None  # None: the writer's
         self.attempts = int(GateSettings.setting("QUIZ_MODEL_ATTEMPTS"))
         if self.attempts < 1:
             raise ValueError("QUIZ_MODEL_ATTEMPTS must be at least 1.")
@@ -265,14 +266,15 @@ class QuizGenerator:
         Args:
             quiz: The quiz as written.
             prompt: The message the quiz was written from (context and diff).
-            settings: The model profile.
+            settings: The writer's model profile; the checker uses QUIZ_VERIFY_PROFILE's when it is set.
         Returns:
             tuple[list[Question], Optional[str]]: The confirmed questions, in order, and None; or [] and
                 why the check could not be made.
         """
         listing = "\n\n".join(f"Question {n}: {q.question}\n" + "\n".join(f"  {i}) {option}" for i, option in enumerate(q.options))
                                for n, q in enumerate(quiz.questions, 1))
-        content, error = self.complete(settings, self.instructions("verify"), f"{prompt}\n\nQuestions:\n{listing}",
+        checker = self.resolve_model(self.verify_profile) if self.verify_profile else settings
+        content, error = self.complete(checker, self.instructions("verify"), f"{prompt}\n\nQuestions:\n{listing}",
                                        temperature=0)
         if content is None:
             return [], f"the answer check failed: {error}"
@@ -287,7 +289,8 @@ class QuizGenerator:
         source = " ".join(prompt.split())  # The quote must be in what the checker was given, spacing aside
         confirmed = [q for q, answer in zip(quiz.questions, answers, strict=True)
                      if answer["answer"] == q.correct and self.quoted(answer.get("evidence"), source)]
-        logging.getLogger("pr_gate").info("Quiz answers checked: %s of %s confirmed", len(confirmed), len(quiz.questions))
+        logging.getLogger("pr_gate").info("Quiz answers checked by %s: %s of %s confirmed", checker["model"],
+                                          len(confirmed), len(quiz.questions))
         return confirmed, None
 
     @staticmethod

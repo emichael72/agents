@@ -14,7 +14,11 @@
     "max_tokens: the most tokens one reply may use, thinking included: a reasoning model spends",
     "thousands thinking before it answers. It applies to every model call, the three agents' and the",
     "pull request gate's quiz writer, so a model stuck thinking stops there with a clear message.",
-    "Without it, the server's own limit applies."
+    "Without it, the server's own limit applies.",
+    "checker: a separate answer checker for the pull request gate, used when QUIZ_VERIFY_PROFILE in",
+    "gatekeepers/pr/settings.json names it. It must reason at least as well as the quiz writer: a",
+    "model that answers without thinking (qwen3-coder-next) confirmed a wrong answer key every time.",
+    "It names its model, so LM Studio loads it beside the writer's; its timeout leaves room for that."
   ],
   "default": "local",
   "profiles": {
@@ -28,6 +32,16 @@
       "api_key": "lm-studio",
       "max_tokens": 16000,
       "timeout": 300
+    },
+    "checker": {
+      "name": "Quiz answer checker",
+      "base_url": "http://boba:1234/v1",
+      "base_url_env": "LOCAL_LLM_BASE_URL",
+      "model": "deepseek/deepseek-v4-flash",
+      "api_key_env": "LOCAL_LLM_API_KEY",
+      "api_key": "lm-studio",
+      "max_tokens": 16000,
+      "timeout": 900
     },
     "openai": {
       "name": "OpenAI",
