@@ -8,13 +8,13 @@ permits merging if its other requirements are satisfied. Someone still has to me
 
 ## The pieces
 
-The **Python service on minion** watches GitHub and serves the quiz website. **systemd** starts that service and
+The **Python service on the gate's host** (minion in the demo) watches GitHub and serves the quiz website. **systemd** starts that service and
 restarts it if it crashes.
 
 The **model on the Mac Studio** writes the questions and answer key. The service calls it directly using the shared
 model profiles; it does not need a coding agent chat to be open.
 
-**SQLite on minion** stores quizzes, answer keys, code-check reports, and scores. **GitHub** stores the PR and enforces
+**SQLite on that host** stores quizzes, answer keys, code-check reports, and scores. **GitHub** stores the PR and enforces
 the merge rule.
 
 ~~~text
@@ -148,7 +148,7 @@ what enforces the requirement.
 
 | Information                                                                      | Location                                        |
 |----------------------------------------------------------------------------------|-------------------------------------------------|
-| Questions, choices, key, explanations, model used, PR version, and check reports | SQLite `quizzes` table on minion                |
+| Questions, choices, key, explanations, model used, PR version, and check reports | SQLite `quizzes` table on the gate's host       |
 | Each attempt's score, total, pass/fail, and timestamp                            | SQLite `attempts` table                         |
 | Questions a developer reported as wrong, with their notes                        | SQLite `reports` table                          |
 | The code tests that `make check` runs                                            | Submitted project files: the project's Makefile |
@@ -218,7 +218,7 @@ Only PRs by one developer are assessed: `QUIZ_DEVELOPER`, or when it is empty, t
 
 ## Run and manage it
 
-From the repository root on minion:
+From the repository root on the gate's host:
 
 ~~~bash
 ./install.sh --gate install
@@ -230,8 +230,10 @@ From the repository root on minion:
 Installation checks for GitHub access and required programs. It also tries to keep the user service running after
 logout.
 
-Open the [quiz homepage](http://minion:8000) or [History](http://minion:8000/history). The demo sign-in is shown on the
-login page.
+Open the quiz homepage or its History page (`/history`) at the address `QUIZ_BASE_URL` in [settings.json](settings.json)
+gives: `http://{hostname}:8000` by default, where `{hostname}` is the name of the machine the service runs on
+(<http://minion:8000> in the demo), so the repository runs unchanged on another host. Give an explicit host instead when
+people reach the gate by another name, such as `http://gate.example.com`. The demo sign-in is shown on the login page.
 
 Settings are in [settings.json](settings.json). Environment values can override them; restart after changing service
 settings. The checked-in `QUIZ_ALLOW_SKIP=true` enables a Skip quiz button. Use `QUIZ_ALLOW_SKIP=false` to require a

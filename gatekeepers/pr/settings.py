@@ -14,6 +14,7 @@ Description:
 import json
 import os
 import re
+import socket
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -72,7 +73,7 @@ class GateSettings:
     The gate's settings (README.md, "Settings").
     """
 
-    base_url: str  # QUIZ_BASE_URL: where the quiz pages are served, without a trailing /
+    base_url: str  # QUIZ_BASE_URL, with {hostname} filled in: where the quiz pages are served, without a trailing /
     developer: str = ""  # QUIZ_DEVELOPER: the only author assessed; "" for the account gh is signed in as
     projects: tuple[Project, ...] = ()  # The gated repositories (pr_gated in context/paths.json)
     skipped: tuple[str, ...] = ()  # Gated folders that cannot be used, each with why
@@ -115,7 +116,7 @@ class GateSettings:
             except ValueError as exc:
                 skipped.append(f"{folder.name}: {exc}")
         return cls(
-            base_url=text("QUIZ_BASE_URL", True).rstrip("/"),
+            base_url=cls.base_url_for(text("QUIZ_BASE_URL", True)),
             developer=text("QUIZ_DEVELOPER"),
             projects=tuple(projects),
             skipped=tuple(skipped),
@@ -148,6 +149,19 @@ class GateSettings:
 
         return {"build_command": text("QUIZ_BUILD_COMMAND"), "test_target": text("QUIZ_TEST_TARGET"),
                 "fail_on_warnings": text("QUIZ_FAIL_ON_WARNINGS").lower() in ("true", "1", "yes")}
+
+    @staticmethod
+    def base_url_for(value: str) -> str:
+        """
+        The quiz pages' address from QUIZ_BASE_URL: {hostname} becomes the name of the machine the
+        service runs on (as socket.gethostname gives it), so the shipped value works on any host; an
+        explicit host stays as it is.
+        Args:
+            value: The setting, e.g. "http://{hostname}:8000" or "http://minion:8000".
+        Returns:
+            str: The address, without a trailing /.
+        """
+        return value.replace("{hostname}", socket.gethostname()).rstrip("/")
 
     @classmethod
     def setting(cls, name: str, required: bool = True, path: Path = SETTINGS_FILE) -> str:

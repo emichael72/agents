@@ -394,6 +394,12 @@ class ModelTests(unittest.TestCase):
         no_check.start()
         self.addCleanup(no_check.stop)
 
+    def test_the_quiz_address_can_name_the_host_it_runs_on(self):
+        with patch("gatekeepers.pr.settings.socket.gethostname", return_value="buildhost"):
+            self.assertEqual(GateSettings.base_url_for("http://{hostname}:8000/"), "http://buildhost:8000")
+            self.assertEqual(GateSettings.base_url_for("http://minion:8000"), "http://minion:8000")  # Explicit
+        self.assertEqual(json.loads(SETTINGS_FILE.read_text())["settings"]["QUIZ_BASE_URL"], "http://{hostname}:8000")
+
     def test_settings_come_from_the_manifest_and_the_environment_overrides_them(self):
         manifest = json.loads(SETTINGS_FILE.read_text())["settings"]
         self.assertEqual(GateSettings.setting("QUIZ_BASE_URL"), os.environ.get("QUIZ_BASE_URL") or manifest["QUIZ_BASE_URL"])

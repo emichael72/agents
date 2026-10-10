@@ -3,6 +3,9 @@
     "Settings of the pull request gate (gatekeepers/pr): read by settings.py for the service",
     "and the agents' pr_gate status tool. A variable set in the environment overrides its",
     "value here; see README.md, 'Settings'.",
+    "QUIZ_BASE_URL: where the quiz pages are served, as people open them from GitHub. {hostname}",
+    "stands for the name of the machine the service runs on, so the repository works on any host;",
+    "or give the host explicitly, e.g. http://minion:8000 or http://gate.example.com.",
     "The gated repositories are the folders marked pr_gated in context/paths.json; each clone's",
     "origin names its GitHub repository. QUIZ_DEVELOPER empty: the account gh is signed in as.",
     "projects: per folder name, QUIZ_BUILD_COMMAND, QUIZ_TEST_TARGET or QUIZ_FAIL_ON_WARNINGS",
@@ -19,7 +22,7 @@
   ],
   "settings": {
     "QUIZ_DEVELOPER": "",
-    "QUIZ_BASE_URL": "http://minion:8000",
+    "QUIZ_BASE_URL": "http://{hostname}:8000",
     "QUIZ_POLL_SECONDS": "5",
     "QUIZ_SYNC_SECONDS": "30",
     "QUIZ_MODEL_PROFILE": "",
