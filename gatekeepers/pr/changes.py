@@ -182,10 +182,8 @@ class ChangeInspector:
         allowed = Path(tempfile.mkdtemp()) / "paths.json"
         allowed.write_text(json.dumps({"paths": {"pr": {"path": str(Path(tree).resolve()), "access": "rwx"}}}))
         try:
-            # No SHELL_NETWORK: a pull request's build never reaches the network, whatever the gate's environment
-            offline = {name: value for name, value in os.environ.items() if name != "SHELL_NETWORK"}
             result = subprocess.run(["python3", str(self.SHELL), "--cwd", "pr", "--command", command], capture_output=True,
-                                    text=True, timeout=120, env={**offline, "FS_GATE_PATHS": str(allowed)})
+                                    text=True, timeout=120, env={**os.environ, "FS_GATE_PATHS": str(allowed)})
         except subprocess.TimeoutExpired:
             return False, f"{command}: timed out."
         finally:

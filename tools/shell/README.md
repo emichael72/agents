@@ -1,8 +1,7 @@
 # Shell
 
 The shell tool reads files, searches code, builds projects, and runs tests inside a bubblewrap sandbox. It can reach
-only the folders permitted in `context/paths.json` and has no network access, except `curl` and `wget` when an
-agent runs them (see "The network" below).
+only the folders permitted in `context/paths.json` and has no network access.
 
 ## Use it
 
@@ -30,18 +29,6 @@ Programs inside project folders, Makefiles, and ninja builds need execute permis
 folder holding their build files (`cd build && ninja`), not through `-C` or `-f`. Build variables such as CFLAGS can be
 supplied before make, and a time zone before date (`TZ=Asia/Tokyo date`; the zone must be installed). Other
 environment assignments are refused.
-
-## The network
-
-The sandbox has no network, with one exception: a command line that uses `curl` or `wget` (marked `"network": true`
-in [commands.json](commands.json)) reaches the network when an agent runs it. The agents' manifest sets
-`SHELL_NETWORK=1` for that; the [PR gate](../../gatekeepers/pr/README.md) runs its builds without it, so a pull
-request's code never reaches the network. Downloads land only in writable folders, and a networked command can also
-reach services on this machine and its local network.
-
-~~~bash
-SHELL_NETWORK=1 python3 tools/shell/shell.py --cwd=core_dump --command="curl -sSL https://example.com | head"
-~~~
 
 ## What the sandbox sees
 

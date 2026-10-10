@@ -18,6 +18,7 @@ run the scripts locally.
 | [memory](memory/README.md)   | Keep notes between chats                        |
 | [skill](skill/README.md)     | Read a procedure for the current task           |
 | [sysinfo](sysinfo/README.md) | Inspect the machine running the tools           |
+| [web](web/README.md)         | Read a web page as Markdown text                |
 
 All command examples in these pages run from the **repository root**.
 
@@ -29,7 +30,8 @@ file inside the configured core_dump checkout.
 `r` allows reading, `w` allows writing, and `x` allows running programs and Makefiles. Subfolders can have different
 permissions. Tools resolve paths before checking them, including parent references and symbolic links.
 
-The [file-system gate](../gatekeepers/README.md) checks access. The shell adds a bubblewrap sandbox with no network, except for `curl` and `wget` when an agent runs them.
+The [file-system gate](../gatekeepers/README.md) checks access. The shell adds a bubblewrap sandbox with no network; the
+web tool is the agents' only way to the web.
 Other tools run as the current user and apply their own checks; there is no single sandbox around every tool.
 
 ## Add a tool

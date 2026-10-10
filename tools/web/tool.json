@@ -1,0 +1,19 @@
+{
+  "description": [
+    "Reads a web page and returns its main text as Markdown (headings, paragraphs, lists,",
+    "tables, code), without menus, ads or scripts; plain text and JSON come back as they are.",
+    "Give a full http:// or https:// address. A long page comes back in parts: its last line",
+    "says where it stopped, and start= reads on from there. Pages that are not text (images,",
+    "PDFs, archives) are refused."
+  ],
+  "command": "python3",
+  "args": ["web/web.py"],
+  "env": {"WEB_TIMEOUT": "20", "WEB_MAX_BYTES": "5000000", "WEB_MAX_CHARS": "12000"},
+  "timeout": 60,
+  "params": [
+    {"name": "url", "type": "string", "description": "The page's address, e.g. https://docs.python.org/3/library/json.html", "style": "flag"},
+    {"name": "start", "type": "integer", "description": "Where in the text to begin, from the end line of the previous part; omit it for the start", "style": "flag", "required": false},
+    {"name": "links", "type": "boolean", "description": "Keep the page's links as Markdown links (default false)", "style": "flag", "required": false}
+  ],
+  "resource": "web/README.md"
+}

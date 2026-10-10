@@ -85,9 +85,6 @@ class Shell:
     # (CFLAGS='-DX' make; set in the environment, the Makefile's own "CFLAGS += ..." still applies, as
     # it does not to make CFLAGS=...), and a time zone for date (TZ=Asia/Tokyo date)
     COMMAND_VARIABLES = {"make": ("CPPFLAGS", "CFLAGS", "CXXFLAGS", "LDFLAGS", "LDLIBS"), "date": ("TZ",)}
-    # What a network command needs from /etc: name lookup, and the certificates HTTPS checks against
-    NETWORK_FILES = ("/etc/resolv.conf", "/etc/hosts", "/etc/nsswitch.conf", "/etc/host.conf", "/etc/gai.conf",
-                     "/etc/pki", "/etc/ssl", "/etc/crypto-policies")
     ZONEINFO = Path("/usr/share/zoneinfo")  # The IANA time zones TZ may name; the sandbox sees /usr
     # Options that would point a build tool at another folder's build files, which execute access
     # where it runs does not cover: the build runs where its files are (cd there)
@@ -100,20 +97,16 @@ class Shell:
     MAX_LINES = 300
     MAX_CHARS = 30_000
 
-    def __init__(self, gate: Optional[FsGate] = None, commands: Optional[dict[str, dict]] = None,
-                 allow_network: bool = False) -> None:
+    def __init__(self, gate: Optional[FsGate] = None, commands: Optional[dict[str, dict]] = None) -> None:
         """
         Args:
             gate: The allowed folders; None reads context/paths.json.
-            allow_network: Let a command line that uses a network command (commands.json) reach the
-                network; the agents' shell tool allows it (SHELL_NETWORK=1), the pull request gate does not.
             commands: The allowed commands; None reads commands.json, leaving out those that are
                 also their own tool and those not installed on this machine.
         Raises:
             ValueError: If commands.json's "environment" is not valid.
         """
         self.gate = gate or FsGate.load()
-        self.allow_network = allow_network
         environment = self.load_environment()
         self.search_path = self.search_folders(environment.get("path", []))
         self.variables = self.extra_variables(environment.get("variables", {}))
@@ -129,7 +122,7 @@ class Shell:
         """
         Read the allowed commands, leaving out those that are also their own tool.
         Returns:
-            dict[str, dict]: Each command and its entry ("about", optional "needs" and "network").
+            dict[str, dict]: Each command and its entry ("about", optional "needs").
         """
         commands = json.loads(cls.COMMANDS_FILE.read_text(encoding="utf-8"))["commands"]
         return {name: entry if isinstance(entry, dict) else {"about": entry} for name, entry in commands.items()}
@@ -227,14 +220,12 @@ class Shell:
             target = (current / path).resolve()
         return target if self.gate.locate(target) else None
 
-    def check(self, command: str, cwd: Path) -> list[str]:
+    def check(self, command: str, cwd: Path) -> None:
         """
         Check a command line before it runs.
         Args:
             command: The command line.
             cwd: The real folder it starts in.
-        Returns:
-            list[str]: The allowed commands it runs (not programs in the allowed folders).
         Raises:
             ValueError: If any part of it is not allowed; the message says why.
         """
@@ -259,7 +250,6 @@ class Shell:
 
         commands = self.commands
         current = cwd
-        used: list[str] = []
         for segment_index, words in enumerate(segments):
             if not words:
                 raise ValueError("Empty command between separators.")
@@ -294,7 +284,6 @@ class Shell:
                 raise ValueError(f"'{name}' is not installed on this machine. Run the command help to see the list.")
             if name not in commands:
                 raise ValueError(f"'{name}' is not an allowed command. Run the command help to see the list.")
-            used.append(name)
             if name == "git":
                 sub = words[1] if len(words) > 1 else ""
                 if sub in self.GIT_LIST_ONLY:
@@ -321,7 +310,6 @@ class Shell:
                 prefixes = tuple(o if len(o) == 2 else o + "=" for o in elsewhere)
                 if elsewhere and any(w in elsewhere or w.startswith(prefixes) for w in words[1:]):
                     raise ValueError(f"{name}: run it where its files are (cd there) instead of using -C or -f.")
-        return used
 
     @classmethod
     def raw_words(cls, command: str) -> list[str]:
@@ -424,14 +412,12 @@ class Shell:
         (folder / "group").write_text(f"{group}:x:{gid}:\n")
         return folder
 
-    def sandbox(self, cwd: Path, identity: Optional[Path] = None, network: bool = False) -> list[str]:
+    def sandbox(self, cwd: Path, identity: Optional[Path] = None) -> list[str]:
         """
         Build the bubblewrap command line for the allowed folders.
         Args:
             cwd: The real folder to start in.
             identity: A folder from identity_files, mounted as /etc/passwd and /etc/group; None for none.
-            network: Share the host's network, with what name lookup and HTTPS need from /etc (for a
-                network command such as curl); otherwise the sandbox has no network.
         Returns:
             list[str]: bwrap (by full path) and its options, ending with "--" (the command follows).
                 Run it with an empty environment: bwrap hands the command its own environment plus
@@ -447,11 +433,6 @@ class Shell:
         for etc in ("/etc/localtime", "/etc/ld.so.cache", "/etc/alternatives"):
             if Path(etc).exists():
                 args += ["--ro-bind", etc, etc]
-        if network:
-            args[2:2] = ["--share-net"]  # After --unshare-all: every namespace but the network's stays private
-            for etc in self.NETWORK_FILES:
-                if Path(etc).exists():  # resolv.conf is often a link into /run: bind what it points to
-                    args += ["--ro-bind", str(Path(etc).resolve()), etc]
         if identity is not None:
             args += ["--ro-bind", str(identity / "passwd"), "/etc/passwd", "--ro-bind", str(identity / "group"), "/etc/group"]
         for name, folder in self.gate.folders.items():
@@ -511,13 +492,12 @@ class Shell:
             cwd = next(iter(self.gate.folders))  # The first allowed folder
         folder, shown = self.gate.resolve(cwd, "dir", "r")
         command = self.STDERR_HABITS.sub("", command)
-        used = self.check(command, folder)
-        network = self.allow_network and any(self.commands[name].get("network") for name in used)
+        self.check(command, folder)
         if not shutil.which("bwrap"):
             raise ValueError("bubblewrap (bwrap) is not installed, so the shell cannot run safely.")
         try:
             with tempfile.TemporaryDirectory(prefix="shell-identity-") as identity:
-                result = subprocess.run([*self.sandbox(folder, self.identity_files(Path(identity)), network),
+                result = subprocess.run([*self.sandbox(folder, self.identity_files(Path(identity))),
                                          "/usr/bin/bash", "--noprofile", "--norc", "-c", command],
                                         stdin=subprocess.DEVNULL,  # No input: rg or cat with no file must not wait
                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
@@ -571,7 +551,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     """
     try:
         args: argparse.Namespace = Shell.build_parser().parse_args(argv)
-        ok, report = Shell(allow_network=os.environ.get("SHELL_NETWORK") == "1").run(args.cwd, args.command)
+        ok, report = Shell().run(args.cwd, args.command)
     except (ValueError, OSError) as e:
         ok, report = False, f"Error: {e}"
     print(report)

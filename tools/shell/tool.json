@@ -6,7 +6,7 @@
     "sort, wc, diff, tree, du, make, ninja, gcc, git, objdump and more;",
     "run the command help to list them all and see the folders and their access.",
     "Join commands with |, &&, || or ;.",
-    "No redirection (> <) or $(...). Only curl and wget reach the network.",
+    "No redirection (> <), $(...), or network.",
     "To add compiler flags and keep the Makefile's own, set them before make:",
     "CPPFLAGS='-DNAME=1' CFLAGS='-Wno-unused-parameter' make (make CFLAGS=... would replace them).",
     "For the date and time: date, or TZ=Asia/Tokyo date for another time zone.",
@@ -14,7 +14,6 @@
   ],
   "command": "python3",
   "args": ["shell/shell.py"],
-  "env": {"SHELL_NETWORK": "1"},
   "params": [
     {"name": "cwd", "type": "string", "description": "Folder to run in, starting with an allowed folder name, e.g. core_dump or core_dump/src; omit it when the command does not depend on a folder (whoami, date, uname, bc)", "style": "flag", "required": false},
     {"name": "command", "type": "string", "description": "The command line, e.g. ls -la, cat -n src/main.c, git log --oneline -5; help lists the commands", "style": "flag"}

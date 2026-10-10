@@ -1,0 +1,2 @@
+# The web tool's page extraction (tools/web/web.py), installed into the shared .venv by install.sh.
+trafilatura==2.3.1
