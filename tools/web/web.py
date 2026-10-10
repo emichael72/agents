@@ -4,14 +4,16 @@ Module: web.py
 Description:
     Fetches a web page and returns its main text as Markdown, for the model to read: trafilatura
     strips the menus, ads, scripts and styling, and keeps the headings, paragraphs, lists, tables
-    and code. Plain text, JSON and XML are returned as they are.
+    and code. Plain text, JSON and XML are returned as they are. A front page or an index, a list of
+    headlines rather than one article, is read with mode=links: its links, with their text.
 
     Key design points:
       - Only http and https; the page's size and the time to fetch it are limited (WEB_MAX_BYTES,
         WEB_TIMEOUT), and so is the text returned at once (WEB_MAX_CHARS): a longer text says where
         it stopped, and start= reads on from there.
       - A page that is not text (an image, a PDF, an archive) is refused, not downloaded.
-      - A page whose text only JavaScript builds has none to extract; it says so.
+      - A page whose text only JavaScript builds has none to extract; it says so. A page with little
+        article text but many links says to read it with mode=links.
       - Started by the system's python3 like the other tools, it carries on under the agents' .venv
         python, which has trafilatura (tools/web/requirements.txt).
 """
@@ -23,7 +25,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 # Import the tools' shared command line from the repository root (the nearest folder above
 # holding pyproject.toml).
@@ -50,6 +52,11 @@ class WebPage:
     USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) agents-web/1.0"
     TEXT_TYPES = ("text/plain", "text/markdown", "text/csv", "application/json", "application/xml", "text/xml")
     HTML_TYPES = ("text/html", "application/xhtml+xml")
+    MODES = ("text", "links")
+    LINK_WORDS = 4  # A link with fewer words is a menu item or a button, not a headline
+    LINK_CHARS = 200  # A link's text is cut there (a teaser around its headline)
+    FEW_CHARS = 1500  # Article text this short, on a page with LINK_HINT links or more: suggest mode=links
+    LINK_HINT = 20
 
     def __init__(self, timeout: Optional[float] = None, max_bytes: Optional[int] = None,
                  max_chars: Optional[int] = None) -> None:
@@ -116,25 +123,82 @@ class WebPage:
         site = meta.sitename if meta and meta.sitename else ""  # Not its date: trafilatura guesses one when there is none
         return f"# {title}" + (f"\n({site})" if site else ""), text.strip()
 
-    def read(self, url: str, start: int = 0, links: bool = False) -> str:
+    @classmethod
+    def link_list(cls, html: str, url: str) -> str:
+        """
+        List a page's links that read as headlines, as Markdown: for a front page or an index, whose
+        main text is a list of articles. A link that holds a heading is named by it; menu items and
+        buttons (fewer than LINK_WORDS words) are left out, and each address is listed once.
+        Args:
+            html: The page.
+            url: Its address, for relative links.
+        Returns:
+            str: One "- [text](address)" line per link, in page order; "" when there are none.
+        """
+        import lxml.html  # trafilatura's own parser
+
+        root = lxml.html.fromstring(html)
+        for junk in root.xpath("//script | //style | //noscript"):
+            junk.drop_tree()
+        seen: dict[str, int] = {}
+        entries: list[list[str]] = []
+        for anchor in root.iter("a"):
+            href = (anchor.get("href") or "").strip()
+            if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
+                continue
+            target = urljoin(url, href)
+            headings = [" ".join(h.text_content().split()) for h in anchor.iter("h1", "h2", "h3", "h4", "h5", "h6")]
+            text = next((h for h in headings if h), "") or " ".join(anchor.text_content().split())
+            if len(text) > cls.LINK_CHARS:
+                text = text[:cls.LINK_CHARS].rsplit(" ", 1)[0] + " …"
+            if target in seen:  # The same article linked again (its picture, its teaser): keep the best text
+                entry = entries[seen[target]]
+                if len(text.split()) >= cls.LINK_WORDS and (headings or len(entry[0].split()) < cls.LINK_WORDS):
+                    entry[0] = text
+                continue
+            seen[target] = len(entries)
+            entries.append([text, target])
+        names = set()
+        lines = []
+        for text, target in entries:
+            if len(text.split()) >= cls.LINK_WORDS and text not in names:
+                names.add(text)
+                lines.append(f"- [{text.replace('[', '(').replace(']', ')')}]({target})")
+        return "\n".join(lines)
+
+    def read(self, url: str, start: int = 0, links: bool = False, mode: str = "text") -> str:
         """
         Fetch a page and return its text, max_chars at a time.
         Args:
             url: The address.
             start: Where in the text to begin, for a page longer than max_chars.
             links: Keep the links (HTML pages only).
+            mode: "text", the page's main text; or "links", its links with their text, for a front page
+                or an index of headlines (HTML pages only).
         Returns:
             str: The heading, the address read and the text; at the end, where it stopped when there
                 is more.
         Raises:
             ValueError: If the page cannot be read (see `fetch`), or has no text.
         """
+        if mode not in self.MODES:
+            raise ValueError(f"Unknown mode '{mode}'. Use text or links.")
         final, kind, body = self.fetch(url)
-        if kind in self.HTML_TYPES:
-            heading, text = self.extract(body, final, links)
+        hint = ""
+        if kind in self.HTML_TYPES and mode == "links":
+            heading = self.extract(body, final, False)[0]
+            text = self.link_list(body, final)
             if not text:
+                raise ValueError(f"{final} has no links with text: the page may be built by JavaScript.")
+        elif kind in self.HTML_TYPES:
+            heading, text = self.extract(body, final, links)
+            listed = self.link_list(body, final).count("\n") + 1 if len(text) < self.FEW_CHARS else 0
+            if not text and listed < self.LINK_HINT:
                 raise ValueError(f"{final} has no text to extract: the page may be built by JavaScript, or be "
                                  f"only a form or media.")
+            if listed >= self.LINK_HINT:
+                hint = (f"[Little article text, but {listed} links with text: a front page or an index. "
+                        f"Call again with mode=links for its headlines.]")
         else:
             heading, text = f"# {final}", body.strip()
             if kind == "application/json":
@@ -149,16 +213,18 @@ class WebPage:
             cut = text.rfind("\n", start + self.max_chars // 2, end)
             end = cut + 1 if cut > 0 else end
         part = text[start:end].strip()
-        lines = [heading, f"url: {final}", "", part]
+        lines = [heading, f"url: {final}", "", part] if part else [heading, f"url: {final}"]
         if start or end < len(text):
             more = f" Call again with start={end} for more." if end < len(text) else ""
             lines += ["", f"[Characters {start:,} to {end:,} of {len(text):,}.{more}]"]
+        if hint:
+            lines += ["", hint]
         return "\n".join(lines)
 
     @classmethod
     def build_parser(cls) -> ToolArgumentParser:
         """
-        The command line: "--url=<address> [--start=<n>] [--links=true]".
+        The command line: "--url=<address> [--start=<n>] [--links=true] [--mode=text|links]".
         Returns:
             ToolArgumentParser: The parser.
         """
@@ -166,6 +232,7 @@ class WebPage:
         parser.add_argument("--url", required=True, help="The page's http(s) address")
         parser.add_argument("--start", type=int, default=0, help="Where in the text to begin (a long page)")
         parser.add_argument("--links", type=ToolArgumentParser.boolean, default=False, help="Keep the links")
+        parser.add_argument("--mode", default="text", help="text (default) or links: the links with their text")
         return parser
 
 
@@ -179,7 +246,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     """
     try:
         args = WebPage.build_parser().parse_args(argv)
-        print(WebPage().read(args.url, args.start, args.links))
+        print(WebPage().read(args.url, args.start, args.links, args.mode))
     except ValueError as e:
         print(f"Error: {e}")
         return 1

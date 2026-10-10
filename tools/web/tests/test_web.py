@@ -28,6 +28,9 @@ PAGES = {  # path: (content type, body)
     "/notes.txt": ("text/plain", "line one\nline two\n"),
     "/data.json": ("application/json", '{"name": "agents", "stars": 3}'),
     "/logo.png": ("image/png", "\x89PNG not really"),
+    "/front": ("text/html", "<html><head><title>News</title></head><body><nav><a href='/'>Home</a></nav>" +
+               "".join(f"<a href='/story/{n}'><img src='{n}.jpg'></a><a href='/story/{n}'><h2>Story {n} headline "
+                       f"about the day</h2><p>Its teaser</p></a>" for n in range(25)) + "</body></html>"),
     "/app": ("text/html", "<html><body><div id=root></div><script>render()</script></body></html>"),
 }
 
@@ -85,6 +88,16 @@ class WebPageTests(unittest.TestCase):
         second = page.read(self.base + "/article", start=start)
         self.assertIn(f"[Characters {start:,} to", second)
         self.assertNotEqual(first.split("\n\n")[1][:50], second.split("\n\n")[1][:50])
+
+    def test_a_front_page_is_read_as_its_headlines(self):
+        text = WebPage().read(self.base + "/front")
+        self.assertIn("Call again with mode=links for its headlines", text)  # Little article text, many links
+        headlines = WebPage().read(self.base + "/front", mode="links")
+        self.assertIn(f"- [Story 0 headline about the day]({self.base}/story/0)", headlines)  # Named by its heading
+        self.assertEqual(headlines.count("/story/24)"), 1)  # The picture's link to it is not listed again
+        self.assertNotIn("Home", headlines)  # A menu item
+        with self.assertRaisesRegex(ValueError, "Unknown mode"):
+            WebPage().read(self.base + "/front", mode="images")
 
     def test_text_and_json_come_back_as_they_are(self):
         self.assertTrue(WebPage().read(self.base + "/notes.txt").endswith("line one\nline two"))

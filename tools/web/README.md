@@ -10,7 +10,14 @@ From the repository root:
 python3 tools/web/web.py --url=https://docs.python.org/3/library/json.html
 python3 tools/web/web.py --url=https://docs.python.org/3/library/json.html --start=12000
 python3 tools/web/web.py --url=https://example.com --links=true
+python3 tools/web/web.py --url=https://www.ynet.co.il/news --mode=links
 ~~~
+
+trafilatura looks for one article. A front page or an index, such as a news site's, is a list of headlines instead, and
+its text would be only the top story. `mode=links` lists such a page's links with their text, one `- [text](address)`
+line each: a link that holds a heading is named by it, menu items and buttons (fewer than four words) are left out, and
+each address is listed once. When a page yields little article text but many links, the text says to try
+`mode=links`.
 
 The tool starts under the system's `python3` like the others and carries on under the agents' `.venv` Python, which has
 trafilatura (`requirements.txt` here; `install.sh` installs it).
