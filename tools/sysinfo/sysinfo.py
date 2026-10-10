@@ -15,7 +15,9 @@ Description:
       - It runs under the system's python3 (3.9 on RHEL 9), outside the agents' .venv.
       - The model section reads what the agent running the tool sets in its environment (AGENT_MODEL,
         AGENT_MODEL_SERVER, AGENT_MODEL_PROFILE, AGENT_MAX_TOKENS, AGENT_SAMPLING; never a key), and
-        asks an LM Studio server what it knows of the model (its /api/v1/models).
+        asks an LM Studio server what it knows of the model (its /api/v1/models); with measure, it
+        also times one short request there (/api/v0/chat/completions reports the server's own speed).
+      - The machine sections are headed with this machine's name: the model may run elsewhere.
 """
 
 import getpass
@@ -28,6 +30,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Optional
 
@@ -54,14 +57,18 @@ class SystemReport:
         ("gh", ["gh", "--version"]), ("uv", ["uv", "--version"]), ("docker", ["docker", "--version"]),
     ]
 
-    def __init__(self, repo_root: Optional[Path] = None) -> None:
+    MEASURE_TOKENS = 200  # What a measuring request generates; its prompt is about 1,500 tokens
+
+    def __init__(self, repo_root: Optional[Path] = None, measure: bool = False) -> None:
         """
         Args:
             repo_root: The agents repository, for its .venv; None finds it: the nearest folder
                 above this file holding pyproject.toml.
+            measure: The model section also measures the model's speed, with one short request.
         """
         self.repo_root = repo_root or next(p for p in Path(__file__).resolve().parents
                                            if (p / "pyproject.toml").is_file())
+        self.measure = measure
 
     @staticmethod
     def run(command: list[str], timeout: float = 5) -> str:
@@ -277,8 +284,12 @@ class SystemReport:
         if not model:
             return [("model", "unknown: the tool was not run by an agent")]
         server = os.environ.get("AGENT_MODEL_SERVER", "")
-        rows = [("agent", os.environ.get("AGENT_NAME", "unknown")), ("model", model), ("server", server or "unknown"),
-                ("profile", os.environ.get("AGENT_MODEL_PROFILE", "unknown") + " (context/models.json)")]
+        rows = [("agent", os.environ.get("AGENT_NAME", "unknown")), ("model", model), ("server", server or "unknown")]
+        host = urlparse(server).hostname or ""
+        if host and host.split(".")[0] not in ("localhost", "127", socket.gethostname().split(".")[0]):
+            rows.append(("runs on", f"{host}, not this machine ({socket.gethostname()}): the other sections "
+                                    f"describe {socket.gethostname()}, where the tools run, not the model's machine"))
+        rows.append(("profile", os.environ.get("AGENT_MODEL_PROFILE", "unknown") + " (context/models.json)"))
         max_tokens = os.environ.get("AGENT_MAX_TOKENS")
         rows.append(("max tokens per reply", f"{int(max_tokens):,}, thinking included" if max_tokens
                      else "the server's limit"))
@@ -318,17 +329,56 @@ class SystemReport:
             ("reasoning", f"yes, {reasoning.get('default', 'on')} by default" if isinstance(reasoning, dict)
              else "yes" if reasoning else "no"),
         ]
+        rows += self.speed(server, model) if self.measure else [
+            ("speed", "not measured (measure=true times one short request, about 10 seconds)")]
+        return rows
+
+    def speed(self, server: str, model: str) -> list[tuple[str, str]]:
+        """
+        Measure the model's speed with one request to LM Studio, which reports its own timing: how fast it
+        reads a prompt of about 1,500 tokens, and generates MEASURE_TOKENS tokens. The prompt starts with
+        the time, so no cached copy of it is reused.
+        Args:
+            server: The OpenAI-compatible base URL, e.g. http://boba:1234/v1.
+            model: The model id.
+        Returns:
+            list[tuple[str, str]]: The speed rows, or one row saying why there are none.
+        """
+        filler = "The quick brown fox jumps over the lazy dog while the river runs past the old mill. " * 80
+        body = {"model": model, "max_tokens": self.MEASURE_TOKENS, "temperature": 0.6,
+                "messages": [{"role": "user", "content": f"{time.time()}\n{filler}\nReply with OK."}]}
+        request = urllib.request.Request(server.rstrip("/").removesuffix("/v1") + "/api/v0/chat/completions",
+                                         json.dumps(body).encode(), {"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                reply = json.load(response)
+        except (OSError, ValueError) as error:
+            return [("speed", f"could not be measured: {error}")]
+        stats, usage = reply.get("stats") or {}, reply.get("usage") or {}
+        if not stats.get("tokens_per_second"):
+            return [("speed", "could not be measured: the server reports no timing")]
+        rows = [("generating", f"{stats['tokens_per_second']:.0f} tokens/s (measured now, "
+                               f"{usage.get('completion_tokens', 0)} tokens in {stats.get('generation_time', 0):.1f}s)")]
+        first, prompt = stats.get("time_to_first_token"), usage.get("prompt_tokens")
+        if first and prompt:
+            rows.append(("reading the prompt", f"{prompt / first:.0f} tokens/s ({prompt:,} tokens in {first:.2f}s "
+                                               f"before the first token)"))
+        runtime = reply.get("runtime") or {}
+        if runtime.get("name"):
+            rows.append(("runtime", f"{runtime['name']} {runtime.get('version', '')}".strip()))
         return rows
 
     @classmethod
     def build_parser(cls) -> ToolArgumentParser:
         """
-        The command line: "[--section=<name>]".
+        The command line: "[--section=<name>] [--measure=true]".
         Returns:
             ToolArgumentParser: The parser.
         """
         parser = ToolArgumentParser("sysinfo", cls.VERSION, "Report on the machine running the tools.")
         parser.add_argument("--section", help=f"One of: all (default), {', '.join(cls.SECTIONS)}")
+        parser.add_argument("--measure", type=ToolArgumentParser.boolean, default=False,
+                            help="The model section also measures the model's speed (about 10 seconds)")
         return parser
 
     def report(self, section: Optional[str] = None) -> str:
@@ -351,7 +401,8 @@ class SystemReport:
             except Exception as section_error:  # One unreadable section should not hide the others
                 rows = [("error", str(section_error))]
             width = max(len(key) for key, _ in rows)
-            blocks.append(f"[{name}]\n" + "\n".join(f"{key:<{width}}  {value}" for key, value in rows))
+            where = "" if name == "model" else f" on {socket.gethostname()}, the machine running the tools"
+            blocks.append(f"[{name}]{where}\n" + "\n".join(f"{key:<{width}}  {value}" for key, value in rows))
         return "\n\n".join(blocks)
 
 
@@ -365,7 +416,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     """
     try:
         args = SystemReport.build_parser().parse_args(argv)
-        print(SystemReport().report(args.section))
+        print(SystemReport(measure=args.measure).report(args.section))
     except ValueError as e:
         print(f"Error: {e}")
         return 1

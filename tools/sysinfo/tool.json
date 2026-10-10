@@ -5,12 +5,16 @@
     "memory and swap use, disks, network interfaces, GPU, the busiest processes,",
     "and software versions (Python, gcc, make, git, node, ...); and the model you run on",
     "(id, server, max tokens, sampling, and from LM Studio its size, quantization, context and",
-    "capabilities). Ask for one section to keep it short."
+    "capabilities). The machine sections describe the machine running the tools; the model",
+    "section says when the model runs on another one. measure=true also measures the model's",
+    "speed (tokens per second), with one short request. Ask for one section to keep it short."
   ],
   "command": "python3",
   "args": ["sysinfo/sysinfo.py"],
+  "timeout": 150,
   "params": [
-    {"name": "section", "type": "string", "description": "One of system, cpu, memory, disk, network, gpu, processes, software, model; omit it for all", "style": "flag", "required": false}
+    {"name": "section", "type": "string", "description": "One of system, cpu, memory, disk, network, gpu, processes, software, model; omit it for all", "style": "flag", "required": false},
+    {"name": "measure", "type": "boolean", "description": "model section: also measure the model's speed, generating and reading a prompt (about 10 seconds)", "style": "flag", "required": false}
   ],
   "resource": "sysinfo/README.md"
 }

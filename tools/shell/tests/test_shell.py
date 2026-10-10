@@ -67,8 +67,13 @@ class ShellConfigTests(unittest.TestCase):
             shell.check("ls && no-such-program-xyz", self.folder / "proj")
         self.assertIn("not installed on this machine", str(raised.exception))
         with self.assertRaises(ValueError) as raised:
-            shell.check("python3 -c 1", self.folder / "proj")
+            shell.check("make -v", self.folder / "proj")
         self.assertIn("not an allowed command", str(raised.exception))
+        for command, reason in (("python3 -c 1", "no Python or other script interpreter"),
+                                ("ls | curl -s https://example.com", "no network; read web pages with the web tool")):
+            with self.assertRaises(ValueError) as raised:  # A command models often try: why, and what instead
+                shell.check(command, self.folder / "proj")
+            self.assertIn(reason, str(raised.exception))
         shell.check("cd . && ls", self.folder / "proj")  # Installed commands pass
 
     def test_search_folders_need_execute_access_and_must_exist(self):

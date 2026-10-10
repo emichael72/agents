@@ -5,6 +5,7 @@
 // (call the model, run requested tools, send results back, repeat until it answers) is done by
 // the AI SDK's ToolLoopAgent; this file only builds the agent and renders its stream in the terminal.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { hostname } from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseArgs, styleText } from 'node:util';
@@ -209,6 +210,25 @@ export function skillsText(folder?: string): string {
 }
 
 /**
+ * Where the model and the tools run, from the whereabouts template (the same in all three agents): the
+ * model and its server's machine come from the environment shared with the tools (shareWithTools).
+ * @returns The paragraph, starting with a blank line; '' before a model is chosen, or without a template.
+ */
+export function whereaboutsText(): string {
+  const template = loadInstructions(INSTRUCTIONS_FILE, 'whereabouts');
+  const model = process.env.AGENT_MODEL;
+  if (!template || !model) return '';
+  let host = 'unknown';
+  try {
+    host = new URL(process.env.AGENT_MODEL_SERVER ?? '').hostname || 'unknown';
+  } catch { /* No server named */ }
+  const toolsHost = hostname().split('.')[0];
+  const modelHost = host === 'localhost' || host === '127.0.0.1' ? toolsHost : host;
+  return '\n\n' + template.replaceAll('{model}', model).replaceAll('{model_host}', modelHost)
+    .replaceAll('{tools_host}', toolsHost);
+}
+
+/**
  * Put the model in the environment the tools inherit, for the sysinfo tool's model section (the same
  * in all three agents): its id, server, profile, max_tokens and sampling; never the key.
  * @param settings The resolved settings, with the model the server has loaded.
@@ -249,7 +269,8 @@ export function buildAgent(model: LanguageModel, tools: ToolSet, parallel = OWN.
     model,
     timeout: { stepMs: timeoutSeconds * 1000 }, // one model call plus the tools it requested
     maxOutputTokens: maxTokens,
-    instructions: identityText(OWN.name) + loadInstructions() + (own ? '\n\n' + own : '') + skillsText(SKILLS_DIR) +
+    instructions: identityText(OWN.name) + loadInstructions() + whereaboutsText() + (own ? '\n\n' + own : '') +
+      skillsText(SKILLS_DIR) +
       memoryText(MEMORY_INDEX),
     tools: parallel ? tools : oneAtATime(tools),
     stopWhen: MAX_STEPS ? isStepCount(MAX_STEPS) : () => false,

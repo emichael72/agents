@@ -55,7 +55,7 @@ it.
 Studio at `http://boba:1234/v1` and can discover the loaded model. It names no model of its own, so it never makes LM Studio load one: with nothing loaded, the agent says so and stops.
 
 Each profile also limits a reply's tokens (`max_tokens`, thinking included) and can set the model's sampling
-(`sampling`). The local profile uses Qwen's recommended settings for its thinking models, including a presence penalty
+(`sampling`). The local profile uses Qwen's recommended settings for its thinking models, with a mild repeat penalty
 against the endless repetition quantized models can fall into. A reply that runs out of tokens while still thinking is
 asked again once, with a request to think briefly (`out_of_tokens_retries` in `context/agent.json`). With `-d`, the
 thinking of such a reply is saved in `logs/` to show whether the model went in circles.

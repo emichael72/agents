@@ -12,8 +12,25 @@
     "/usr/bin, as the sandbox sees them (under /usr, or /work/<name>/... with x access);",
     "variables are exported, ${NAME} taking NAME from the tool's own environment",
     "(the agents set AGENT_NAME). The sandbox's own variables (PATH, HOME, GIT_*, ...)",
-    "cannot be replaced."
+    "cannot be replaced.",
+    "refused: commands a model often tries that are not available, each with the reason and what",
+    "to do instead, which the refusal says."
   ],
+  "refused": {
+    "curl": "the shell has no network; read web pages with the web tool",
+    "wget": "the shell has no network; read web pages with the web tool",
+    "ssh": "the shell has no network",
+    "scp": "the shell has no network",
+    "ping": "the shell has no network",
+    "nc": "the shell has no network",
+    "python": "there is no Python or other script interpreter; use the shell's commands, or ask the user",
+    "python3": "there is no Python or other script interpreter; use the shell's commands, or ask the user",
+    "pip": "there is no Python or other script interpreter; use the shell's commands, or ask the user",
+    "perl": "there is no Python or other script interpreter; use the shell's commands, or ask the user",
+    "node": "there is no Python or other script interpreter; use the shell's commands, or ask the user",
+    "ruby": "there is no Python or other script interpreter; use the shell's commands, or ask the user",
+    "sudo": "commands run as the user, in a sandbox, without sudo"
+  },
   "environment": {
     "path": ["/usr/local/bin"],
     "variables": {

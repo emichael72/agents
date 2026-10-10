@@ -9,8 +9,11 @@ Description:
     layout (context/output.json), and the memory index those settings point at.
 """
 import json
+import os
+import socket
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from mcpagent.config import MCPAgentConfig
 
@@ -32,7 +35,7 @@ class AgentContext:
         """
         Read lines from the instructions file the client config names.
         Args:
-            key: Which lines to read: "instructions", "identity", "on_exit" (the prompt sent
+            key: Which lines to read: "instructions", "identity", "whereabouts", "on_exit" (the prompt sent
                 before exit) or "out_of_tokens" (sent to ask again after a reply ran out of tokens).
         Returns:
             str: The lines joined with newlines, or "" if none are configured.
@@ -78,10 +81,25 @@ class AgentContext:
         """
         return self._read("output_file") or {}
 
+    def whereabouts(self) -> str:
+        """
+        Where the model and the tools run, from the whereabouts template: the model and its server's
+        machine come from the environment the agent shares with its tools (AGENT_MODEL, AGENT_MODEL_SERVER).
+        Returns:
+            str: The paragraph, starting with a blank line; "" before a model is chosen, or without a template.
+        """
+        template, model = self.instructions("whereabouts"), os.environ.get("AGENT_MODEL")
+        if not template or not model:
+            return ""
+        host = urlparse(os.environ.get("AGENT_MODEL_SERVER", "")).hostname or "unknown"
+        tools_host = socket.gethostname().split(".")[0]
+        model_host = tools_host if host in ("localhost", "127.0.0.1") else host
+        return "\n\n" + template.format(model=model, model_host=model_host, tools_host=tools_host)
+
     def system_prompt(self, settings: dict[str, Any]) -> str:
         """
-        The model's full instructions: this agent's identity, the shared instructions, its own
-        instructions, its skills, and the topics in its memory.
+        The model's full instructions: this agent's identity, the shared instructions, where the model and
+        the tools run, its own instructions, its skills, and the topics in its memory.
         Args:
             settings: The agent loop settings, from `agent_settings`.
         Returns:
@@ -91,7 +109,8 @@ class AgentContext:
         skills: Optional[str] = settings.get("skills_dir")
         own = self.own()
         own_lines = "\n".join(own.get("instructions", []))
-        return (self.identity(own.get("name")) + self.instructions() + ("\n\n" + own_lines if own_lines else "")
+        return (self.identity(own.get("name")) + self.instructions() + self.whereabouts()
+                + ("\n\n" + own_lines if own_lines else "")
                 + self.skills_text(MCPAgentConfig.repo_path(skills) if skills else None)
                 + self.memory_text(MCPAgentConfig.repo_path(index) if index else None))
 

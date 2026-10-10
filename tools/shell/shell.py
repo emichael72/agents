@@ -128,6 +128,15 @@ class Shell:
         return {name: entry if isinstance(entry, dict) else {"about": entry} for name, entry in commands.items()}
 
     @classmethod
+    def load_refused(cls) -> dict[str, str]:
+        """
+        Read the commands a model often tries that are not available, with the reason and what to do instead.
+        Returns:
+            dict[str, str]: Each command and its reason.
+        """
+        return json.loads(cls.COMMANDS_FILE.read_text(encoding="utf-8")).get("refused", {})
+
+    @classmethod
     def load_environment(cls) -> dict[str, Any]:
         """
         Read what commands.json adds to the sandbox's environment.
@@ -283,6 +292,9 @@ class Shell:
             if name in self.missing:
                 raise ValueError(f"'{name}' is not installed on this machine. Run the command help to see the list.")
             if name not in commands:
+                reason = self.load_refused().get(name)
+                if reason:
+                    raise ValueError(f"'{name}' is not available: {reason}.")
                 raise ValueError(f"'{name}' is not an allowed command. Run the command help to see the list.")
             if name == "git":
                 sub = words[1] if len(words) > 1 else ""
