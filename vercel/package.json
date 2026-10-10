@@ -15,10 +15,13 @@
   "dependencies": {
     "@ai-sdk/openai-compatible": "3.0.63",
     "ai": "7.0.128",
+    "marked": "^12.0.2",
+    "marked-terminal": "^7.3.0",
     "ora": "9.4.1",
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@types/marked-terminal": "^6.1.1",
     "@types/node": "22.20.5",
     "oxlint": "1.87.0",
     "typescript": "7.0.2"

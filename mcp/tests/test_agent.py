@@ -487,7 +487,7 @@ class OutputTests(unittest.TestCase):
     # noinspection DuplicatedCode
     def test_with_debug_the_spinner_runs_between_the_lines_and_times_the_thinking(self):
         printed = io.StringIO()
-        output = Output(Console(file=printed, force_terminal=True, width=120), {'width': 120}, debug=True)
+        output = Output(Console(file=printed, force_terminal=True, width=120), {'width': 120, 'render': False}, debug=True)
         spinners = []
         output.out.status = Mock(side_effect=lambda *args, **kwargs: spinners.append(Mock()) or spinners[-1])
         now = [100.0]
@@ -515,9 +515,58 @@ class OutputTests(unittest.TestCase):
             output.thinking()
             self.assertEqual(len(spinners), 3)  # No spinner while the answer streams
 
+    def test_the_answer_renders_as_markdown_block_by_block(self):
+        printed = io.StringIO()
+        output = Output(Console(file=printed, force_terminal=True, width=100, height=40), {'width': 100, 'show_time': False})
+        output.start()
+        answer = "## Title\n\nThe **flip** swaps `left`.\n\n```c\nint x = 1;\n```\n\n- one\n- two"
+        for i in range(0, len(answer), 5):  # As a model streams it: a block is redrawn as it grows
+            output.text(answer[i:i + 5])
+        self.assertEqual(output.blocks, 3)  # Title, paragraph and code block are done; the list still streams
+        output.finish()
+        printed.seek(0)
+        printed.truncate()
+        output.start()
+        for block in answer.split("\n\n"):  # Whole blocks: only finished frames, so no half-closed **
+            output.text(block + "\n\n")
+        output.finish()
+        raw = printed.getvalue()
+        plain = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", raw)
+        for marker in ("**", "```", "## ", "- one"):
+            self.assertNotIn(marker, plain)  # Markdown's markers are rendered, not shown
+        self.assertIn("• one", plain)
+        self.assertIn("\x1b[1m", raw)  # Bold
+        self.assertIn("Title", plain)
+
+    def test_blocks_end_at_a_blank_line_or_a_closed_code_block(self):
+        self.assertEqual(Output.block_end("One.\n\nTwo"), len("One.\n\n"))
+        self.assertIsNone(Output.block_end("One line, still streaming"))
+        self.assertIsNone(Output.block_end("```c\nint x;\n\nint y;\n"))  # A blank line inside code does not end it
+        self.assertEqual(Output.block_end("```c\nint x;\n```\nMore"), len("```c\nint x;\n```\n"))
+
+    def test_with_debug_code_from_a_named_file_is_highlighted_dimmed(self):
+        printed = io.StringIO()
+        output = Output(Console(file=printed, force_terminal=True, width=100), {'width': 100}, debug=True)
+        output.line('→ shell({"command":"cat -n src/pi.c"})')
+        output.line("← shell:      1\t#include <math.h>\n     2\tint x = 1;")
+        raw = printed.getvalue()
+        dim = re.compile(r"\x1b\[(?:[0-9;]*;)?2(?:;[0-9;]*)?m")  # An SGR code with 2, dim (not 2K, erase)
+        self.assertRegex(raw, dim)
+        self.assertIn("int", re.sub(r"\x1b\[[0-9;]*m", "", raw))
+        printed.seek(0)
+        printed.truncate()
+        output.line('→ shell({"command":"ls"})')  # No file named: a plain gray line
+        output.line("← shell: a.c\nb.c")
+        self.assertNotRegex(printed.getvalue(), dim)
+
+    def test_piped_output_and_plain_do_not_render(self):
+        self.assertFalse(Output(Console(file=io.StringIO()), {'width': 100}).render)  # Not a terminal
+        self.assertFalse(Output(Console(file=io.StringIO(), force_terminal=True), {'render': False}).render)
+        self.assertTrue(Output(Console(file=io.StringIO(), force_terminal=True), {'width': 100}).render)
+
     def test_by_default_only_the_answer_and_timing_print_and_tools_show_on_the_spinner(self):
         printed = io.StringIO()
-        output = Output(Console(file=printed, force_terminal=True, width=120), {"width": 120, "show_time": True},
+        output = Output(Console(file=printed, force_terminal=True, width=120), {"width": 120, "show_time": True, "render": False},
                         debug=False)
         spinner = Mock()
         output.out.status = Mock(return_value=spinner)  # rich's spinner, without drawing it
@@ -555,7 +604,7 @@ class OutputTests(unittest.TestCase):
 
     def test_a_link_in_a_gray_line_is_bright_cyan_and_the_rest_stays_gray(self):
         printed = io.StringIO()
-        output = Output(Console(file=printed, force_terminal=True, width=120), {"width": 120, "links": True})
+        output = Output(Console(file=printed, force_terminal=True, width=120), {"width": 120, "links": True, "render": False})
         output.line("← pr: quiz at http://minion:8000/q/abc for PR #12")
         raw = printed.getvalue()
         self.assertRegex(raw, r"\x1b\[90m← pr: quiz at ")  # Gray before the link

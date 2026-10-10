@@ -46,7 +46,7 @@ node vercel/agent.ts
 MCPAgent starts and stops its own tool server. No second terminal is needed. If the installer supplied Node, use
 `.node/bin/node` in the last command.
 
-Add `-d` to see the tool calls and results. Type `exit` to finish; `/history` shows the conversation and `/reset` clears
+Add `-d` to see the tool calls and results. On a terminal the answer's Markdown is rendered as it streams (headings, emphasis, lists, tables, highlighted code), and with `-d` code a tool shows from a file is highlighted, dimmed; `--plain` prints raw text instead (`render` in `context/output.json`). Type `exit` to finish; `/history` shows the conversation and `/reset` clears
 it.
 
 ## Models and settings

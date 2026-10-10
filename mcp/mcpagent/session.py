@@ -31,7 +31,7 @@ class AgentSession:
     PROMPT = ANSI("\x1b[90mYou > \x1b[0m")
 
     def __init__(self, config_file: str | Path, profile: Optional[str] = None, model: Optional[str] = None,
-                 base_url: Optional[str] = None, context: str = "", trace: bool = True) -> None:
+                 base_url: Optional[str] = None, context: str = "", trace: bool = True, plain: bool = False) -> None:
         """
         Args:
             config_file: The MCPAgent config: the MCP servers, the tools its own server serves, and
@@ -40,6 +40,7 @@ class AgentSession:
             model: Overrides the profile's model.
             base_url: Overrides the profile's base URL.
             context: Extra instructions for the assistant.
+            plain: Print the answer as plain text, without rendering Markdown (--plain).
             trace: Debug mode: print the gray lines (banner, hints, tool calls and results)
                 instead of a spinner.
         """
@@ -48,6 +49,7 @@ class AgentSession:
         self.model = model
         self.base_url = base_url
         self.context = context
+        self.plain = plain  # --plain: no Markdown rendering
         self.trace = trace
         self.console = Console(highlight=False, soft_wrap=True)  # Never re-wrap lines; Output wraps
         self.output = Output(self.console, debug=trace)  # Replaced by the configured layout in _start
@@ -91,7 +93,8 @@ class AgentSession:
         mcp_client = MCPClient(self.config_file)
         shared = AgentContext(mcp_client.config_data)
         self.shared = shared
-        self.output = Output(self.console, shared.output_settings(), debug=self.trace)
+        self.output = Output(self.console, {**shared.output_settings(), **({"render": False} if self.plain else {})},
+                             debug=self.trace)
         model = ModelProfiles.load(mcp_client.config_data).resolve(self.profile, model=self.model,
                                                                     base_url=self.base_url)
         self.settings = shared.agent_settings()

@@ -7,10 +7,14 @@
     "and how many model calls it took.",
     "links: show Markdown links and web addresses as clickable terminal links",
     "(OSC 8; only on a terminal).",
+    "render: on a terminal, render the answer's Markdown (headings, emphasis, lists, tables,",
+    "highlighted code blocks) block by block as it streams, and with -d highlight code a tool shows",
+    "from a named file, dimmed; --plain turns it off for one run. Piped output is always plain.",
     "Everything except the model's answer prints in dark gray (ANSI 90)."
   ],
   "width": 120,
   "show_time": true,
   "show_tokens": true,
-  "links": true
+  "links": true,
+  "render": true
 }

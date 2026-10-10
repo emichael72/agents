@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import {
-  ask, buildAgent, identityText, outOfTokens, linkSegments, loadInstructions, loadModels, loadOutputSettings, memoryText, Output, resolveModel, skillsText, worthSaving, wrap,
+  ask, blockEnd, buildAgent, identityText, outOfTokens, linkSegments, loadInstructions, loadModels, loadOutputSettings, memoryText, Output, resolveModel, skillsText, worthSaving, wrap,
   loadTools, localTools, repeatGuard, REPO_ROOT, runScript, TOOLS_DIR,
 } from '../vercelagent/index.ts';
 
@@ -329,4 +329,52 @@ test('the skills join the instructions', () => {
   mkdirSync(path.join(folder, 'notes')); // A folder without SKILL.md is not a skill
   assert.ok(skillsText(folder).endsWith('read it with the skill tool and follow it):\n- build: Build and test a project.'));
   assert.equal(skillsText(undefined), '');
+});
+
+test('the answer renders as Markdown block by block', () => {
+  let raw = '';
+  const output = new Output((text) => { raw += text; }, { width: 100, show_time: false }, false, true);
+  output.start();
+  const answer = '## Title\n\nThe **flip** swaps `left`.\n\n```c\nint x = 1;\n```\n\n- one\n- two';
+  for (const block of answer.split('\n\n')) output.text(block + '\n\n'); // Whole blocks: finished frames only
+  output.stopSpinner();
+  output.end();
+  const plain = stripVTControlCharacters(raw);
+  for (const marker of ['**', '```', '## ', '- one']) assert.ok(!plain.includes(marker), `${marker} shown`);
+  assert.match(plain, /Title/);
+  assert.match(plain, /\* one/); // marked-terminal's bullet
+  assert.match(plain, /^ {2}int x = 1;$/m); // The code block, indented (colors need a terminal: see the README)
+});
+
+test('blocks end at a blank line or a closed code block', () => {
+  assert.equal(blockEnd('One.\n\nTwo'), 'One.\n\n'.length);
+  assert.equal(blockEnd('One line, still streaming'), undefined);
+  assert.equal(blockEnd('```c\nint x;\n\nint y;\n'), undefined); // A blank line inside code does not end it
+  assert.equal(blockEnd('```c\nint x;\n```\nMore'), '```c\nint x;\n```\n'.length);
+});
+
+test('with debug, code from a named file is highlighted dimmed', () => {
+  let raw = '';
+  const output = new Output((text) => { raw += text; }, { width: 100 }, true, true);
+  output.line('→ shell({"command":"cat -n src/pi.c"})');
+  output.line('← shell:      1\t#include <math.h>\n     2\tint x = 1;');
+  output.stopSpinner();
+  // Each code line on its own, number first (its dimmed colors need a terminal)
+  assert.match(stripVTControlCharacters(raw), /^ {2} {5}2 {2}int x = 1;$/m);
+  raw = '';
+  output.line('→ shell({"command":"ls"})'); // No file named: a plain gray line
+  output.line('← shell: a.c\nb.c');
+  output.stopSpinner();
+  assert.match(stripVTControlCharacters(raw), /← shell: a\.c\nb\.c\n/); // The usual gray lines
+});
+
+test('plain and piped output do not render', () => {
+  let raw = '';
+  for (const output of [new Output((t) => { raw += t; }, { render: false }, false, true),
+                        new Output((t) => { raw += t; }, {}, false, false)]) {
+    output.start();
+    output.text('Some **bold** text.');
+    output.end();
+  }
+  assert.equal(stripVTControlCharacters(raw).match(/\*\*bold\*\*/g)?.length, 2); // Shown as typed
 });

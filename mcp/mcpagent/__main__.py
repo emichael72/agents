@@ -48,6 +48,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", help="Override the profile's model for this run.")
     parser.add_argument("--base-url", help="Override the profile's OpenAI-compatible base URL for this run.")
     parser.add_argument("--prompt", help="Run one prompt and exit.")
+    parser.add_argument("--plain", action="store_true", help="Print the answer as plain text: no Markdown rendering or code highlighting.")
     parser.add_argument("-d", "--debug", action="store_true",
                         help="Print the banner, tool calls and results as gray lines, instead of a spinner.")
     parser.add_argument("-v", "--version", action="store_true", help="Show the package version and exit.")
@@ -81,7 +82,7 @@ def main() -> int:
         profile = args.profile or ("local" if args.local else "openai" if args.openai else None)
         context = args.context.expanduser().read_text(encoding="utf-8") if args.context else ""
         session = AgentSession(config_file, profile=profile, model=args.model, base_url=args.base_url,
-                               context=context, trace=args.debug)
+                               context=context, trace=args.debug, plain=args.plain)
         return asyncio.run(session.run(args.prompt))
 
     except KeyboardInterrupt:

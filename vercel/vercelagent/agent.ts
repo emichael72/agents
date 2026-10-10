@@ -10,6 +10,9 @@ import { createInterface } from 'node:readline';
 import { parseArgs, styleText } from 'node:util';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { isStepCount, ToolLoopAgent, type LanguageModel, type ModelMessage, type ToolSet } from 'ai';
+import { highlight } from 'cli-highlight';
+import { Marked } from 'marked';
+import { markedTerminal } from 'marked-terminal';
 import ora, { type Ora } from 'ora';
 import { localTools, oneAtATime, REPO_ROOT, repeatGuard } from './tools.ts';
 
@@ -234,7 +237,47 @@ export function buildAgent(model: LanguageModel, tools: ToolSet, parallel = OWN.
 type Agent = ReturnType<typeof buildAgent>;
 type Write = (text: string) => void;
 
-export type OutputSettings = { width?: number; show_time?: boolean; show_tokens?: boolean; links?: boolean };
+export type OutputSettings = { width?: number; show_time?: boolean; show_tokens?: boolean; links?: boolean; render?: boolean };
+
+// A file named in a tool call, and the language its contents are highlighted as
+const FILE_LANGUAGES: Record<string, string> = {
+  '.c': 'c', '.h': 'c', '.cc': 'cpp', '.cpp': 'cpp', '.hpp': 'cpp', '.py': 'python', '.ts': 'typescript',
+  '.js': 'javascript', '.json': 'json', '.md': 'markdown', '.sh': 'bash', '.mk': 'makefile', '.yaml': 'yaml',
+  '.yml': 'yaml', '.toml': 'toml',
+};
+const NAMED_FILE = /[\w./-]*?(Makefile|\.(?:c|h|cc|cpp|hpp|py|ts|js|json|md|sh|mk|yaml|yml|toml))\b/;
+const NUMBERED_LINE = /^(\s*\d+)(\t| {2})(.*)$/; // cat -n's lines, and ed's
+// Dimmed colors for code a tool shows: each token keeps dim, since its own codes end with a reset
+const dimmed = (...styles: Parameters<typeof styleText>[0][]) => (text: string) => styleText(['dim', ...styles.flat()] as never, text);
+const DIM_THEME = {
+  keyword: dimmed('blue'), built_in: dimmed('cyan'), type: dimmed('cyan'), literal: dimmed('yellow'),
+  number: dimmed('yellow'), string: dimmed('green'), comment: dimmed('gray'), meta: dimmed('magenta'),
+  title: dimmed('cyan'), attr: dimmed('yellow'), symbol: dimmed('magenta'), section: dimmed('bold'),
+  default: dimmed([]),
+};
+
+/**
+ * Find where the first complete Markdown block ends: at a blank line outside a code block, or after
+ * the line that closes a code block.
+ * @param text The streamed text of the current block, and what follows it.
+ * @returns The offset just past the block; undefined while it is still open.
+ */
+export function blockEnd(text: string): number | undefined {
+  let fenced = false;
+  let offset = 0;
+  for (const line of text.split(/(?<=\n)/)) {
+    if (!line.endsWith('\n')) return undefined; // The line is not complete yet
+    offset += line.length;
+    const stripped = line.trim();
+    if (stripped.startsWith('```') || stripped.startsWith('~~~')) {
+      if (fenced) return offset;
+      fenced = true;
+    } else if (!fenced && !stripped && offset > line.length) {
+      return offset;
+    }
+  }
+  return undefined;
+}
 
 // A Markdown link, [text](url), or a bare web address: shown as a clickable OSC 8 link
 const LINK = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>()[\]"'`]+)/g;
@@ -324,26 +367,41 @@ export class Output {
   private blankOwed = false; // The last text ended without its blank line after it
   private thinkingSince?: number; // When the current stretch of thinking began
   private thinkingShown = -1; // The seconds the spinner shows for it
+  private readonly renderMarkdown: boolean; // Render the answer's Markdown and highlight code, on a terminal
+  private readonly markdown: Marked;
+  private block = ''; // The answer's Markdown block being streamed
+  private blockLines = 0; // The lines it takes on screen, to redraw it in place
+  private blocks = 0; // Blocks of this answer already shown
+  private lastCall = ''; // The latest "→ tool(...)" line, to tell the language of what the tool shows
 
   /**
    * @param write Prints raw text (stdout by default).
    * @param settings The layout settings; undefined reads context/output.json.
    * @param debug Print the gray lines (banner, hints, tool calls and results); otherwise a spinner
    *   runs while the model thinks or a tool runs, and only the answer and the timing line print.
+   * @param terminal Writing to a terminal, where the answer's Markdown is rendered ("render", on by
+   *   default; --plain turns it off): block by block, each redrawn in place as it streams, with
+   *   highlighted code; with debug, code a tool shows from a named file is highlighted too, dimmed.
    */
-  constructor(write: Write, settings: OutputSettings = loadOutputSettings(), debug = true) {
+  constructor(write: Write, settings: OutputSettings = loadOutputSettings(), debug = true,
+              terminal = Boolean(process.stdout.isTTY)) {
     this.write = write;
     this.debug = debug;
     this.width = Math.min(settings.width ?? 120, process.stdout.isTTY ? process.stdout.columns : Infinity);
     this.showTime = settings.show_time ?? true;
     this.showTokens = settings.show_tokens ?? false;
     this.links = (settings.links ?? false) && Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+    this.renderMarkdown = (settings.render ?? true) && terminal && !process.env.NO_COLOR;
+    this.markdown = new Marked();
+    this.markdown.use(markedTerminal({ width: this.width, reflowText: true, tab: 2, showSectionPrefix: false }) as never);
   }
 
   /** Start timing a response, and the spinner (on a terminal only). */
   start(): void {
     this.started = performance.now();
     this.usage = undefined;
+    this.block = '';
+    this.blockLines = this.blocks = 0;
     this.spin('Thinking…');
   }
 
@@ -404,6 +462,10 @@ export class Output {
       this.blankOwed = false;
       this.inText = true;
     }
+    if (this.renderMarkdown) {
+      this.streamMarkdown(chunk);
+      return;
+    }
     const body = chunk.replace(/\n+$/, '');
     if (body) {
       this.write(this.render(this.wrapStream(this.pending + body)));
@@ -414,11 +476,71 @@ export class Output {
   }
 
   /**
+   * Stream rendered Markdown: add the chunk to the current block and redraw it; each block that is
+   * complete stays on screen, and the next starts below it.
+   */
+  private streamMarkdown(chunk: string): void {
+    this.block += chunk;
+    for (let end = blockEnd(this.block); end !== undefined; end = blockEnd(this.block)) {
+      const done = this.block.slice(0, end);
+      this.block = this.block.slice(end).replace(/^\n+/, '');
+      this.showBlock(done, true);
+    }
+    if (this.block.trim()) this.showBlock(this.block, false);
+  }
+
+  /**
+   * Draw a block rendered: in place while it streams (the cursor goes back over its lines and they are
+   * written again), and for good once it is complete. A block taller than the terminal is not redrawn
+   * until it is complete, since the lines above the screen cannot be reached.
+   */
+  private showBlock(text: string, final: boolean): void {
+    const rendered = (this.markdown.parse(text.replace(/^\n+|\n+$/g, '')) as string).replace(/^\n+|\n+$/g, '');
+    const lines = rendered.split('\n').length;
+    const rows = process.stdout.rows || 24;
+    if (!final && lines > rows - 2) return;
+    if (this.blockLines) this.write(`\x1b[${this.blockLines}F\x1b[J`); // Back to the block's first line, clear below
+    else if (this.blocks) this.write('\n'); // One blank line between blocks
+    this.write(rendered + '\n');
+    this.blockLines = final ? 0 : lines;
+    if (final) this.blocks += 1;
+  }
+
+  /**
+   * With rendering on, show a tool's result highlighted and dimmed when it is code from a file its call
+   * names (cat -n src/main.c, ed on a Makefile): the gray first line, then each line of code, with its
+   * number kept gray.
+   * @returns True if it was shown; false to show it as a plain gray line.
+   */
+  private toolCode(text: string): boolean {
+    const named = this.renderMarkdown ? NAMED_FILE.exec(this.lastCall) : null;
+    const at = text.indexOf(': ');
+    const body = at >= 0 ? text.slice(at + 2) : '';
+    if (!named || !body.includes('\n')) return false;
+    const language = named[1] === 'Makefile' ? 'makefile' : FILE_LANGUAGES[named[1]];
+    const [first, ...rest] = body.split('\n');
+    this.note(text.slice(0, at + 2) + first);
+    for (const line of rest) {
+      const numbered = NUMBERED_LINE.exec(line);
+      const [number, code] = numbered ? [numbered[1] + numbered[2].replace('\t', '  '), numbered[3]] : ['', line];
+      let shown: string;
+      try {
+        shown = highlight(code.replaceAll('\t', '    '), { language, ignoreIllegals: true, theme: DIM_THEME as never });
+      } catch {
+        shown = styleText('dim', code);
+      }
+      this.write('  ' + gray(number) + shown + '\n');
+    }
+    return true;
+  }
+
+  /**
    * Print a whole dark gray line (a tool call or result, the banner) in debug mode, then spin on while
    * the tool or the model works; otherwise only show the activity on the spinner: "Running <tool>…"
    * for a call, "Thinking…" after it.
    */
   line(text: string): void {
+    if (text.startsWith('→ ')) this.lastCall = text;
     if (!this.debug) {
       if (text.startsWith('→ ')) {
         this.end(false); // A call after some answer text: end its line, and spin again
@@ -428,7 +550,7 @@ export class Output {
       }
       return;
     }
-    this.note(text);
+    if (!(text.startsWith('← ') && this.toolCode(text))) this.note(text);
     if (/^[←✗] /.test(text)) this.spin('Thinking…'); // A result goes back to the model, which works on it
   }
 
@@ -447,7 +569,13 @@ export class Output {
    *   a gray line adds one first), so text around a hidden tool call has only one.
    */
   end(blank = true): void {
-    if (this.inText) {
+    if (this.inText && this.renderMarkdown) { // The last block stays; the cursor is already on a new line
+      if (this.block.trim()) this.showBlock(this.block, true);
+      this.block = '';
+      this.blockLines = 0;
+      if (blank) this.write('\n');
+      this.blankOwed = !blank;
+    } else if (this.inText) {
       this.write(this.render(this.takeWord()) + (blank ? '\n\n' : '\n'));
       this.blankOwed = !blank;
     }
@@ -536,11 +664,12 @@ export class Output {
  * @returns The updated message history, including this turn.
  */
 export async function ask(agent: Agent, prompt: string, history: ModelMessage[],
-                          { trace = true, write = (text: string) => void process.stdout.write(text), limit = {} }:
-                            { trace?: boolean; write?: Write; limit?: { profile?: string; maxTokens?: number } } = {}):
+                          { trace = true, write = (text: string) => void process.stdout.write(text), limit = {}, plain = false }:
+                            { trace?: boolean; write?: Write; limit?: { profile?: string; maxTokens?: number };
+                              plain?: boolean } = {}):
   Promise<ModelMessage[]> {
   const messages: ModelMessage[] = [...history, { role: 'user', content: prompt }];
-  const output = new Output(write, undefined, trace);
+  const output = new Output(write, plain ? { ...loadOutputSettings(), render: false } : undefined, trace); // --plain
   output.start();
   repeatGuard.reset(); // Only this turn's calls count as repeats
   // The AI SDK reports every call of a model response before their results; hold each call line
@@ -619,10 +748,10 @@ function errorMessage(error: unknown): string {
 }
 
 async function chat(agent: Agent, prompt: string | undefined, trace: boolean, showHistory: boolean,
-                    limit: { profile?: string; maxTokens?: number } = {}) {
+                    limit: { profile?: string; maxTokens?: number } = {}, plain = false) {
   let history: ModelMessage[] = [];
   if (prompt !== undefined) {
-    history = await ask(agent, prompt, history, { trace, limit });
+    history = await ask(agent, prompt, history, { trace, limit, plain });
     if (showHistory) console.dir(history, { depth: null });
     return;
   }
@@ -639,7 +768,7 @@ async function chat(agent: Agent, prompt: string | undefined, trace: boolean, sh
         if (AGENT_SETTINGS.save_on_exit && onExit && worthSaving(history)) {
           if (trace) console.log(gray('Before exiting: saving anything worth remembering (Ctrl+C skips).'));
           try {
-            await ask(agent, onExit, history, { trace, limit });
+            await ask(agent, onExit, history, { trace, limit, plain });
           } catch (error) {
             console.error(styleText('red', `\nError: ${errorMessage(error)}`));
           }
@@ -653,7 +782,7 @@ async function chat(agent: Agent, prompt: string | undefined, trace: boolean, sh
         console.dir(history, { depth: null });
       } else if (line) {
         try {
-          history = await ask(agent, line, history, { trace, limit });
+          history = await ask(agent, line, history, { trace, limit, plain });
         } catch (error) {
           console.error(styleText('red', `\nError: ${errorMessage(error)}`));
         }
@@ -675,6 +804,7 @@ const CLI_OPTIONS = {
   prompt: { type: 'string' },
   history: { type: 'boolean', default: false },
   debug: { type: 'boolean', short: 'd', default: false },
+  plain: { type: 'boolean', default: false },
   help: { type: 'boolean', short: 'h', default: false },
 } as const;
 
@@ -699,6 +829,7 @@ export async function main(): Promise<number> {
   --base-url URL     Override the profile's OpenAI-compatible base URL for this run
   --prompt TEXT      Run one prompt and exit
   --history          With --prompt, print the message history
+  --plain            Print the answer as plain text: no Markdown rendering or code highlighting
   -d, --debug        Print the banner, tool calls and results as gray lines, instead of a spinner`);
     return 0;
   }
@@ -723,7 +854,7 @@ export async function main(): Promise<number> {
     const toolCount = `${Object.keys(localTools).length} tools`;
     new Output((text) => void process.stdout.write(text), undefined, values.debug).line(
       `${settings.name} model: ${settings.model} @ ${settings.baseURL}, ${toolCount} (${parallel ? 'parallel' : 'sequential'})`);
-    await chat(agent, values.prompt, values.debug, values.history, settings);
+    await chat(agent, values.prompt, values.debug, values.history, settings, values.plain);
     return 0;
   } catch (error) {
     console.error(styleText('red', `Error: ${errorMessage(error)}`));

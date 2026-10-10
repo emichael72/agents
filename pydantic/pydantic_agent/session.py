@@ -41,6 +41,7 @@ class AgentSession:
     PROMPT = ANSI("\x1b[90mYou > \x1b[0m")
 
     def __init__(self, trace: bool = True, parallel: Optional[bool] = None, context: Optional[AgentContext] = None,
+                 plain: bool = False,
                  console: Optional[Console] = None) -> None:
         """
         Args:
@@ -48,6 +49,7 @@ class AgentSession:
                 spinner shows them.
             parallel: Run the tool calls of one model response concurrently instead of one at a time;
                 None uses parallel_tool_calls in pydantic/instructions.json (true when unset).
+            plain: Print the answer as plain text, without rendering Markdown (--plain).
             context: The shared context files; None uses agents/context.
             console: Where to print; None prints to the terminal.
         """
@@ -60,7 +62,7 @@ class AgentSession:
         self.settings = self.context.agent_settings()
         self.tool_retries = int(self.settings.get("tool_retries", 3))  # Corrections of an invalid call
         self.limits = self.context.usage_limits(self.settings)
-        self.output_settings = self.context.output_settings()
+        self.output_settings = {**self.context.output_settings(), **({"render": False} if plain else {})}
         self.tools: Optional[FunctionToolset] = None  # The local tools, once build_agent loads them
         self.model_settings: dict[str, Any] = {}  # The resolved model profile, once run picks it
 
