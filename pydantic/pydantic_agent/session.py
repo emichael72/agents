@@ -98,6 +98,7 @@ class AgentSession:
             self.console.print()  # Blank line before the banner (hidden without debug)
         try:
             settings = ModelProfiles.load().resolve(profile, model=model, base_url=base_url)
+            ModelProfiles.share_with_tools(settings)
             self.model_settings = settings
             agent = self.build_agent(ModelProfiles.build_model(settings))
             tools = f"{len(self.tools.tools) if self.tools else 0} tools"

@@ -137,6 +137,19 @@ class ModelProfiles:
         return OpenAIChatModel(settings["model"], provider=provider, settings=model_settings or None)
 
     @staticmethod
+    def share_with_tools(settings: dict[str, Any]) -> None:
+        """
+        Put the model in the environment the tools inherit, for the sysinfo tool's model section
+        (the same in all three agents): its id, server, profile, max_tokens and sampling; never the key.
+        Args:
+            settings: The resolved profile.
+        """
+        os.environ.update({"AGENT_MODEL": settings["model"], "AGENT_MODEL_SERVER": settings["base_url"],
+                           "AGENT_MODEL_PROFILE": settings["profile"],
+                           "AGENT_MAX_TOKENS": str(settings.get("max_tokens") or ""),
+                           "AGENT_SAMPLING": json.dumps(settings.get("sampling") or {})})
+
+    @staticmethod
     def out_of_tokens(settings: dict[str, Any]) -> str:
         """
         What to tell the user when a reply hit the profile's max_tokens (the same in all three agents).

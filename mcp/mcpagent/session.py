@@ -98,6 +98,7 @@ class AgentSession:
                              debug=self.trace)
         model = ModelProfiles.load(mcp_client.config_data).resolve(self.profile, model=self.model,
                                                                     base_url=self.base_url)
+        ModelProfiles.share_with_tools(model)  # Before the MCP server starts: its tools inherit it
         self.settings = shared.agent_settings()
         agent = MCPAgent(mcp_client, base_url=model["base_url"], model=model["model"],
                          api_key=model["api_key"], provider=model["name"], timeout=model["timeout"],

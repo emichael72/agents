@@ -256,6 +256,18 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                     for line in (f"→ {step['tool']}", f"{'←' if step['outcome'] == 'ok' else '✗'} {step['tool']}")]
         self.assertEqual(lines, expected)
 
+    def test_tools_are_told_which_model_the_agent_runs_on(self):
+        settings = {"model": "some/model", "base_url": "http://127.0.0.1:9/v1", "profile": "local", "max_tokens": 16000,
+                    "sampling": {"top_k": 20}, "api_key": "secret"}
+        with patch.dict(os.environ):
+            ModelProfiles.share_with_tools(settings)
+            report = LocalTools.run_script("python3", "sysinfo/sysinfo.py", "--section=model")
+        self.assertIn("some/model", report)
+        self.assertRegex(report, r"max tokens per reply +16,000, thinking included")
+        self.assertRegex(report, r"sampling +top_k 20")
+        self.assertIn("unavailable (not an LM Studio server", report)  # Nothing listens on port 9
+        self.assertNotIn("secret", report)
+
     def test_tools_are_told_which_agent_runs_them(self):
         self.assertEqual(LocalTools.run_script("printenv", "AGENT_NAME"), "Pydantic Agent")
 

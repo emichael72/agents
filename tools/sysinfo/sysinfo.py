@@ -3,7 +3,8 @@ Module: sysinfo.py
 
 Description:
     Reports on the machine running the tools: the system, CPU and its current load, memory, disks,
-    network, GPU, busiest processes and the versions of the development software.
+    network, GPU, busiest processes and the versions of the development software; and on the model
+    the agent runs on.
 
     Key design points:
       - Read-only, standard library only (and the tools' shared command line): reads /proc, /sys and /etc/os-release, and runs a few
@@ -12,9 +13,13 @@ Description:
       - CPU utilization is measured over SAMPLE_SECONDS (two readings of /proc/stat).
       - One section, or all of them; output is "key: value" lines under a heading per section.
       - It runs under the system's python3 (3.9 on RHEL 9), outside the agents' .venv.
+      - The model section reads what the agent running the tool sets in its environment (AGENT_MODEL,
+        AGENT_MODEL_SERVER, AGENT_MODEL_PROFILE, AGENT_MAX_TOKENS, AGENT_SAMPLING; never a key), and
+        asks an LM Studio server what it knows of the model (its /api/v1/models).
 """
 
 import getpass
+import json
 import os
 import platform
 import shutil
@@ -22,6 +27,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -38,7 +44,7 @@ class SystemReport:
     """
 
     VERSION = "1.0.0"
-    SECTIONS = ("system", "cpu", "memory", "disk", "network", "gpu", "processes", "software")
+    SECTIONS = ("system", "cpu", "memory", "disk", "network", "gpu", "processes", "software", "model")
     SAMPLE_SECONDS = 0.5
     REAL_FILESYSTEMS = {"ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "vfat", "exfat", "ntfs", "ntfs3", "f2fs",
                         "nfs", "nfs4", "cifs", "fuseblk"}
@@ -241,6 +247,77 @@ class SystemReport:
             version = self.run(command).splitlines()
             if version:
                 rows.append((name, version[0]))
+        return rows
+
+    @staticmethod
+    def server_model(server: str, model: str) -> Optional[dict]:
+        """
+        Ask an LM Studio server what it knows of a model: its /api/v1/models lists every model it has,
+        with the loaded instances (an instance id may carry a ":2" suffix).
+        Args:
+            server: The OpenAI-compatible base URL, e.g. http://boba:1234/v1.
+            model: The model id the agent uses.
+        Returns:
+            Optional[dict]: The model's entry; None when the server is not LM Studio, cannot be reached,
+                or does not have the model.
+        """
+        root = server.rstrip("/").removesuffix("/v1")
+        try:
+            with urllib.request.urlopen(root + "/api/v1/models", timeout=3) as response:
+                models = json.load(response).get("models", [])
+        except (OSError, ValueError, AttributeError):
+            return None
+        return next((entry for entry in models if isinstance(entry, dict) and
+                     (entry.get("key") == model or
+                      any(i.get("id") == model for i in entry.get("loaded_instances") or []))), None)
+
+    def model(self) -> list[tuple[str, str]]:
+        """The model the agent runs on: its settings in the agent, and what its server says of it."""
+        model = os.environ.get("AGENT_MODEL", "")
+        if not model:
+            return [("model", "unknown: the tool was not run by an agent")]
+        server = os.environ.get("AGENT_MODEL_SERVER", "")
+        rows = [("agent", os.environ.get("AGENT_NAME", "unknown")), ("model", model), ("server", server or "unknown"),
+                ("profile", os.environ.get("AGENT_MODEL_PROFILE", "unknown") + " (context/models.json)")]
+        max_tokens = os.environ.get("AGENT_MAX_TOKENS")
+        rows.append(("max tokens per reply", f"{int(max_tokens):,}, thinking included" if max_tokens
+                     else "the server's limit"))
+        try:
+            sampling = json.loads(os.environ.get("AGENT_SAMPLING") or "{}")
+        except ValueError:
+            sampling = {}
+        rows.append(("sampling", ", ".join(f"{key} {value}" for key, value in sampling.items())
+                     or "the server's defaults"))
+        entry = self.server_model(server, model) if server else None
+        if entry is None:
+            rows.append(("server details", "unavailable (not an LM Studio server, or it cannot be reached)"))
+            return rows
+        quantization = entry.get("quantization") or {}
+        capabilities = entry.get("capabilities") or {}
+        reasoning = capabilities.get("reasoning")
+        rows += [
+            ("name", entry.get("display_name") or entry.get("key", "")),
+            ("publisher", entry.get("publisher") or "unknown"),
+            ("architecture", entry.get("architecture") or "unknown"),
+            ("parameters", entry.get("params_string") or "unknown"),
+            ("format", entry.get("format") or "unknown"),
+            ("quantization", f"{quantization.get('name', 'unknown')}" +
+             (f" ({quantization['bits_per_weight']} bits per weight)" if quantization.get("bits_per_weight") else "")),
+            ("size", self.size(entry["size_bytes"]) if entry.get("size_bytes") else "unknown"),
+            ("max context", f"{entry['max_context_length']:,} tokens" if entry.get("max_context_length") else "unknown"),
+        ]
+        for instance in entry.get("loaded_instances") or []:
+            config = instance.get("config") or {}
+            rows.append((f"loaded as {instance.get('id')}", ", ".join(
+                part for part in (f"context {config['context_length']:,} tokens" if config.get("context_length") else "",
+                                  f"{config['parallel']} requests at a time" if config.get("parallel") else "")
+                if part) or "loaded"))
+        rows += [
+            ("vision", "yes" if capabilities.get("vision") else "no"),
+            ("trained for tool use", "yes" if capabilities.get("trained_for_tool_use") else "no"),
+            ("reasoning", f"yes, {reasoning.get('default', 'on')} by default" if isinstance(reasoning, dict)
+             else "yes" if reasoning else "no"),
+        ]
         return rows
 
     @classmethod

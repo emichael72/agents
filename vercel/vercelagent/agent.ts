@@ -209,6 +209,18 @@ export function skillsText(folder?: string): string {
 }
 
 /**
+ * Put the model in the environment the tools inherit, for the sysinfo tool's model section (the same
+ * in all three agents): its id, server, profile, max_tokens and sampling; never the key.
+ * @param settings The resolved settings, with the model the server has loaded.
+ */
+export function shareWithTools(settings: ModelSettings): void {
+  Object.assign(process.env, {
+    AGENT_MODEL: settings.model, AGENT_MODEL_SERVER: settings.baseURL, AGENT_MODEL_PROFILE: settings.profile,
+    AGENT_MAX_TOKENS: String(settings.maxTokens ?? ''), AGENT_SAMPLING: JSON.stringify(settings.sampling ?? {}),
+  });
+}
+
+/**
  * What to tell the user when a reply hit the profile's max_tokens (the same in all three agents).
  * @param settings The resolved profile (its name and maxTokens).
  * @returns The message.
@@ -908,6 +920,7 @@ export async function main(): Promise<number> {
       throw new Error(`No model is loaded on ${settings.baseURL}, and the '${settings.profile}' profile names none ` +
         `(it uses the loaded model): load one in LM Studio, or name one with --model or ${variable}.`);
     }
+    shareWithTools(settings); // For the sysinfo tool's model section
     const parallel = OWN.parallel_tool_calls ?? true;
     const agent = buildAgent(buildModel(settings), localTools, parallel, settings.timeout, settings.maxTokens);
     const toolCount = `${Object.keys(localTools).length} tools`;
