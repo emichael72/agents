@@ -4,6 +4,8 @@
     "(instructions.json in its folder). The lines are joined with newlines.",
     "on_exit: the last prompt of an interactive chat, sent when the user types exit",
     "(save_on_exit in agent.json).",
+    "out_of_tokens: sent when a reply ran out of tokens while thinking, to ask again",
+    "(out_of_tokens_retries in agent.json).",
     "identity: put before the instructions, with {name} replaced by the agent's name",
     "(name in its own instructions.json)."
   ],
@@ -52,5 +54,10 @@
     "matter next time. Add to an existing topic rather than starting a near-duplicate one. Do not",
     "save what only happened this session, such as files read or commands run. If there is nothing",
     "to save, call no tool and answer only: Nothing to save."
+  ],
+  "out_of_tokens": [
+    "Your last reply ran out of tokens while you were still thinking, before you answered.",
+    "Think briefly this time: do not go over the same points again. Answer now with what you know,",
+    "or take one smaller step."
   ]
 }

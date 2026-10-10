@@ -2,9 +2,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { tool, type ModelMessage, type ToolSet } from 'ai';
+import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { convertArrayToReadableStream, MockLanguageModelV4 } from 'ai/test';
 import { z } from 'zod';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
@@ -101,11 +102,13 @@ test('a call repeated too often is not run', async () => {
   }
 });
 
-test('a reply cut off at max_tokens says so, and the limit reaches the model', async () => {
+test('a reply cut off at max_tokens is asked again once, then says so; the limit reaches the model', async () => {
   let maxOutputTokens: number | undefined;
+  const prompts: string[] = [];
   const thinker = new MockLanguageModelV4({
     doStream: async (options) => {
       maxOutputTokens = options.maxOutputTokens;
+      prompts.push(JSON.stringify(options.prompt.at(-1)));
       return {
         stream: convertArrayToReadableStream([
           { type: 'reasoning-start' as const, id: 'r' },
@@ -125,10 +128,36 @@ test('a reply cut off at max_tokens says so, and the limit reaches the model', a
     console.error = saved;
   }
   assert.equal(maxOutputTokens, 150);
+  assert.equal(prompts.length, 2); // out_of_tokens_retries in context/agent.json: asked again once
+  assert.ok(prompts[1].includes(loadInstructions(undefined, 'out_of_tokens').split('\n')[0]));
   assert.deepEqual(errors, [outOfTokens({ profile: 'local', maxTokens: 150 })]);
   assert.equal(outOfTokens({ profile: 'local', maxTokens: 16000 }),
     "The model ran out of tokens: it may use 16,000 tokens per reply, thinking included " +
     "(max_tokens in the 'local' profile, context/models.json). Raise it, or ask for a smaller step.");
+});
+
+test('a retry that answers ends the turn well, and the cut-off thinking is kept with -d', async () => {
+  let calls = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async () => ({
+      stream: convertArrayToReadableStream<LanguageModelV4StreamPart>(calls++ === 0
+        ? [{ type: 'reasoning-start', id: 'r' }, { type: 'reasoning-delta', id: 'r', delta: 'in circles' },
+           { type: 'reasoning-end', id: 'r' }, finish('length')]
+        : [{ type: 'text-start', id: 't' }, { type: 'text-delta', id: 't', delta: 'Short answer' },
+           { type: 'text-end', id: 't' }, finish('stop')]),
+    }),
+  });
+  let shown = '';
+  const output = new Output((text) => void (shown += text), { width: 300 }, true, false);
+  output.thinking('in circles');
+  const folder = mkdtempSync(path.join(os.tmpdir(), 'thinking-'));
+  output.outOfTokens(folder, true);
+  assert.match(stripVTControlCharacters(shown), /✗ out of tokens; its thinking is in .*thinking-\d{8}-\d{6}\.log; asking again/);
+  const [file] = readdirSync(folder);
+  assert.equal(readFileSync(path.join(folder, file), 'utf8'), 'in circles');
+  const history = await ask(buildAgent(model, {}, true, 60, 150), 'Think hard', [], quiet);
+  assert.equal(calls, 2);
+  assert.equal(JSON.stringify(history.at(-1)), JSON.stringify({ role: 'assistant', content: [{ type: 'text', text: 'Short answer' }] }));
 });
 
 test('tools are told which agent runs them', async () => {

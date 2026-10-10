@@ -81,8 +81,8 @@ class ModelProfiles:
             model: Overrides the profile's model.
             base_url: Overrides the profile's base URL.
         Returns:
-            dict[str, Any]: profile (its name), name, base_url, model, api_key, timeout and max_tokens
-                (None when the profile sets none).
+            dict[str, Any]: profile (its name), name, base_url, model, api_key, timeout, max_tokens
+                (None when the profile sets none) and sampling ({} when none).
         Raises:
             ValueError: If the profile does not exist, lacks base_url or model, or its API key is not set.
         """
@@ -114,13 +114,14 @@ class ModelProfiles:
             "api_key": api_key,
             "timeout": float(settings.get("timeout", 60)),
             "max_tokens": int(settings["max_tokens"]) if settings.get("max_tokens") else None,
+            "sampling": dict(settings.get("sampling") or {}),  # Sent as they are with each model call
         }
 
     @staticmethod
     def build_model(settings: dict[str, Any]) -> Model:
         """
         Create a model on an OpenAI-compatible server (LM Studio, OpenAI, ...), limited to the
-        profile's max_tokens per reply when it sets one.
+        profile's max_tokens per reply when it sets one, with its sampling settings in each request.
         Args:
             settings: A resolved profile, as returned by `resolve`.
         Returns:
@@ -128,8 +129,12 @@ class ModelProfiles:
         """
         http_client = httpx2.AsyncClient(timeout=settings["timeout"])
         provider = OpenAIProvider(base_url=settings["base_url"], api_key=settings["api_key"], http_client=http_client)
-        limit = ModelSettings(max_tokens=settings["max_tokens"]) if settings.get("max_tokens") else None
-        return OpenAIChatModel(settings["model"], provider=provider, settings=limit)
+        model_settings = ModelSettings()
+        if settings.get("max_tokens"):
+            model_settings["max_tokens"] = settings["max_tokens"]
+        if settings.get("sampling"):  # As they are, top_k and min_p too, which ModelSettings does not name
+            model_settings["extra_body"] = settings["sampling"]
+        return OpenAIChatModel(settings["model"], provider=provider, settings=model_settings or None)
 
     @staticmethod
     def out_of_tokens(settings: dict[str, Any]) -> str:

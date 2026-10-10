@@ -83,7 +83,7 @@ class ModelProfiles:
             base_url: Overrides the profile's base URL.
         Returns:
             dict[str, Any]: profile (its name), name, base_url, model, api_key, timeout, error_hints
-                and max_tokens (None when the profile sets none), as `MCPAgent` expects.
+                max_tokens (None when the profile sets none) and sampling ({} when none), as `MCPAgent` expects.
         Raises:
             ValueError: If the profile does not exist, lacks base_url or model, or its API key is not set.
         """
@@ -116,6 +116,7 @@ class ModelProfiles:
             "timeout": float(settings.get("timeout", 60)),
             "error_hints": settings.get("error_hints"),
             "max_tokens": int(settings["max_tokens"]) if settings.get("max_tokens") else None,
+            "sampling": dict(settings.get("sampling") or {}),  # Sent as they are with each model call
         }
 
     @staticmethod

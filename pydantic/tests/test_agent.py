@@ -19,7 +19,7 @@ from unittest.mock import Mock, patch
 
 from rich.console import Console
 import pydantic as pydantic_dependency
-from pydantic_ai import ModelRetry, ToolFailed
+from pydantic_ai import ModelRetry, ToolFailed, UnexpectedModelBehavior
 from pydantic_ai.messages import (ModelRequest, ModelResponse, TextPart, ToolCallPart, ToolReturnPart,
                                   UserPromptPart)
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
@@ -201,8 +201,10 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ, {"LOCAL_LLM_MODEL": "m"}):
             settings = ModelProfiles.load().resolve("local")
         self.assertEqual((settings["profile"], settings["max_tokens"]), ("local", 16000))  # context/models.json
-        self.assertEqual(ModelProfiles.build_model(settings).settings, {"max_tokens": 16000})
-        self.assertIsNone(ModelProfiles.build_model({**settings, "max_tokens": None}).settings)
+        sampling = settings["sampling"]  # Sent as they are, top_k too
+        self.assertEqual(sampling["top_k"], 20)
+        self.assertEqual(ModelProfiles.build_model(settings).settings, {"max_tokens": 16000, "extra_body": sampling})
+        self.assertIsNone(ModelProfiles.build_model({**settings, "max_tokens": None, "sampling": {}}).settings)
         self.assertEqual(ModelProfiles.out_of_tokens(settings),
                          "The model ran out of tokens: it may use 16,000 tokens per reply, thinking included "
                          "(max_tokens in the 'local' profile, context/models.json). Raise it, or ask for a smaller step.")
@@ -286,6 +288,34 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("# Change code and open a pull request", returns[0].model_response_str())  # Kept
         history = await session.ask(bot, "and now?", history)
         self.assertEqual(history[-1].parts[0].content, "done")
+
+    async def test_a_reply_out_of_tokens_is_asked_again_once(self):
+        prompts = []
+
+        async def stream(_agent, prompt, history, output, _pending):
+            prompts.append(prompt)
+            output.thinking("going in circles")
+            if len(prompts) in (1, 3, 4):  # Thinking only, cut off at max_tokens
+                raise UnexpectedModelBehavior("Model token limit (150) exceeded before any response was generated.")
+            return history + [ModelResponse(parts=[TextPart("Short answer")])], False
+
+        session = self.session(trace=True)
+        session.model_settings = {"profile": "local", "max_tokens": 150}
+        bot = session.build_agent(FunctionModel(stream_function=scripted_model))  # Not called: _stream is replaced
+        retry_prompt = session.context.instructions("out_of_tokens")
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.dict(session.settings, {"out_of_tokens_retries": 1, "thinking_dir": folder}), \
+                patch.object(session, "_stream", stream):
+            history = await session.ask(bot, "Think hard", [])
+            self.assertEqual(prompts, ["Think hard", retry_prompt])
+            self.assertEqual(history[-1].parts[0].content, "Short answer")
+            saved = list(Path(folder).glob("thinking-*.log"))  # With -d, the cut-off thinking is kept
+            self.assertEqual(saved[0].read_text(), "going in circles")
+            await session.ask(bot, "Think harder", history)  # Asked again once, then the turn ends
+        self.assertEqual(prompts[2:], ["Think harder", retry_prompt])
+        text = " ".join(self.output.getvalue().split())
+        self.assertIn("✗ out of tokens; its thinking is in", text)
+        self.assertIn("The model ran out of tokens: it may use 150 tokens per reply", text)
 
     async def test_history_carries_across_turns(self):
         async def remember(messages, _info):

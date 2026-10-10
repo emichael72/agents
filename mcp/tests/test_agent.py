@@ -251,13 +251,35 @@ class MCPAgentTests(unittest.IsolatedAsyncioTestCase):
         thoughts = []
         with self.assertRaisesRegex(RuntimeError, r"^The model ran out of tokens: it may use 150 tokens per reply, "
                                                   r"thinking included \(max_tokens in the 'local' profile"):
-            await self.agent.ask('Think hard', on_text=lambda text: None, on_thinking=lambda: thoughts.append(1))
-        self.assertEqual(len(thoughts), 3)
+            await self.agent.ask('Think hard', on_text=lambda text: None, on_thinking=thoughts.append)
+        self.assertEqual(thoughts, ['hmm'] * 3)  # The thinking itself, for -d to save
         self.assertEqual(self.requests[0]['max_output_tokens'], 150)
         self.agent.max_tokens = None  # No limit: none is sent, and the reply is only "no text"
         with self.assertRaisesRegex(RuntimeError, 'returned no text or tool calls'):
             await self.agent.ask('Think hard', on_text=lambda text: None)
         self.assertNotIn('max_output_tokens', self.requests[-1])
+
+    async def test_a_reply_out_of_tokens_is_asked_again_once(self):
+        self.agent.max_tokens, self.agent.profile = 150, 'local'
+        self.agent.out_of_tokens_retries, self.agent.out_of_tokens_prompt = 1, 'Think briefly.'
+        self.agent.sampling = {'temperature': 0.6, 'top_k': 20}
+        cut = {"status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"},
+               "output": [{"type": "reasoning", "content": []}], "usage": {"input_tokens": 10, "output_tokens": 150}}
+        replies = [cut, {"status": "completed", "output": [message('Short answer')]}, cut, cut]
+
+        async def answer(request):
+            self.requests.append(await request.json())
+            return web.json_response(replies.pop(0))
+
+        self.model_handler = answer
+        retried = []
+        self.assertEqual(await self.agent.ask('Think hard', on_out_of_tokens=retried.append), 'Short answer')
+        self.assertEqual(retried, [True])
+        self.assertEqual(self.requests[1]['input'][-1], {'role': 'user', 'content': 'Think briefly.'})
+        self.assertEqual((self.requests[0]['temperature'], self.requests[0]['top_k']), (0.6, 20))  # The profile's sampling
+        with self.assertRaisesRegex(RuntimeError, '^The model ran out of tokens'):  # Asked again once only
+            await self.agent.ask('Think harder', on_out_of_tokens=retried.append)
+        self.assertEqual(retried, [True, True, False])
 
     async def test_tool_failure_returned_to_model(self):
         self.outputs = [[call(self.aliases['shell'], {'cwd': 'missing-file', 'command': 'ls'})],

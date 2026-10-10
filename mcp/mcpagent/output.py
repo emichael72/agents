@@ -9,6 +9,7 @@ Description:
 import json
 import re
 import time
+from pathlib import Path
 from typing import Optional
 
 from rich.console import Console
@@ -89,6 +90,7 @@ class Output:
             out.markdown_theme = True  # Once per console: an Output is made for every response
         self.thinking_since: Optional[float] = None  # When the current stretch of thinking began
         self.thinking_shown = -1  # The seconds the spinner shows for it
+        self.thought = ""  # The thinking since the spinner last changed: the current model call's
 
     def start(self) -> None:
         """Start timing a response, and the spinner (on a terminal only)."""
@@ -105,13 +107,18 @@ class Output:
             label: What the agent is doing, e.g. "Thinking…".
         """
         self.thinking_since, self.thinking_shown = None, -1
+        self.thought = ""
         self._label(label)
 
-    def thinking(self) -> None:
+    def thinking(self, text: str = "") -> None:
         """
         A chunk of the model's thinking arrived: show on the spinner how long it has been thinking,
         so a reasoning model's long silence is visibly work, not a hang. Ignored once the answer streams.
+        The text is kept, for `out_of_tokens` to save.
+        Args:
+            text: The chunk.
         """
+        self.thought += text
         if self.in_text:
             return
         now = time.monotonic()
@@ -121,6 +128,26 @@ class Output:
         if seconds != self.thinking_shown:
             self.thinking_shown = seconds
             self._label(f"Thinking… {seconds}s" if seconds else "Thinking…")
+
+    def out_of_tokens(self, folder: Optional[Path], retry: bool) -> None:
+        """
+        A reply ran out of tokens (max_tokens): with debug, say so in a gray line and save its thinking
+        in the folder (thinking_dir), to see whether the model went in circles; then show the retry, if
+        one follows, on the spinner.
+        Args:
+            folder: Where the thinking is saved, as thinking-<date>-<time>.log; None saves nothing.
+            retry: The model is asked again.
+        """
+        if self.debug:
+            saved = ""
+            if folder is not None and self.thought:
+                folder.mkdir(parents=True, exist_ok=True)
+                path = folder / time.strftime("thinking-%Y%m%d-%H%M%S.log")
+                path.write_text(self.thought, encoding="utf-8")
+                saved = f"; its thinking is in {path}"
+            self.note(f"✗ out of tokens{saved}" + ("; asking again for a direct answer" if retry else ""))
+        if retry:
+            self.spin("Asking again…")
 
     def _label(self, label: str) -> None:
         """

@@ -4,7 +4,7 @@
 // and tools (agents/tools) as the other two agents. The agent loop
 // (call the model, run requested tools, send results back, repeat until it answers) is done by
 // the AI SDK's ToolLoopAgent; this file only builds the agent and renders its stream in the terminal.
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseArgs, styleText } from 'node:util';
@@ -31,7 +31,7 @@ const OWN_FILE = path.join(REPO_ROOT, 'vercel', 'instructions.json');
 // 0 means no limit: the loop then ends only when the model answers without calling a tool.
 const AGENT_SETTINGS = JSON.parse(readFileSync(AGENT_FILE, 'utf8')) as
   { max_tool_calls?: number; max_repeated_calls?: number; memory_index?: string; save_on_exit?: boolean;
-    skills_dir?: string };
+    skills_dir?: string; out_of_tokens_retries?: number; thinking_dir?: string };
 const OWN = JSON.parse(readFileSync(OWN_FILE, 'utf8')) as
   { name?: string; parallel_tool_calls?: boolean; instructions?: string[] };
 const MAX_TOOL_CALLS = AGENT_SETTINGS.max_tool_calls ?? 8;
@@ -40,19 +40,22 @@ repeatGuard.limit = AGENT_SETTINGS.max_repeated_calls ?? 0; // The same call at 
 const MEMORY_INDEX = AGENT_SETTINGS.memory_index && path.join(REPO_ROOT, AGENT_SETTINGS.memory_index);
 // The skills folder (relative to the repository), whose skills are listed in the instructions
 const SKILLS_DIR = AGENT_SETTINGS.skills_dir && path.join(REPO_ROOT, AGENT_SETTINGS.skills_dir);
+// With -d, the thinking of a reply that ran out of tokens is saved here (relative to the repository)
+const THINKING_DIR = AGENT_SETTINGS.thinking_dir && path.join(REPO_ROOT, AGENT_SETTINGS.thinking_dir);
 const MAX_STEPS = MAX_TOOL_CALLS ? MAX_TOOL_CALLS + 1 : 0;
 
 const gray = (text: string) => styleText('gray', text); // Everything except the model's answer
 
 type Profile = {
   name?: string; base_url: string; base_url_env?: string; model?: string; model_env?: string; model_auto?: boolean;
-  api_key_env?: string; api_key?: string; timeout?: number; max_tokens?: number;
+  api_key_env?: string; api_key?: string; timeout?: number; max_tokens?: number; sampling?: Record<string, unknown>;
 };
 type Models = { default?: string; profiles?: Record<string, Profile> };
 export type ModelSettings = {
   profile: string; name: string; baseURL: string; model: string; apiKey: string; timeout: number;
   auto: boolean; // Ask the server which model is loaded (see loadedModel)
   maxTokens?: number; // The most tokens one reply may use, thinking included; undefined leaves it to the server
+  sampling?: Record<string, unknown>; // Request settings sent as they are with each model call (temperature, top_k, ...)
 };
 
 /** Read the shared model profiles file: "default" (a profile name) and "profiles" (by name). */
@@ -94,6 +97,7 @@ export function resolveModel(models: Models, profile?: string,
     apiKey,
     timeout: settings.timeout ?? 60,
     maxTokens: settings.max_tokens || undefined,
+    sampling: settings.sampling,
     auto: Boolean(settings.model_auto) && !overrides.model && !env(settings.model_env),
   };
 }
@@ -118,17 +122,23 @@ export async function loadedModel(baseURL: string, apiKey = ''): Promise<string 
   }
 }
 
-/** Create a model on an OpenAI-compatible server (LM Studio, OpenAI, ...) from resolved settings. */
+/**
+ * Create a model on an OpenAI-compatible server (LM Studio, OpenAI, ...) from resolved settings, with
+ * the profile's sampling settings added to each request as they are (top_k and min_p too, which the
+ * AI SDK does not send).
+ */
 export function buildModel(settings: ModelSettings): LanguageModel {
   // includeUsage: streamed replies report their token counts (shown after each response)
   return createOpenAICompatible({ name: settings.profile, baseURL: settings.baseURL, apiKey: settings.apiKey,
-                                  includeUsage: true })(settings.model);
+                                  includeUsage: true,
+                                  transformRequestBody: (body) => ({ ...body, ...settings.sampling }) })(settings.model);
 }
 
 /**
  * Read the shared instructions file.
  * @param file The JSON file (default: agents/context/instructions.json).
- * @param key Which lines to read: 'instructions', or 'on_exit' (the prompt sent before exit).
+ * @param key Which lines to read: 'instructions', 'on_exit' (the prompt sent before exit), or
+ *   'out_of_tokens' (sent to ask again after a reply ran out of tokens).
  * @returns Those lines, joined with newlines ('' if the file has none).
  */
 export function loadInstructions(file = INSTRUCTIONS_FILE, key = 'instructions'): string {
@@ -367,6 +377,7 @@ export class Output {
   private blankOwed = false; // The last text ended without its blank line after it
   private thinkingSince?: number; // When the current stretch of thinking began
   private thinkingShown = -1; // The seconds the spinner shows for it
+  private thought = ''; // The thinking since the spinner last changed: the current model call's
   private readonly renderMarkdown: boolean; // Render the answer's Markdown and highlight code, on a terminal
   private readonly markdown: Marked;
   private block = ''; // The answer's Markdown block being streamed
@@ -412,14 +423,18 @@ export class Output {
   spin(label: string): void {
     this.thinkingSince = undefined;
     this.thinkingShown = -1;
+    this.thought = '';
     this.label(label);
   }
 
   /**
    * A chunk of the model's thinking arrived: show on the spinner how long it has been thinking, so a
    * reasoning model's long silence is visibly work, not a hang. Ignored once the answer streams.
+   * The text is kept, for outOfTokens to save.
+   * @param text The chunk.
    */
-  thinking(): void {
+  thinking(text = ''): void {
+    this.thought += text;
     if (this.inText) return;
     const now = performance.now();
     this.thinkingSince ??= now;
@@ -428,6 +443,31 @@ export class Output {
       this.thinkingShown = seconds;
       this.label(seconds ? `Thinking… ${seconds}s` : 'Thinking…');
     }
+  }
+
+  /**
+   * A reply ran out of tokens (max_tokens): with debug, say so in a gray line and save its thinking in
+   * the folder (thinking_dir), to see whether the model went in circles; then show the retry, if one
+   * follows, on the spinner.
+   * @param folder Where the thinking is saved, as thinking-<date>-<time>.log; undefined saves nothing.
+   * @param retry The model is asked again.
+   */
+  outOfTokens(folder: string | undefined, retry: boolean): void {
+    if (this.debug) {
+      let saved = '';
+      if (folder && this.thought) {
+        mkdirSync(folder, { recursive: true });
+        const now = new Date();
+        const two = (n: number) => String(n).padStart(2, '0'); // Local time, as the other agents name the file
+        const stamp = `${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}-` +
+          `${two(now.getHours())}${two(now.getMinutes())}${two(now.getSeconds())}`;
+        const file = path.join(folder, `thinking-${stamp}.log`);
+        writeFileSync(file, this.thought);
+        saved = `; its thinking is in ${file}`;
+      }
+      this.note(`✗ out of tokens${saved}` + (retry ? '; asking again for a direct answer' : ''));
+    }
+    if (retry) this.spin('Asking again…');
   }
 
   /** Show a label on the spinner, starting it if needed. */
@@ -681,42 +721,61 @@ export async function ask(agent: Agent, prompt: string, history: ModelMessage[],
     pendingCalls.delete(toolCallId);
   };
   let cutOff = false;
+  let retries = AGENT_SETTINGS.out_of_tokens_retries ?? 0;
+  const retryPrompt = loadInstructions(INSTRUCTIONS_FILE, 'out_of_tokens');
+  let turn = messages;
   try {
-    const result = await agent.stream({ messages });
-    for await (const part of result.fullStream) {
-      switch (part.type) {
-        case 'text-delta':
-          output.text(part.text);
-          break;
-        case 'reasoning-delta':
-          output.thinking(); // A reasoning model thinks: the spinner shows for how long
-          break;
-        case 'tool-call':
-          pendingCalls.set(part.toolCallId, `→ ${part.toolName}(${JSON.stringify(part.input)})`);
-          if (!trace) output.line(pendingCalls.get(part.toolCallId)!); // Name the tool on the spinner now, while it runs
-          else output.spin(`Running ${part.toolName}…`); // The call prints with its result; meanwhile the spinner names it
-          break;
-        case 'finish-step':
-          if (part.finishReason === 'length') cutOff = true; // The reply hit max_tokens
-          break;
-        case 'tool-result':
-          showCall(part.toolCallId);
-          output.line(`← ${part.toolName}: ${readable(part.output)}`);
-          break;
-        case 'tool-error':
-          showCall(part.toolCallId);
-          output.line(`✗ ${part.toolName}: ${readable(errorMessage(part.error))}`);
-          break;
-        case 'error':
-          throw part.error;
+    for (;;) {
+      cutOff = false;
+      const result = await agent.stream({ messages: turn });
+      for await (const part of result.fullStream) {
+        switch (part.type) {
+          case 'text-delta':
+            output.text(part.text);
+            break;
+          case 'reasoning-delta':
+            output.thinking(part.text); // A reasoning model thinks: the spinner shows for how long
+            break;
+          case 'tool-call':
+            pendingCalls.set(part.toolCallId, `→ ${part.toolName}(${JSON.stringify(part.input)})`);
+            if (!trace) output.line(pendingCalls.get(part.toolCallId)!); // Name the tool on the spinner now, while it runs
+            else output.spin(`Running ${part.toolName}…`); // The call prints with its result; meanwhile the spinner names it
+            break;
+          case 'finish-step':
+            if (part.finishReason === 'length') cutOff = true; // The reply hit max_tokens
+            break;
+          case 'tool-result':
+            showCall(part.toolCallId);
+            output.line(`← ${part.toolName}: ${readable(part.output)}`);
+            break;
+          case 'tool-error':
+            showCall(part.toolCallId);
+            output.line(`✗ ${part.toolName}: ${readable(errorMessage(part.error))}`);
+            break;
+          case 'error':
+            throw part.error;
+        }
       }
+      const usage = await result.totalUsage;
+      const steps = await result.steps;
+      if (usage.inputTokens || usage.outputTokens) {
+        output.addUsage(usage.inputTokens ?? 0, usage.outputTokens ?? 0, steps.length);
+      }
+      // Out of tokens while still thinking, nothing of the answer shown: ask again (out_of_tokens_retries)
+      const retry = cutOff && retries > 0 && Boolean(retryPrompt) && !output.inText;
+      if (cutOff) output.outOfTokens(THINKING_DIR, retry);
+      if (retry) {
+        retries -= 1;
+        cutOff = false;
+        // The turn's tool calls and results are kept; the cut-off step's thinking is dropped, and the
+        // model starts over, told to be brief
+        turn = [...turn, ...steps.slice(0, -1).flatMap((step) => step.response.messages),
+                { role: 'user', content: retryPrompt }];
+        continue;
+      }
+      // Every step's messages, the tool calls and results too: result.response holds only the last step's
+      return [...turn, ...steps.flatMap((step) => step.response.messages)];
     }
-    const usage = await result.totalUsage;
-    if (usage.inputTokens || usage.outputTokens) {
-      output.addUsage(usage.inputTokens ?? 0, usage.outputTokens ?? 0, (await result.steps).length);
-    }
-    // Every step's messages, the tool calls and results too: result.response holds only the last step's
-    return [...messages, ...(await result.steps).flatMap((step) => step.response.messages)];
   } finally {
     for (const line of pendingCalls.values()) output.line(line); // Calls that never got a result
     output.finish();

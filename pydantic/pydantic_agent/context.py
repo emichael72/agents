@@ -40,8 +40,8 @@ class AgentContext:
         """
         Read lines from the shared instructions file.
         Args:
-            key: Which lines to read: "instructions", "identity", or "on_exit" (the prompt sent
-                before exit).
+            key: Which lines to read: "instructions", "identity", "on_exit" (the prompt sent
+                before exit) or "out_of_tokens" (sent to ask again after a reply ran out of tokens).
         Returns:
             str: Those lines, joined with newlines ("" if the file has none).
         """
@@ -71,7 +71,8 @@ class AgentContext:
         """
         Read the shared agent loop settings.
         Returns:
-            dict[str, Any]: "max_tool_calls", "memory_index", "save_on_exit" and "skills_dir".
+            dict[str, Any]: "max_tool_calls", "memory_index", "save_on_exit", "skills_dir", "out_of_tokens_retries"
+                and "thinking_dir".
         """
         return json.loads(self.agent_file.read_text(encoding="utf-8"))
 

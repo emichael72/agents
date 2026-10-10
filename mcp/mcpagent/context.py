@@ -32,8 +32,8 @@ class AgentContext:
         """
         Read lines from the instructions file the client config names.
         Args:
-            key: Which lines to read: "instructions", "identity", or "on_exit" (the prompt sent
-                before exit).
+            key: Which lines to read: "instructions", "identity", "on_exit" (the prompt sent
+                before exit) or "out_of_tokens" (sent to ask again after a reply ran out of tokens).
         Returns:
             str: The lines joined with newlines, or "" if none are configured.
         """
@@ -64,7 +64,8 @@ class AgentContext:
         """
         Read the agent loop settings from the file the client config names.
         Returns:
-            dict[str, Any]: "max_tool_calls", "memory_index", "save_on_exit" and "skills_dir", or {}
+            dict[str, Any]: "max_tool_calls", "memory_index", "save_on_exit", "skills_dir", "out_of_tokens_retries"
+                and "thinking_dir", or {}
                 (the defaults) if none is configured.
         """
         return self._read("agent_file") or {}

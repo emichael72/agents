@@ -18,12 +18,19 @@
     "turn to save what is worth remembering (the on_exit prompt in instructions.json); skipped",
     "for a session with no tool call and a single exchange, and by Ctrl+C or a --prompt run.",
     "skills_dir: the skills folder (relative to the repository): one <name>/SKILL.md per skill, whose",
-    "name and description are listed in the agents' instructions at start-up; the skill tool reads them."
+    "name and description are listed in the agents' instructions at start-up; the skill tool reads them.",
+    "out_of_tokens_retries: when a reply runs out of tokens (max_tokens in models.json), usually a",
+    "reasoning model thinking in circles, ask again this many times with the out_of_tokens prompt",
+    "(instructions.json), keeping the turn's tool results; 0 reports it at once.",
+    "thinking_dir: with -d, the thinking of a reply that ran out of tokens is saved in this folder",
+    "(relative to the repository) as thinking-<date>-<time>.log; empty saves nothing."
   ],
   "max_tool_calls": 150,
   "max_repeated_calls": 3,
   "tool_retries": 3,
   "memory_index": ".memory/index.md",
   "save_on_exit": true,
-  "skills_dir": "skills"
+  "skills_dir": "skills",
+  "out_of_tokens_retries": 1,
+  "thinking_dir": "logs"
 }

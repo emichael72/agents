@@ -125,6 +125,7 @@ class QuizGenerator:
             "api_key": api_key,
             "timeout": float(settings.get("timeout", 60)),
             "max_tokens": int(settings["max_tokens"]) if settings.get("max_tokens") else None,
+            "sampling": dict(settings.get("sampling") or {}),  # Sent as they are with each model call
             "profile": name,
         }
 
@@ -236,7 +237,8 @@ class QuizGenerator:
             settings: The model profile (`resolve_model`).
             system: The instructions.
             user: The message.
-            temperature: Sampling temperature; the answer check uses 0.
+            temperature: Sampling temperature; the answer check uses 0. The profile's sampling
+                settings, when it has them, override it.
         Returns:
             tuple[Optional[str], Optional[str]]: The reply's text and None; or None and why there is no
                 usable reply (it did not finish).
@@ -248,6 +250,7 @@ class QuizGenerator:
             headers={"Authorization": "Bearer " + settings["api_key"]},
             json={"model": settings["model"], "temperature": temperature,
                   **({"max_tokens": settings["max_tokens"]} if settings.get("max_tokens") else {}),
+                  **(settings.get("sampling") or {}),
                   "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]},
             timeout=settings["timeout"])
         response.raise_for_status()

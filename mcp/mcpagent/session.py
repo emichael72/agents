@@ -15,6 +15,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import ANSI
 from rich.console import Console
 
+from mcpagent import REPO_ROOT
 from mcpagent.agent import MCPAgent
 from mcpagent.client import MCPClient
 from mcpagent.context import AgentContext
@@ -105,7 +106,9 @@ class AgentSession:
                          context=self.context, trace=self.output.line,  # Debug lines, else the spinner
                          max_tool_calls=int(self.settings.get("max_tool_calls", 8)),
                          max_repeated_calls=int(self.settings.get("max_repeated_calls", 0)),
-                         max_tokens=model["max_tokens"], profile=model["profile"])
+                         max_tokens=model["max_tokens"], profile=model["profile"], sampling=model["sampling"],
+                         out_of_tokens_retries=int(self.settings.get("out_of_tokens_retries", 0)),
+                         out_of_tokens_prompt=shared.instructions("out_of_tokens"))
         self.agent = agent
         # The server's log lines (server_output), among the other gray lines; only with -d
         if self.trace and mcp_client.config_data.get("server_output"):
@@ -124,7 +127,10 @@ class AgentSession:
         assert self.agent is not None
         self.output.start()
         try:
-            answer = await self.agent.ask(prompt, on_text=self.output.text, on_thinking=self.output.thinking)
+            thinking_dir = self.settings.get("thinking_dir")
+            folder = REPO_ROOT / thinking_dir if thinking_dir else None
+            answer = await self.agent.ask(prompt, on_text=self.output.text, on_thinking=self.output.thinking,
+                                          on_out_of_tokens=lambda retry: self.output.out_of_tokens(folder, retry))
             if not self.output.in_text:
                 self.output.text(answer)  # Nothing was streamed (e.g. a non-streaming reply)
         finally:

@@ -69,7 +69,9 @@ class MCPAgent:
                  instructions: str = "",
                  trace: Optional[Callable[[str], None]] = None,
                  max_tool_calls: int = 8, max_repeated_calls: int = 0, context: str = "",
-                 max_tokens: Optional[int] = None, profile: str = ""):
+                 max_tokens: Optional[int] = None, profile: str = "",
+                 sampling: Optional[dict[str, Any]] = None, out_of_tokens_retries: int = 0,
+                 out_of_tokens_prompt: str = ""):
         """
         Set up the agent; call `connect()` before `ask()`.
         Args:
@@ -88,6 +90,11 @@ class MCPAgent:
             max_tokens: The most tokens one model reply may use, thinking included (the profile's
                 max_tokens); None leaves it to the server.
             profile: The model profile's name, for the message when a reply hits max_tokens.
+            sampling: Request settings sent as they are with each model call (the profile's
+                sampling, e.g. temperature, top_p, top_k).
+            out_of_tokens_retries: How many times one turn asks again, with out_of_tokens_prompt, when a
+                reply runs out of tokens; 0 fails the turn at once.
+            out_of_tokens_prompt: What the model is told when it is asked again.
             max_repeated_calls: The most times in a row one turn may make the same call (same tool,
                 same arguments); the next is not run and the model is told to answer. 0 means no limit.
             context: Extra instructions appended to `instructions`.
@@ -102,6 +109,9 @@ class MCPAgent:
         self.max_tool_calls = max_tool_calls
         self.max_tokens = max_tokens
         self.profile = profile
+        self.sampling = dict(sampling or {})
+        self.out_of_tokens_retries = out_of_tokens_retries if out_of_tokens_prompt else 0
+        self.out_of_tokens_prompt = out_of_tokens_prompt
         self.guard = RepeatGuard(max_repeated_calls)
         self.instructions = "\n".join(part for part in (instructions, context) if part)
         self.history = []
@@ -243,7 +253,7 @@ class MCPAgent:
         Args:
             payload: The Responses API request body.
             on_text: Called with each text delta; None makes a single non-streaming request.
-            on_thinking: Called for each chunk of a reasoning model's thinking, while streaming.
+            on_thinking: Called with each chunk of a reasoning model's thinking, while streaming.
         Returns:
             Reply: The final reply; when streaming, the response in the completed event.
         """
@@ -267,7 +277,7 @@ class MCPAgent:
                         on_text(event.get("delta", ""))
                     elif kind in {"response.reasoning_text.delta", "response.reasoning_summary_text.delta"}:
                         if on_thinking is not None:
-                            on_thinking()
+                            on_thinking(event.get("delta", ""))
                     elif kind in {"response.completed", "response.incomplete", "response.failed"}:
                         return Reply(200, event["response"])
                     elif kind == "error":
@@ -276,15 +286,19 @@ class MCPAgent:
             raise RuntimeError(f"{self.provider} stream ended before completion. Earlier tool calls may have completed; no retry was made.")
 
     async def ask(self, prompt: str, on_text: Optional[Callable[[str], None]] = None,
-                  on_thinking: Optional[Callable[[], None]] = None) -> str:
+                  on_thinking: Optional[Callable[[str], None]] = None,
+                  on_out_of_tokens: Optional[Callable[[bool], None]] = None) -> str:
         """
         Run one user turn: call the model, run the tools it requests, repeat until it answers.
         On success the turn is added to the history; on any failure the history is cleared, so a
-        later turn never replays unanswered tool calls.
+        later turn never replays unanswered tool calls. A reply that runs out of tokens is asked
+        again, up to out_of_tokens_retries times, with out_of_tokens_prompt; the turn's tool results
+        so far are kept.
         Args:
             prompt: The user's message.
             on_text: Called with each streamed text delta, if given.
-            on_thinking: Called for each streamed chunk of the model's thinking, if given.
+            on_thinking: Called with each streamed chunk of the model's thinking, if given.
+            on_out_of_tokens: Called when a reply ran out of tokens, with True if it is asked again.
         Returns:
             str: The model's final text answer.
         Raises:
@@ -292,6 +306,7 @@ class MCPAgent:
         """
         conversation = self.history + [{"role": "user", "content": prompt}]
         calls_used = 0
+        retries = self.out_of_tokens_retries
         self.guard.reset()
         self.usage = []  # (input tokens, output tokens) per model call of this turn, when reported
         try:
@@ -301,6 +316,7 @@ class MCPAgent:
                     "input": conversation, "tools": self.tools,
                     "parallel_tool_calls": False, "store": False,
                     **({"max_output_tokens": self.max_tokens} if self.max_tokens else {}),
+                    **self.sampling,
                     "include": ["reasoning.encrypted_content"],
                 }, on_text=on_text, on_thinking=on_thinking)
                 if response.is_error:
@@ -327,9 +343,24 @@ class MCPAgent:
                 usage = data.get("usage") or {}
                 if usage:
                     self.usage.append((int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0))))
-                if data.get("status") == "incomplete" and \
-                        (data.get("incomplete_details") or {}).get("reason") == "max_output_tokens":
-                    raise RuntimeError(ModelProfiles.out_of_tokens({"max_tokens": self.max_tokens, "profile": self.profile}))
+                # Only thinking, no answer or call yet: asked again, nothing having been shown. LM Studio
+                # reports a reply cut off at max_output_tokens as completed, with only thinking.
+                thinking_only = not any(item.get("type") in ("message", "function_call")
+                                        for item in data.get("output", []))
+                cut_off = (data.get("status") == "incomplete" and
+                           (data.get("incomplete_details") or {}).get("reason") == "max_output_tokens") or \
+                    (data.get("status") == "completed" and thinking_only and bool(self.max_tokens) and
+                     int(usage.get("output_tokens", 0)) >= self.max_tokens - 1)
+                if cut_off:
+                    retry = retries > 0 and thinking_only
+                    if on_out_of_tokens is not None:
+                        on_out_of_tokens(retry)
+                    if not retry:
+                        raise RuntimeError(ModelProfiles.out_of_tokens({"max_tokens": self.max_tokens,
+                                                                        "profile": self.profile}))
+                    retries -= 1  # Its thinking is dropped: the model starts over, told to be brief
+                    conversation.append({"role": "user", "content": self.out_of_tokens_prompt})
+                    continue
                 if data.get("status") != "completed":
                     raise RuntimeError(f"{self.provider} response did not complete ({data.get('status', 'unknown')}).")
                 output = data.get("output", [])
@@ -343,10 +374,6 @@ class MCPAgent:
                         if part.get("type") in ("output_text", "refusal")
                     )
                     if not text:
-                        # LM Studio reports a reply cut off at max_output_tokens as completed, with only thinking
-                        if self.max_tokens and int(usage.get("output_tokens", 0)) >= self.max_tokens - 1:
-                            raise RuntimeError(ModelProfiles.out_of_tokens({"max_tokens": self.max_tokens,
-                                                                            "profile": self.profile}))
                         raise RuntimeError(f"{self.provider} returned no text or tool calls.")
                     self.history = conversation
                     return text

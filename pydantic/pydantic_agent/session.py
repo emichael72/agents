@@ -25,6 +25,7 @@ from pydantic_ai.models import Model
 from pydantic_ai.toolsets import FunctionToolset
 from rich.console import Console
 
+from pydantic_agent import REPO_ROOT
 from pydantic_agent.context import AgentContext
 from pydantic_agent.output import Output
 from pydantic_agent.profiles import ModelProfiles
@@ -112,7 +113,9 @@ class AgentSession:
         """
         Run one user turn, printing streamed text and tool activity. A model that keeps making invalid
         tool calls (past tool_retries) ends the turn, not the conversation: its messages so far are
-        kept, without the last response, whose calls never got results.
+        kept, without the last response, whose calls never got results. A reply that runs out of tokens
+        while still thinking is asked again, up to out_of_tokens_retries times, with the out_of_tokens
+        prompt, keeping the turn's tool results so far.
         Args:
             agent: The agent to run.
             prompt: The user's message.
@@ -132,48 +135,32 @@ class AgentSession:
         failure: Optional[UnexpectedModelBehavior] = None
         kept: list[ModelMessage] = history
         cut_off = False
+        retries = int(self.settings.get("out_of_tokens_retries", 0))
+        retry_prompt = self.context.instructions("out_of_tokens")
+        thinking_dir = self.settings.get("thinking_dir")
+        folder = REPO_ROOT / thinking_dir if thinking_dir else None
         try:
-            with capture_run_messages() as run_messages, \
-                    agent.parallel_tool_call_execution_mode("parallel" if self.parallel else "sequential"):
-                async with agent.run_stream_events(prompt, message_history=history, usage_limits=self.limits) as events:
-                    async for event in events:
-                        if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart):
-                            output.text(event.part.content)
-                        elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
-                            output.text(event.delta.content_delta)
-                        elif isinstance(event, (PartStartEvent, PartDeltaEvent)) and \
-                                isinstance(getattr(event, "part", None) or getattr(event, "delta", None),
-                                           (ThinkingPart, ThinkingPartDelta)):
-                            output.thinking()  # A reasoning model thinks: the spinner shows for how long
-                        elif isinstance(event, FunctionToolCallEvent):
-                            arguments = json.dumps(event.part.args_as_dict(), separators=(",", ":"))
-                            pending_calls[event.tool_call_id] = f"→ {event.part.tool_name}({arguments})"
-                            if not self.trace:  # Name the tool on the spinner now, while it runs
-                                output.line(pending_calls[event.tool_call_id])
-                            else:  # The call prints with its result; meanwhile the spinner names it
-                                output.spin(f"Running {event.part.tool_name}…")
-                        elif isinstance(event, FunctionToolResultEvent):
-                            part = event.part
-                            if event.tool_call_id in pending_calls:
-                                output.line(pending_calls.pop(event.tool_call_id))
-                            if isinstance(part, ToolReturnPart) and part.outcome == "success":
-                                output.line(f"← {part.tool_name}: {Output.readable(part.model_response_str())}")
-                            else:  # The tool failed, or its arguments were invalid
-                                message = part.model_response_str() if isinstance(part, ToolReturnPart) else part.content
-                                output.line(f"✗ {part.tool_name}: {Output.readable(str(message))}")
-                        elif isinstance(event, AgentRunResultEvent):
-                            usage = event.result.usage
-                            if usage.input_tokens or usage.output_tokens:
-                                output.add_usage(usage.input_tokens, usage.output_tokens, usage.requests)
-                            messages = event.result.all_messages()
-                            last = next((m for m in reversed(messages) if isinstance(m, ModelResponse)), None)
-                            cut_off = last is not None and last.finish_reason == "length"  # The answer stops short
-                            kept = messages
-        except UnexpectedModelBehavior as error:
-            failure = error
-            kept = list(run_messages) or history
-            while kept and isinstance(kept[-1], ModelResponse):
-                kept.pop()
+            while True:
+                failure = None
+                with capture_run_messages() as run_messages, \
+                        agent.parallel_tool_call_execution_mode("parallel" if self.parallel else "sequential"):
+                    try:
+                        kept, cut_off = await self._stream(agent, prompt, kept, output, pending_calls)
+                    except UnexpectedModelBehavior as error:
+                        failure = error
+                        kept = list(run_messages) or kept
+                        while kept and isinstance(kept[-1], ModelResponse):
+                            kept.pop()
+                if cut_off:  # Out of tokens with some of the answer shown: it is not asked again
+                    output.out_of_tokens(folder, False)
+                if failure is None or "token limit" not in failure.message:
+                    break
+                retry = retries > 0 and bool(retry_prompt) and not output.in_text  # Nothing of it shown yet
+                output.out_of_tokens(folder, retry)
+                if not retry:
+                    break
+                retries -= 1  # Its thinking is dropped: the model starts over, told to be brief
+                prompt = retry_prompt
         finally:
             for line in pending_calls.values():  # Calls that never got a result (e.g. the run failed)
                 output.line(line)
@@ -188,6 +175,58 @@ class AgentSession:
                                f"(tool_retries in context/agent.json sets how many corrections a tool gets).",
                                style="red", markup=False)
         return kept
+
+    async def _stream(self, agent: Agent, prompt: str, history: list[ModelMessage], output: Output,
+                      pending_calls: dict[str, str]) -> tuple[list[ModelMessage], bool]:
+        """
+        Run the agent on one prompt, showing its events as they stream.
+        Args:
+            agent: The agent to run.
+            prompt: The message.
+            history: The messages before it.
+            output: Where the answer and the tool activity show.
+            pending_calls: Tool call lines waiting for their result, by call id.
+        Returns:
+            tuple[list[ModelMessage], bool]: The messages so far, and whether the last reply was cut off
+                at max_tokens (the answer stops short).
+        Raises:
+            UnexpectedModelBehavior: When the run fails, e.g. a reply with only thinking ran out of tokens.
+        """
+        messages, cut_off = history, False
+        async with agent.run_stream_events(prompt, message_history=history, usage_limits=self.limits) as events:
+            async for event in events:
+                if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart):
+                    output.text(event.part.content)
+                elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
+                    output.text(event.delta.content_delta)
+                elif isinstance(event, PartStartEvent) and isinstance(event.part, ThinkingPart):
+                    output.thinking(event.part.content)  # A reasoning model thinks: the spinner shows for how long
+                elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, ThinkingPartDelta):
+                    output.thinking(event.delta.content_delta or "")
+                elif isinstance(event, FunctionToolCallEvent):
+                    arguments = json.dumps(event.part.args_as_dict(), separators=(",", ":"))
+                    pending_calls[event.tool_call_id] = f"→ {event.part.tool_name}({arguments})"
+                    if not self.trace:  # Name the tool on the spinner now, while it runs
+                        output.line(pending_calls[event.tool_call_id])
+                    else:  # The call prints with its result; meanwhile the spinner names it
+                        output.spin(f"Running {event.part.tool_name}…")
+                elif isinstance(event, FunctionToolResultEvent):
+                    part = event.part
+                    if event.tool_call_id in pending_calls:
+                        output.line(pending_calls.pop(event.tool_call_id))
+                    if isinstance(part, ToolReturnPart) and part.outcome == "success":
+                        output.line(f"← {part.tool_name}: {Output.readable(part.model_response_str())}")
+                    else:  # The tool failed, or its arguments were invalid
+                        message = part.model_response_str() if isinstance(part, ToolReturnPart) else part.content
+                        output.line(f"✗ {part.tool_name}: {Output.readable(str(message))}")
+                elif isinstance(event, AgentRunResultEvent):
+                    usage = event.result.usage
+                    if usage.input_tokens or usage.output_tokens:
+                        output.add_usage(usage.input_tokens, usage.output_tokens, usage.requests)
+                    messages = event.result.all_messages()
+                    last = next((m for m in reversed(messages) if isinstance(m, ModelResponse)), None)
+                    cut_off = last is not None and last.finish_reason == "length"
+        return messages, cut_off
 
     def print_history(self, history: list[ModelMessage]) -> None:
         """
